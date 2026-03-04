@@ -1356,6 +1356,74 @@
     .lrn-tl-change.adj  { color: var(--amber); background: rgba(232,160,32,0.10); }
     .lrn-tl-change.new  { color: #18ccd8;      background: rgba(24,204,216,0.10); }
 
+    /* ‚îÄ‚îÄ‚îÄ FEATURE 5: LIVE CONTAGION MAP  ¬∑  teal #00d4c8 ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ */
+    .cmap-wrap { margin-bottom: 24px; }
+    .cmap-header { background: rgba(0,212,200,0.06); border: 1px solid rgba(0,212,200,0.28); border-top: 2px solid #00d4c8; border-left: 4px solid #00d4c8; padding: 10px 16px; display: flex; align-items: center; gap: 14px; justify-content: space-between; flex-wrap: wrap; }
+    .cmap-header-left  { display: flex; align-items: center; gap: 12px; }
+    .cmap-header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .cmap-live-dot { width: 8px; height: 8px; border-radius: 50%; background: #00d4c8; animation: cmapLivePulse 1.4s ease-in-out infinite; flex-shrink: 0; }
+    @keyframes cmapLivePulse { 0%,100% { opacity:1; box-shadow:0 0 0 0 rgba(0,212,200,0.6); } 50% { opacity:0.7; box-shadow:0 0 0 5px rgba(0,212,200,0); } }
+    .cmap-title-block { display: flex; flex-direction: column; gap: 2px; }
+    .cmap-title    { color: #00d4c8; font-size: 13px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+    .cmap-subtitle { color: var(--dim); font-size: 10px; }
+    .cmap-ctrl-pill { font-size: 9px; padding: 3px 10px; background: rgba(0,212,200,0.10); border: 1px solid rgba(0,212,200,0.32); color: #00d4c8; font-weight: bold; letter-spacing: 1px; }
+    .cmap-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 7px 14px; background: var(--bg2); border: 1px solid var(--border); border-top: none; margin-bottom: 2px; }
+    .cmap-ctrl-group { display: flex; align-items: center; gap: 4px; }
+    .cmap-ctrl-label { color: var(--dim); font-size: 9px; letter-spacing: 1px; white-space: nowrap; margin-right: 2px; }
+    .cmap-fbtn { background: var(--bg3); border: 1px solid var(--border); color: var(--dim); padding: 2px 7px; font-family: 'Courier New', monospace; font-size: 9px; cursor: pointer; transition: all 0.15s; letter-spacing: 0.5px; }
+    .cmap-fbtn:hover { border-color: rgba(0,212,200,0.5); color: #00d4c8; }
+    .cmap-fbtn.active { background: rgba(0,212,200,0.12); border-color: #00d4c8; color: #00d4c8; }
+    .cmap-slider { -webkit-appearance: none; width: 70px; height: 3px; background: var(--border); outline: none; cursor: pointer; }
+    .cmap-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%; background: #00d4c8; cursor: pointer; }
+    #cmapConfVal { color: #00d4c8; font-size: 10px; min-width: 30px; }
+    .cmap-main { display: flex; background: var(--bg2); border: 1px solid var(--border); border-top: none; }
+    .cmap-canvas-wrap { flex: 1; overflow: hidden; background: #06090d; }
+    .cmap-svg { width: 100%; height: auto; display: block; }
+    .cmap-node { cursor: pointer; }
+    @keyframes cmapHaloSpin { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -60; } }
+    .cmap-halo       { animation: cmapHaloSpin 7s linear infinite; }
+    .cmap-halo-outer { animation: cmapHaloSpin 12s linear infinite reverse; }
+    .cmap-scan-ring  { animation: cmapHaloSpin 2s linear infinite; }
+    @keyframes cmapEdgeFlow { from { stroke-dashoffset: 30; } to { stroke-dashoffset: 0; } }
+    .cmap-efast { animation: cmapEdgeFlow 0.75s linear infinite; }
+    .cmap-emed  { animation: cmapEdgeFlow 1.6s  linear infinite; }
+    .cmap-eslow { animation: cmapEdgeFlow 3s    linear infinite; }
+    .cmap-epred { animation: cmapEdgeFlow 5s    linear infinite; }
+    .cmap-predicted { opacity: 0.38 !important; }
+    .cmap-ehidden   { display: none !important; }
+    .cmap-sidebar { width: 0; overflow: hidden; transition: width 0.25s ease; background: var(--bg3); border-left: 1px solid var(--border); flex-shrink: 0; }
+    .cmap-sidebar.open { width: 280px; }
+    .cmap-sb-hdr { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg2); }
+    .cmap-sb-title { color: #00d4c8; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
+    .cmap-sb-close { background: none; border: none; color: var(--dim); font-size: 16px; cursor: pointer; padding: 0 2px; line-height: 1; }
+    .cmap-sb-close:hover { color: var(--bright); }
+    .cmap-sb-body { padding: 12px; overflow-y: auto; max-height: 470px; font-size: 11px; }
+    .cmap-sb-empty { color: var(--dim); text-align: center; padding: 30px 8px; line-height: 1.9; }
+    .cmap-sb-empty-icon { font-size: 22px; margin-bottom: 8px; color: rgba(0,212,200,0.3); }
+    .cmap-sb-name { color: var(--bright); font-size: 12px; font-weight: bold; margin-bottom: 5px; }
+    .cmap-sb-badge { display: inline-block; padding: 1px 5px; font-size: 9px; letter-spacing: 1px; margin-left: 6px; }
+    .cmap-sb-badge.confirmed  { background: rgba(224,48,48,0.15);  border: 1px solid #e03030; color: #e03030; }
+    .cmap-sb-badge.developing { background: rgba(232,160,32,0.15); border: 1px solid #e8a020; color: #e8a020; }
+    .cmap-sb-badge.watch      { background: rgba(0,212,200,0.10);  border: 1px solid #00d4c8; color: #00d4c8; }
+    .cmap-sb-sec { margin-top: 11px; }
+    .cmap-sb-sec-ttl { color: #00d4c8; font-size: 9px; letter-spacing: 1.5px; border-bottom: 1px solid rgba(0,212,200,0.2); padding-bottom: 3px; margin-bottom: 5px; }
+    .cmap-sb-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid rgba(30,45,61,0.5); }
+    .cmap-sb-row-l { color: var(--dim); font-size: 10px; }
+    .cmap-sb-row-v { font-size: 10px; }
+    .cmap-sb-path { padding: 5px 7px; background: var(--bg2); border: 1px solid var(--border); margin-bottom: 4px; font-size: 10px; }
+    .cmap-sb-path-hdr  { display: flex; justify-content: space-between; }
+    .cmap-sb-path-desc { font-size: 9px; color: var(--dim); margin-top: 2px; }
+    .cmap-sb-trade { padding: 5px 7px; background: var(--bg2); border-left: 3px solid; margin-bottom: 4px; font-size: 10px; }
+    .cmap-sb-trade.long  { border-left-color: #28c060; }
+    .cmap-sb-trade.short { border-left-color: #e03030; }
+    .cmap-risk-strip { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: center; padding: 7px 14px; background: var(--bg2); border: 1px solid var(--border); border-top: 1px solid rgba(0,212,200,0.15); }
+    .cmap-rs-item  { display: flex; align-items: center; gap: 6px; }
+    .cmap-rs-label { color: var(--dim); font-size: 9px; letter-spacing: 1px; }
+    .cmap-rs-val   { font-size: 10px; font-weight: bold; }
+    .cmap-rs-val.teal { color: #00d4c8; }
+    .cmap-rs-bar-wrap { width: 70px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .cmap-rs-bar { height: 100%; background: linear-gradient(90deg, var(--amber), var(--red)); border-radius: 3px; transition: width 0.5s ease; }
+
     /* scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
@@ -3980,6 +4048,274 @@
   </div><!-- /lrn-wrap -->
 
   <!-- ‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê
+       FEATURE 5 ‚Äî LIVE CONTAGION MAP
+       ‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê -->
+  <div class="cmap-wrap" id="cmapWrap">
+
+    <!-- Header -->
+    <div class="cmap-header">
+      <div class="cmap-header-left">
+        <span class="cmap-live-dot"></span>
+        <div class="cmap-title-block">
+          <div class="cmap-title">Live Contagion Map</div>
+          <div class="cmap-subtitle">Bayesian propagation ¬∑ Cross-asset contagion ¬∑ Predictive spillover ¬∑ Self-learning weighted</div>
+        </div>
+      </div>
+      <div class="cmap-header-right">
+        <span class="cmap-ctrl-pill">3 SOURCE EVENTS</span>
+        <span class="cmap-ctrl-pill">15 ACTIVE EDGES</span>
+        <span class="cmap-ctrl-pill" id="cmapCycleId">CYCLE #001</span>
+      </div>
+    </div>
+
+    <!-- Filter Controls -->
+    <div class="cmap-controls">
+      <div class="cmap-ctrl-group">
+        <span class="cmap-ctrl-label">REGION</span>
+        <button class="cmap-fbtn active" data-cmap-region="all">ALL</button>
+        <button class="cmap-fbtn" data-cmap-region="mena">MENA</button>
+        <button class="cmap-fbtn" data-cmap-region="asia">ASIA</button>
+        <button class="cmap-fbtn" data-cmap-region="europe">EUROPE</button>
+        <button class="cmap-fbtn" data-cmap-region="americas">AMERICAS</button>
+      </div>
+      <div class="cmap-ctrl-group">
+        <span class="cmap-ctrl-label">ASSET</span>
+        <button class="cmap-fbtn active" data-cmap-asset="all">ALL</button>
+        <button class="cmap-fbtn" data-cmap-asset="commodity">COMMODITY</button>
+        <button class="cmap-fbtn" data-cmap-asset="equity">EQUITY</button>
+        <button class="cmap-fbtn" data-cmap-asset="fx">FX</button>
+        <button class="cmap-fbtn" data-cmap-asset="crypto">CRYPTO</button>
+        <button class="cmap-fbtn" data-cmap-asset="deriv">DERIV</button>
+      </div>
+      <div class="cmap-ctrl-group">
+        <span class="cmap-ctrl-label">MIN CONF</span>
+        <input type="range" class="cmap-slider" id="cmapConfSlider" min="0" max="90" value="30">
+        <span id="cmapConfVal">30%</span>
+      </div>
+      <div class="cmap-ctrl-group">
+        <span class="cmap-ctrl-label">VIEW</span>
+        <button class="cmap-fbtn cmap-view-btn active" data-cmap-view="global">GLOBAL</button>
+        <button class="cmap-fbtn cmap-view-btn" data-cmap-view="asset">ASSET GRAPH</button>
+      </div>
+    </div>
+
+    <!-- Map + Sidebar -->
+    <div class="cmap-main">
+      <div class="cmap-canvas-wrap">
+        <svg class="cmap-svg" id="cmapSvg" viewBox="0 0 1160 480" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="cmap-ap" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#28c060"/></marker>
+            <marker id="cmap-an" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#e03030"/></marker>
+            <marker id="cmap-aw" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#00d4c8" opacity="0.7"/></marker>
+          </defs>
+
+          <!-- ‚îÄ‚îÄ CONTINENT OUTLINES ‚îÄ‚îÄ -->
+          <path d="M 58,55 L 180,48 L 260,78 L 278,125 L 272,175 L 262,230 L 240,285 L 210,340 L 175,370 L 148,360 L 132,325 L 142,275 L 130,228 L 112,185 L 88,150 L 68,112 L 55,78 Z" fill="rgba(14,22,32,0.95)" stroke="rgba(30,50,68,0.7)" stroke-width="0.8"/>
+          <ellipse cx="192" cy="28" rx="32" ry="16" fill="rgba(14,22,32,0.8)" stroke="rgba(30,50,68,0.5)" stroke-width="0.5"/>
+          <path d="M 578,55 L 642,48 L 678,58 L 692,82 L 688,112 L 672,130 L 650,136 L 625,130 L 605,118 L 590,100 L 576,78 Z" fill="rgba(14,22,32,0.95)" stroke="rgba(30,50,68,0.7)" stroke-width="0.8"/>
+          <ellipse cx="557" cy="80" rx="13" ry="22" fill="rgba(14,22,32,0.8)" stroke="rgba(30,50,68,0.5)" stroke-width="0.5"/>
+          <path d="M 655,30 L 668,28 L 672,42 L 665,56 L 652,58 L 646,46 Z" fill="rgba(14,22,32,0.8)" stroke="rgba(30,50,68,0.5)" stroke-width="0.5"/>
+          <path d="M 678,40 L 1082,32 L 1098,78 L 1080,132 L 1042,148 L 992,152 L 940,145 L 888,140 L 842,148 L 800,144 L 758,136 L 722,128 L 702,108 L 688,78 Z" fill="rgba(14,22,32,0.95)" stroke="rgba(30,50,68,0.7)" stroke-width="0.8"/>
+          <path d="M 688,120 L 735,118 L 748,132 L 738,148 L 712,150 L 692,140 Z" fill="rgba(14,22,32,0.9)" stroke="rgba(30,50,68,0.5)" stroke-width="0.5"/>
+          <path d="M 690,128 L 762,122 L 804,130 L 814,158 L 812,196 L 790,222 L 752,228 L 718,222 L 695,200 L 678,170 L 676,148 Z" fill="rgba(14,22,32,0.95)" stroke="rgba(30,50,68,0.7)" stroke-width="0.8"/>
+          <path d="M 582,200 L 640,194 L 702,200 L 745,212 L 778,232 L 790,272 L 790,322 L 770,372 L 738,396 L 698,400 L 658,394 L 622,372 L 600,338 L 580,292 L 568,250 L 568,218 Z" fill="rgba(14,22,32,0.95)" stroke="rgba(30,50,68,0.7)" stroke-width="0.8"/>
+          <path d="M 808,152 L 878,146 L 902,156 L 912,188 L 900,228 L 876,252 L 848,258 L 820,242 L 806,210 L 802,176 Z" fill="rgba(14,22,32,0.95)" stroke="rgba(30,50,68,0.7)" stroke-width="0.8"/>
+          <path d="M 900,148 L 972,144 L 1002,160 L 1010,192 L 1000,222 L 976,236 L 944,238 L 918,226 L 904,198 L 900,172 Z" fill="rgba(14,22,32,0.95)" stroke="rgba(30,50,68,0.7)" stroke-width="0.8"/>
+          <path d="M 940,70 L 1032,68 L 1062,92 L 1058,132 L 1042,150 L 1010,165 L 975,168 L 948,154 L 930,132 L 926,102 Z" fill="rgba(14,22,32,0.95)" stroke="rgba(30,50,68,0.7)" stroke-width="0.8"/>
+          <ellipse cx="1062" cy="120" rx="12" ry="38" transform="rotate(-15 1062 120)" fill="rgba(14,22,32,0.85)" stroke="rgba(30,50,68,0.6)" stroke-width="0.7"/>
+          <ellipse cx="1002" cy="162" rx="7"  ry="11" fill="rgba(14,22,32,0.8)"  stroke="rgba(30,50,68,0.5)" stroke-width="0.5"/>
+          <ellipse cx="1080" cy="348" rx="48" ry="28" fill="rgba(14,22,32,0.8)"  stroke="rgba(30,50,68,0.6)" stroke-width="0.7"/>
+
+          <!-- ‚îÄ‚îÄ GRID LINES ‚îÄ‚îÄ -->
+          <line x1="0" y1="204" x2="1160" y2="204" stroke="rgba(30,50,68,0.35)" stroke-width="0.5" stroke-dasharray="4,8"/>
+          <line x1="0" y1="154" x2="1160" y2="154" stroke="rgba(30,50,68,0.18)" stroke-width="0.4" stroke-dasharray="2,12"/>
+          <line x1="0" y1="254" x2="1160" y2="254" stroke="rgba(30,50,68,0.18)" stroke-width="0.4" stroke-dasharray="2,12"/>
+          <line x1="290" y1="0" x2="290" y2="405" stroke="rgba(30,50,68,0.18)" stroke-width="0.4" stroke-dasharray="2,12"/>
+          <line x1="580" y1="0" x2="580" y2="405" stroke="rgba(30,50,68,0.18)" stroke-width="0.4" stroke-dasharray="2,12"/>
+          <line x1="870" y1="0" x2="870" y2="405" stroke="rgba(30,50,68,0.18)" stroke-width="0.4" stroke-dasharray="2,12"/>
+          <text x="4" y="207" fill="rgba(96,112,128,0.45)" font-size="7" font-family="'Courier New',monospace">EQ</text>
+
+          <!-- ‚îÄ‚îÄ ASSET STRIP SEPARATOR ‚îÄ‚îÄ -->
+          <line x1="0" y1="408" x2="1160" y2="408" stroke="rgba(0,212,200,0.2)" stroke-width="0.8" stroke-dasharray="3,6"/>
+          <text x="4" y="419" fill="rgba(0,212,200,0.35)" font-size="7" font-family="'Courier New',monospace">ASSETS</text>
+
+          <!-- ‚ïê‚ïê‚ïê GEO-GEO EDGES ‚ïê‚ïê‚ïê -->
+          <!-- Russia ‚Üí Ukraine [confirmed, neg, s=0.90, conf=85] -->
+          <path class="cmap-edge cmap-efast" id="e-rus-ukr" d="M 852,66 Q 765,54 678,90" stroke="#e03030" stroke-width="2" fill="none" stroke-dasharray="8,4" marker-end="url(#cmap-an)" opacity="0.85" data-strength="0.90" data-conf="85" data-type="geo" data-region="europe"/>
+          <!-- Ukraine ‚Üí EU [confirmed, neg, s=0.78, conf=68] -->
+          <path class="cmap-edge cmap-emed" id="e-ukr-eu" d="M 678,90 Q 656,86 632,104" stroke="#e03030" stroke-width="1.6" fill="none" stroke-dasharray="7,4" marker-end="url(#cmap-an)" opacity="0.78" data-strength="0.78" data-conf="68" data-type="geo" data-region="europe"/>
+          <!-- Iran ‚Üí Saudi [confirmed, neg, s=0.70, conf=65] -->
+          <path class="cmap-edge cmap-emed" id="e-iran-sau" d="M 748,145 Q 737,164 726,182" stroke="#e03030" stroke-width="1.4" fill="none" stroke-dasharray="6,4" marker-end="url(#cmap-an)" opacity="0.72" data-strength="0.70" data-conf="65" data-type="geo" data-region="mena"/>
+          <!-- Taiwan ‚Üí China [developing, neg, s=0.80, conf=61] -->
+          <path class="cmap-edge cmap-emed" id="e-twn-chn" d="M 998,160 Q 972,137 942,110" stroke="#e03030" stroke-width="1.6" fill="none" stroke-dasharray="7,4" marker-end="url(#cmap-an)" opacity="0.75" data-strength="0.80" data-conf="61" data-type="geo" data-region="asia"/>
+          <!-- Taiwan ‚Üí Japan [developing, neg, s=0.62, conf=55] -->
+          <path class="cmap-edge cmap-eslow" id="e-twn-jpn" d="M 998,160 Q 1030,140 1058,118" stroke="#e8a020" stroke-width="1.2" fill="none" stroke-dasharray="6,5" marker-end="url(#cmap-an)" opacity="0.62" data-strength="0.62" data-conf="55" data-type="geo" data-region="asia"/>
+          <!-- Iran ‚Üí Russia [weak pos, s=0.55, conf=48] -->
+          <path class="cmap-edge cmap-eslow" id="e-iran-rus" d="M 748,145 Q 800,105 852,66" stroke="#e8a020" stroke-width="1" fill="none" stroke-dasharray="5,6" marker-end="url(#cmap-ap)" opacity="0.52" data-strength="0.55" data-conf="48" data-type="geo" data-region="europe"/>
+          <!-- Ukraine ‚Üí USA [predicted, s=0.38, conf=35] -->
+          <path class="cmap-edge cmap-epred cmap-predicted" id="e-ukr-usa" d="M 678,90 Q 465,44 255,128" stroke="#00d4c8" stroke-width="0.8" fill="none" stroke-dasharray="3,7" marker-end="url(#cmap-aw)" data-strength="0.38" data-conf="35" data-type="geo" data-region="americas"/>
+
+          <!-- ‚ïê‚ïê‚ïê GEO-ASSET EDGES ‚ïê‚ïê‚ïê -->
+          <!-- Iran ‚Üí WTI [strong pos, s=0.95, conf=72] -->
+          <path class="cmap-edge cmap-efast" id="e-iran-wti" d="M 748,145 Q 490,395 95,445" stroke="#28c060" stroke-width="1.8" fill="none" stroke-dasharray="8,4" marker-end="url(#cmap-ap)" opacity="0.82" data-strength="0.95" data-conf="72" data-type="asset" data-asset="commodity"/>
+          <!-- Iran ‚Üí Airlines [neg, s=0.75, conf=70] -->
+          <path class="cmap-edge cmap-emed" id="e-iran-air" d="M 748,145 Q 570,395 378,445" stroke="#e03030" stroke-width="1.5" fill="none" stroke-dasharray="6,4" marker-end="url(#cmap-an)" opacity="0.75" data-strength="0.75" data-conf="70" data-type="asset" data-asset="equity"/>
+          <!-- Iran ‚Üí BTC [pos scanner, s=0.62, conf=58] -->
+          <path class="cmap-edge cmap-emed" id="e-iran-btc" d="M 748,145 Q 530,395 285,445" stroke="#18ccd8" stroke-width="1.2" fill="none" stroke-dasharray="6,5" marker-end="url(#cmap-ap)" opacity="0.68" data-strength="0.62" data-conf="58" data-type="asset" data-asset="crypto"/>
+          <!-- Iran ‚Üí VIX [pos, s=0.68, conf=65] -->
+          <path class="cmap-edge cmap-emed" id="e-iran-vix" d="M 748,145 Q 618,385 475,445" stroke="#28c060" stroke-width="1.3" fill="none" stroke-dasharray="6,4" marker-end="url(#cmap-ap)" opacity="0.70" data-strength="0.68" data-conf="65" data-type="asset" data-asset="deriv"/>
+          <!-- Taiwan ‚Üí TSM [strong neg, s=0.92, conf=61] -->
+          <path class="cmap-edge cmap-efast" id="e-twn-tsm" d="M 998,160 Q 790,395 570,445" stroke="#e03030" stroke-width="1.8" fill="none" stroke-dasharray="8,4" marker-end="url(#cmap-an)" opacity="0.80" data-strength="0.92" data-conf="61" data-type="asset" data-asset="equity"/>
+          <!-- Taiwan ‚Üí JPY [pos, s=0.75, conf=58] -->
+          <path class="cmap-edge cmap-emed" id="e-twn-jpy" d="M 998,160 Q 832,395 665,445" stroke="#28c060" stroke-width="1.4" fill="none" stroke-dasharray="6,4" marker-end="url(#cmap-ap)" opacity="0.72" data-strength="0.75" data-conf="58" data-type="asset" data-asset="fx"/>
+          <!-- Ukraine ‚Üí NatGas [pos, s=0.70, conf=55] -->
+          <path class="cmap-edge cmap-emed" id="e-ukr-ng" d="M 678,90 Q 719,350 760,445" stroke="#28c060" stroke-width="1.3" fill="none" stroke-dasharray="6,5" marker-end="url(#cmap-ap)" opacity="0.65" data-strength="0.70" data-conf="55" data-type="asset" data-asset="commodity"/>
+          <!-- Ukraine ‚Üí EUR/USD [predicted, s=0.50, conf=42] -->
+          <path class="cmap-edge cmap-epred cmap-predicted" id="e-ukr-eur" d="M 678,90 Q 767,350 855,445" stroke="#00d4c8" stroke-width="0.9" fill="none" stroke-dasharray="3,6" marker-end="url(#cmap-aw)" data-strength="0.50" data-conf="42" data-type="asset" data-asset="fx"/>
+
+          <!-- ‚ïê‚ïê‚ïê PREDICTION HALOS ‚ïê‚ïê‚ïê -->
+          <circle class="cmap-halo"       cx="998" cy="160" r="32" fill="none" stroke="rgba(232,160,32,0.22)" stroke-width="1.2" stroke-dasharray="4,6"/>
+          <circle class="cmap-halo-outer" cx="998" cy="160" r="46" fill="none" stroke="rgba(0,212,200,0.10)"  stroke-width="0.8" stroke-dasharray="2,9"/>
+          <circle class="cmap-halo"       cx="678" cy="90"  r="28" fill="none" stroke="rgba(232,160,32,0.20)" stroke-width="1"   stroke-dasharray="4,6"/>
+
+          <!-- ‚ïê‚ïê‚ïê GEO NODES ‚ïê‚ïê‚ïê -->
+          <!-- IRAN ‚Äî CONFIRMED CRS:82 -->
+          <g class="cmap-node" id="node-iran" data-region="mena" data-crs="82" data-state="confirmed" data-label="Iran / Strait of Hormuz" onclick="cmapNodeClick(this)">
+            <circle cx="748" cy="145" r="22" fill="rgba(224,48,48,0.10)" stroke="#e03030" stroke-width="1"   class="cmap-node-outer"/>
+            <circle cx="748" cy="145" r="13" fill="rgba(224,48,48,0.30)" stroke="#e03030" stroke-width="2"   class="cmap-node-inner"/>
+            <circle cx="748" cy="145" r="5"  fill="#e03030" class="cmap-node-dot"/>
+            <text x="748" y="133" text-anchor="middle" fill="#e8f0f8" font-size="8.5" font-family="'Courier New',monospace" font-weight="bold">IRAN</text>
+            <text x="748" y="124" text-anchor="middle" fill="#e03030" font-size="7"   font-family="'Courier New',monospace">‚ö† CRS:82</text>
+          </g>
+          <!-- UKRAINE ‚Äî DEVELOPING CRS:68 -->
+          <g class="cmap-node" id="node-ukraine" data-region="europe" data-crs="68" data-state="developing" data-label="Ukraine / Eastern Front" onclick="cmapNodeClick(this)">
+            <circle cx="678" cy="90" r="18" fill="rgba(224,48,48,0.08)" stroke="#e03030" stroke-width="1"   class="cmap-node-outer"/>
+            <circle cx="678" cy="90" r="11" fill="rgba(224,48,48,0.26)" stroke="#e03030" stroke-width="1.8" class="cmap-node-inner"/>
+            <circle cx="678" cy="90" r="4"  fill="#e03030" class="cmap-node-dot"/>
+            <text x="678" y="78" text-anchor="middle" fill="#e8f0f8" font-size="8" font-family="'Courier New',monospace" font-weight="bold">UKR</text>
+            <text x="678" y="70" text-anchor="middle" fill="#e03030" font-size="7"  font-family="'Courier New',monospace">CRS:68</text>
+          </g>
+          <!-- TAIWAN ‚Äî PRE-EVENT CRS:55 -->
+          <g class="cmap-node" id="node-taiwan" data-region="asia" data-crs="55" data-state="developing" data-label="Taiwan / TSMC Flashpoint" onclick="cmapNodeClick(this)">
+            <circle cx="998" cy="160" r="16" fill="rgba(232,160,32,0.10)" stroke="#e8a020" stroke-width="1"   class="cmap-node-outer"/>
+            <circle cx="998" cy="160" r="10" fill="rgba(232,160,32,0.25)" stroke="#e8a020" stroke-width="1.8" class="cmap-node-inner"/>
+            <circle cx="998" cy="160" r="4"  fill="#e8a020" class="cmap-node-dot"/>
+            <text x="998" y="148" text-anchor="middle" fill="#e8f0f8" font-size="8" font-family="'Courier New',monospace" font-weight="bold">TWN</text>
+            <text x="998" y="140" text-anchor="middle" fill="#e8a020" font-size="7"  font-family="'Courier New',monospace">CRS:55</text>
+          </g>
+          <!-- RUSSIA ‚Äî CRS:62 -->
+          <g class="cmap-node" id="node-russia" data-region="europe" data-crs="62" data-state="confirmed" data-label="Russia / Eurasia" onclick="cmapNodeClick(this)">
+            <circle cx="852" cy="66" r="15" fill="rgba(224,48,48,0.08)" stroke="#e03030" stroke-width="1"   class="cmap-node-outer"/>
+            <circle cx="852" cy="66" r="9"  fill="rgba(224,48,48,0.22)" stroke="#e03030" stroke-width="1.5" class="cmap-node-inner"/>
+            <circle cx="852" cy="66" r="3.5" fill="#e03030" class="cmap-node-dot"/>
+            <text x="852" y="55" text-anchor="middle" fill="#e8f0f8" font-size="8" font-family="'Courier New',monospace" font-weight="bold">RUS</text>
+            <text x="852" y="47" text-anchor="middle" fill="#e03030" font-size="7"  font-family="'Courier New',monospace">CRS:62</text>
+          </g>
+          <!-- CHINA ‚Äî CRS:48 -->
+          <g class="cmap-node" id="node-china" data-region="asia" data-crs="48" data-state="watch" data-label="China / PRC" onclick="cmapNodeClick(this)">
+            <circle cx="942" cy="110" r="14" fill="rgba(232,160,32,0.08)" stroke="#e8a020" stroke-width="0.8" class="cmap-node-outer"/>
+            <circle cx="942" cy="110" r="8"  fill="rgba(232,160,32,0.18)" stroke="#e8a020" stroke-width="1.2" class="cmap-node-inner"/>
+            <circle cx="942" cy="110" r="3"  fill="#e8a020" class="cmap-node-dot"/>
+            <text x="942" y="99" text-anchor="middle" fill="#e8f0f8" font-size="7.5" font-family="'Courier New',monospace" font-weight="bold">CHN</text>
+          </g>
+          <!-- SAUDI ARABIA ‚Äî CRS:45 -->
+          <g class="cmap-node" id="node-saudi" data-region="mena" data-crs="45" data-state="watch" data-label="Saudi Arabia / Gulf States" onclick="cmapNodeClick(this)">
+            <circle cx="726" cy="182" r="13" fill="rgba(232,160,32,0.07)" stroke="#e8a020" stroke-width="0.8" class="cmap-node-outer"/>
+            <circle cx="726" cy="182" r="8"  fill="rgba(232,160,32,0.16)" stroke="#e8a020" stroke-width="1.2" class="cmap-node-inner"/>
+            <circle cx="726" cy="182" r="3"  fill="#e8a020" class="cmap-node-dot"/>
+            <text x="726" y="172" text-anchor="middle" fill="#e8f0f8" font-size="7.5" font-family="'Courier New',monospace" font-weight="bold">SAU</text>
+          </g>
+          <!-- EU ‚Äî CRS:42 -->
+          <g class="cmap-node" id="node-eu" data-region="europe" data-crs="42" data-state="watch" data-label="European Union" onclick="cmapNodeClick(this)">
+            <circle cx="632" cy="104" r="13" fill="rgba(32,144,224,0.08)" stroke="#2090e0" stroke-width="0.8" class="cmap-node-outer"/>
+            <circle cx="632" cy="104" r="8"  fill="rgba(32,144,224,0.18)" stroke="#2090e0" stroke-width="1.2" class="cmap-node-inner"/>
+            <circle cx="632" cy="104" r="3"  fill="#2090e0" class="cmap-node-dot"/>
+            <text x="632" y="93" text-anchor="middle" fill="#e8f0f8" font-size="7.5" font-family="'Courier New',monospace" font-weight="bold">EU</text>
+          </g>
+          <!-- USA ‚Äî CRS:28 -->
+          <g class="cmap-node" id="node-usa" data-region="americas" data-crs="28" data-state="watch" data-label="United States" onclick="cmapNodeClick(this)">
+            <circle cx="255" cy="128" r="11" fill="rgba(32,144,224,0.07)" stroke="#2090e0" stroke-width="0.8" class="cmap-node-outer"/>
+            <circle cx="255" cy="128" r="7"  fill="rgba(32,144,224,0.16)" stroke="#2090e0" stroke-width="1"   class="cmap-node-inner"/>
+            <circle cx="255" cy="128" r="3"  fill="#2090e0" class="cmap-node-dot"/>
+            <text x="255" y="118" text-anchor="middle" fill="#e8f0f8" font-size="7.5" font-family="'Courier New',monospace" font-weight="bold">USA</text>
+          </g>
+          <!-- JAPAN ‚Äî CRS:35 -->
+          <g class="cmap-node" id="node-japan" data-region="asia" data-crs="35" data-state="watch" data-label="Japan" onclick="cmapNodeClick(this)">
+            <circle cx="1058" cy="118" r="12" fill="rgba(232,160,32,0.07)" stroke="#e8a020" stroke-width="0.7" class="cmap-node-outer"/>
+            <circle cx="1058" cy="118" r="7"  fill="rgba(232,160,32,0.16)" stroke="#e8a020" stroke-width="1"   class="cmap-node-inner"/>
+            <circle cx="1058" cy="118" r="3"  fill="#e8a020" class="cmap-node-dot"/>
+            <text x="1058" y="107" text-anchor="middle" fill="#e8f0f8" font-size="7.5" font-family="'Courier New',monospace" font-weight="bold">JPN</text>
+          </g>
+
+          <!-- Scanner alert rings -->
+          <circle class="cmap-scan-ring" cx="285" cy="445" r="26" fill="none" stroke="rgba(24,204,216,0.5)"  stroke-width="1.2" stroke-dasharray="3,4"/>
+          <text x="285" y="430" text-anchor="middle" fill="#18ccd8" font-size="7" font-family="'Courier New',monospace">+24pp</text>
+          <circle class="cmap-scan-ring" cx="1042" cy="445" r="26" fill="none" stroke="rgba(232,160,32,0.45)" stroke-width="1"   stroke-dasharray="3,5"/>
+          <text x="1042" y="430" text-anchor="middle" fill="#e8a020" font-size="7" font-family="'Courier New',monospace">+5.1pp</text>
+
+          <!-- ‚ïê‚ïê‚ïê ASSET NODE STRIP (y‚âà445) ‚ïê‚ïê‚ïê -->
+          <g class="cmap-node" id="node-wti"    data-asset="commodity" data-label="WTI Crude Oil"           onclick="cmapNodeClick(this)"><rect x="55"   y="432" width="80" height="26" rx="2" fill="rgba(40,192,96,0.10)"  stroke="#28c060" stroke-width="1.2"/><text x="95"   y="444" text-anchor="middle" fill="#28c060" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚ñ≤ WTI</text><text x="95"   y="453" text-anchor="middle" fill="#28c060" font-size="7.5" font-family="'Courier New',monospace">P:72% LONG</text></g>
+          <g class="cmap-node" id="node-gold"   data-asset="commodity" data-label="Gold"                    onclick="cmapNodeClick(this)"><rect x="148"  y="432" width="80" height="26" rx="2" fill="rgba(40,192,96,0.08)"  stroke="#28c060" stroke-width="1"/><text x="188"  y="444" text-anchor="middle" fill="#28c060" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚ñ≤ GOLD</text><text x="188"  y="453" text-anchor="middle" fill="#28c060" font-size="7.5" font-family="'Courier New',monospace">P:68% LONG</text></g>
+          <g class="cmap-node" id="node-btc"    data-asset="crypto"    data-label="Bitcoin / BTC"           onclick="cmapNodeClick(this)"><rect x="242"  y="432" width="86" height="26" rx="2" fill="rgba(24,204,216,0.12)" stroke="#18ccd8" stroke-width="1.5"/><text x="285"  y="444" text-anchor="middle" fill="#18ccd8" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚óà BTC</text><text x="285"  y="453" text-anchor="middle" fill="#18ccd8" font-size="7.5" font-family="'Courier New',monospace">SCAN:+24pp GAP</text></g>
+          <g class="cmap-node" id="node-air"    data-asset="equity"    data-label="Airlines (Short)"        onclick="cmapNodeClick(this)"><rect x="338"  y="432" width="80" height="26" rx="2" fill="rgba(224,48,48,0.10)" stroke="#e03030" stroke-width="1.2"/><text x="378"  y="444" text-anchor="middle" fill="#e03030" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚ñº AIR</text><text x="378"  y="453" text-anchor="middle" fill="#e03030" font-size="7.5" font-family="'Courier New',monospace">P:70% SHORT</text></g>
+          <g class="cmap-node" id="node-vix"    data-asset="deriv"     data-label="VIX Volatility Index"    onclick="cmapNodeClick(this)"><rect x="430"  y="432" width="90" height="26" rx="2" fill="rgba(24,204,216,0.10)" stroke="#18ccd8" stroke-width="1.2"/><text x="475"  y="444" text-anchor="middle" fill="#18ccd8" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚óà VIX</text><text x="475"  y="453" text-anchor="middle" fill="#18ccd8" font-size="7.5" font-family="'Courier New',monospace">UNDERPRICE ‚àí9.6</text></g>
+          <g class="cmap-node" id="node-tsm"    data-asset="equity"    data-label="TSM / Semiconductors"    onclick="cmapNodeClick(this)"><rect x="530"  y="432" width="80" height="26" rx="2" fill="rgba(224,48,48,0.10)" stroke="#e03030" stroke-width="1.2"/><text x="570"  y="444" text-anchor="middle" fill="#e03030" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚ñº TSM</text><text x="570"  y="453" text-anchor="middle" fill="#e03030" font-size="7.5" font-family="'Courier New',monospace">P:61% SHORT</text></g>
+          <g class="cmap-node" id="node-jpy"    data-asset="fx"        data-label="JPY / Safe Haven"        onclick="cmapNodeClick(this)"><rect x="622"  y="432" width="86" height="26" rx="2" fill="rgba(40,192,96,0.08)"  stroke="#28c060" stroke-width="1"/><text x="665"  y="444" text-anchor="middle" fill="#28c060" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚ñ≤ JPY</text><text x="665"  y="453" text-anchor="middle" fill="#28c060" font-size="7.5" font-family="'Courier New',monospace">CROWD:‚àí21pp</text></g>
+          <g class="cmap-node" id="node-ng"     data-asset="commodity" data-label="Natural Gas"             onclick="cmapNodeClick(this)"><rect x="718"  y="432" width="84" height="26" rx="2" fill="rgba(40,192,96,0.08)"  stroke="#28c060" stroke-width="1"/><text x="760"  y="444" text-anchor="middle" fill="#28c060" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚ñ≤ NATGAS</text><text x="760"  y="453" text-anchor="middle" fill="#28c060" font-size="7.5" font-family="'Courier New',monospace">P:55% LONG</text></g>
+          <g class="cmap-node" id="node-eurusd" data-asset="fx"        data-label="EUR/USD"                 onclick="cmapNodeClick(this)"><rect x="812"  y="432" width="86" height="26" rx="2" fill="rgba(40,192,96,0.06)"  stroke="#28c060" stroke-width="0.8"/><text x="855"  y="444" text-anchor="middle" fill="#28c060" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚ñ≤ EUR/USD</text><text x="855"  y="453" text-anchor="middle" fill="#28c060" font-size="7.5" font-family="'Courier New',monospace">P:48% ~ PRED</text></g>
+          <g class="cmap-node" id="node-soxx"   data-asset="equity"    data-label="SOXX Semiconductors ETF" onclick="cmapNodeClick(this)"><rect x="908"  y="432" width="80" height="26" rx="2" fill="rgba(224,48,48,0.08)" stroke="#e03030" stroke-width="0.8"/><text x="948"  y="444" text-anchor="middle" fill="#e03030" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚ñº SOXX</text><text x="948"  y="453" text-anchor="middle" fill="#e03030" font-size="7.5" font-family="'Courier New',monospace">CONDITIONAL</text></g>
+          <g class="cmap-node" id="node-xle"    data-asset="equity"    data-label="XLE Energy ETF"          onclick="cmapNodeClick(this)"><rect x="998"  y="432" width="90" height="26" rx="2" fill="rgba(232,160,32,0.10)" stroke="#e8a020" stroke-width="1.2"/><text x="1043" y="444" text-anchor="middle" fill="#e8a020" font-size="9"   font-family="'Courier New',monospace" font-weight="bold">‚óà XLE</text><text x="1043" y="453" text-anchor="middle" fill="#e8a020" font-size="7.5" font-family="'Courier New',monospace">LAGGARD +5.1pp</text></g>
+
+          <!-- ‚îÄ‚îÄ INLINE LEGEND ‚îÄ‚îÄ -->
+          <g transform="translate(8,308)">
+            <rect width="150" height="82" rx="2" fill="rgba(6,9,13,0.90)" stroke="rgba(30,50,68,0.7)" stroke-width="0.6"/>
+            <text x="8" y="13" fill="#00d4c8" font-size="8" font-family="'Courier New',monospace" font-weight="bold">LEGEND</text>
+            <circle cx="15" cy="24" r="4"   fill="#e03030" opacity="0.85"/>
+            <text x="24" y="27" fill="#c8d8e8" font-size="7" font-family="'Courier New',monospace">CONFIRMED (&gt;60 CRS)</text>
+            <circle cx="15" cy="36" r="3.5" fill="#e8a020" opacity="0.85"/>
+            <text x="24" y="39" fill="#c8d8e8" font-size="7" font-family="'Courier New',monospace">DEVELOPING (&gt;40 CRS)</text>
+            <line x1="8" y1="49" x2="22" y2="49" stroke="#28c060" stroke-width="1.5" stroke-dasharray="4,2"/>
+            <text x="26" y="52" fill="#c8d8e8" font-size="7" font-family="'Courier New',monospace">POSITIVE contagion</text>
+            <line x1="8" y1="61" x2="22" y2="61" stroke="#e03030" stroke-width="1.5" stroke-dasharray="4,2"/>
+            <text x="26" y="64" fill="#c8d8e8" font-size="7" font-family="'Courier New',monospace">NEGATIVE contagion</text>
+            <line x1="8" y1="73" x2="22" y2="73" stroke="#00d4c8" stroke-width="1"   stroke-dasharray="2,4"/>
+            <text x="26" y="76" fill="#c8d8e8" font-size="7" font-family="'Courier New',monospace">PREDICTED pathway</text>
+          </g>
+
+        </svg>
+      </div>
+
+      <!-- SIDEBAR -->
+      <div class="cmap-sidebar" id="cmapSidebar">
+        <div class="cmap-sb-hdr">
+          <span class="cmap-sb-title" id="cmapSbTitle">SELECT A NODE</span>
+          <button class="cmap-sb-close" onclick="cmapCloseSidebar()">√ó</button>
+        </div>
+        <div class="cmap-sb-body" id="cmapSbBody">
+          <div class="cmap-sb-empty">
+            <div class="cmap-sb-empty-icon">‚óé</div>
+            <div>Click any node on the map to inspect signals, contagion pathways &amp; linked trades</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RISK STRIP -->
+    <div class="cmap-risk-strip">
+      <div class="cmap-rs-item">
+        <span class="cmap-rs-label">SYSTEMIC RISK</span>
+        <div class="cmap-rs-bar-wrap"><div class="cmap-rs-bar" id="cmapSysBar" style="width:64%"></div></div>
+        <span class="cmap-rs-val red">64 / 100</span>
+      </div>
+      <div class="cmap-rs-item"><span class="cmap-rs-label">MOST EXPOSED</span><span class="cmap-rs-val amber">WTI (CRS:78)</span></div>
+      <div class="cmap-rs-item"><span class="cmap-rs-label">FASTEST RISING</span><span class="cmap-rs-val red">Iran ‚Üë+12 (3 cycles)</span></div>
+      <div class="cmap-rs-item"><span class="cmap-rs-label">CASCADE RISK</span><span class="cmap-rs-val amber">‚ö† MEDIUM ‚Äî Iran‚ÜíOil‚ÜíVIX chain</span></div>
+      <div class="cmap-rs-item"><span class="cmap-rs-label">MODEL CONF</span><span class="cmap-rs-val teal">76% Cal ¬∑ 0.18 Brier</span></div>
+    </div>
+
+  </div><!-- /cmap-wrap -->
+
+  <!-- ‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê
        SECTION 1 ‚Äî GLOBAL STATUS MAP
        ‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê -->
   <div class="section">
@@ -6461,6 +6797,208 @@ document.addEventListener('DOMContentLoaded', function() {
       applyLrnFilter();
     });
   });
+
+
+  /* ‚îÄ‚îÄ‚îÄ FEATURE 5: LIVE CONTAGION MAP ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ */
+  (function() {
+
+    /* 1 ‚Äî Assign CSS animation speed class to each edge based on strength */
+    document.querySelectorAll('.cmap-edge').forEach(function(e) {
+      var s    = parseFloat(e.getAttribute('data-strength') || '0.5');
+      var pred = e.classList.contains('cmap-predicted');
+      if (!pred) {
+        e.classList.add(s >= 0.80 ? 'cmap-efast' : s >= 0.55 ? 'cmap-emed' : 'cmap-eslow');
+      }
+    });
+
+    /* 2 ‚Äî Confidence slider filter */
+    var confSlider = document.getElementById('cmapConfSlider');
+    var confValEl  = document.getElementById('cmapConfVal');
+    function applyCmapConf() {
+      var min = confSlider ? parseInt(confSlider.value) : 30;
+      if (confValEl) confValEl.textContent = min + '%';
+      document.querySelectorAll('.cmap-edge').forEach(function(e) {
+        var c = parseInt(e.getAttribute('data-conf') || '0');
+        c < min ? e.classList.add('cmap-ehidden') : e.classList.remove('cmap-ehidden');
+      });
+    }
+    if (confSlider) confSlider.addEventListener('input', applyCmapConf);
+
+    /* 3 ‚Äî Region + Asset filter buttons */
+    var activeR = 'all', activeA = 'all';
+    function applyCmapFilters() {
+      /* geo nodes */
+      document.querySelectorAll('#cmapSvg .cmap-node[data-region]').forEach(function(n) {
+        var show = activeR === 'all' || n.getAttribute('data-region') === activeR;
+        n.style.opacity = show ? '1' : '0.10';
+        n.style.pointerEvents = show ? 'auto' : 'none';
+      });
+      /* asset nodes */
+      document.querySelectorAll('#cmapSvg .cmap-node[data-asset]').forEach(function(n) {
+        var show = activeA === 'all' || n.getAttribute('data-asset') === activeA;
+        n.style.opacity = show ? '1' : '0.10';
+        n.style.pointerEvents = show ? 'auto' : 'none';
+      });
+      /* asset edges */
+      document.querySelectorAll('.cmap-edge[data-type="asset"]').forEach(function(e) {
+        var ea = e.getAttribute('data-asset') || '';
+        (activeA !== 'all' && ea !== activeA) ? e.classList.add('cmap-ehidden') : e.classList.remove('cmap-ehidden');
+      });
+      /* geo edges */
+      document.querySelectorAll('.cmap-edge[data-type="geo"]').forEach(function(e) {
+        var er = e.getAttribute('data-region') || '';
+        (activeR !== 'all' && er !== activeR) ? e.classList.add('cmap-ehidden') : e.classList.remove('cmap-ehidden');
+      });
+      applyCmapConf();
+    }
+    document.querySelectorAll('[data-cmap-region]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('[data-cmap-region]').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        activeR = btn.getAttribute('data-cmap-region');
+        applyCmapFilters();
+      });
+    });
+    document.querySelectorAll('[data-cmap-asset]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('[data-cmap-asset]').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        activeA = btn.getAttribute('data-cmap-asset');
+        applyCmapFilters();
+      });
+    });
+    document.querySelectorAll('.cmap-view-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.cmap-view-btn').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+      });
+    });
+
+    /* 4 ‚Äî Propagation cycle counter (synced with Scanner's 60 s cadence) */
+    var cycleEl = document.getElementById('cmapCycleId');
+    var cycleN  = 1;
+    setInterval(function() {
+      cycleN++;
+      if (cycleEl) cycleEl.textContent = 'CYCLE #' + String(cycleN).padStart(3, '0');
+      var bar = document.getElementById('cmapSysBar');
+      if (bar) { bar.style.boxShadow = '0 0 8px rgba(224,48,48,0.5)'; setTimeout(function() { bar.style.boxShadow = 'none'; }, 350); }
+    }, 60000);
+
+    /* 5 ‚Äî Node data store */
+    var cmapDb = {
+      'node-iran': {
+        crs:82, state:'confirmed',
+        metrics:[['P(Escalation)','72%','red'],['GEE Confidence','High','green'],['Scanner Hits','2 active','teal'],['Bayesian Posterior','0.72','amber']],
+        signals:[['M1 ‚Äî Hormuz Blockade Signal','0.94‚Üë','red'],['M4 ‚Äî IRGC Activity','0.89‚Üë','red'],['NIB: OSINT Vessel Data','0.82‚Üí','amber'],['F4 Scanner: BTC gap','0.62‚Üë','teal']],
+        pathways:[['‚Üí WTI Crude','+24pp mismatch','pos','72%'],['‚Üí Airlines SHORT','inverse cost exposure','neg','70%'],['‚Üí VIX','volatility spike','pos','65%'],['‚Üí Gold','safe-haven flow','pos','68%'],['‚Üí BTC','geopolitical hedge','pos','58%'],['‚Üí Russia (geo)','axis alignment','pos','48%'],['‚Üí Saudi (geo)','regional spillover','neg','65%']],
+        trades:[['WTI LONG','long'],['WTI $90 Calls LONG','long'],['Airlines SHORT','short'],['Gold Miners LONG','long'],['BTC LONG','long']]
+      },
+      'node-ukraine': {
+        crs:68, state:'developing',
+        metrics:[['P(Peace Deal)','31%','amber'],['GEE Confidence','Developing','amber'],['Escalation Velocity','‚àí0.8%/cycle','green'],['Model Horizon','T+7d','teal']],
+        signals:[['M7 ‚Äî Ceasefire Signals','0.85‚Üí','amber'],['M8 ‚Äî EU/NATO Response','0.83‚Üí','amber'],['NIB: Diplomatic Channel','0.71‚Üí','amber'],['M3 ‚Äî Energy Sanctions','0.76‚Üë','amber']],
+        pathways:[['‚Üí EU (geo)','economic/policy contagion','neg','68%'],['‚Üí Nat Gas SHORT','peace = supply normalise','pos','55%'],['‚Üí EUR/USD LONG','reconstruction capital','pos','42%'],['‚Üí Russia (source)','active conflict front','neg','85%'],['‚Üí USA (predicted)','policy/aid contagion','pos','35%']],
+        trades:[['EUR/USD LONG','long'],['Nat Gas SHORT','short'],['EU Defense LONG','long']]
+      },
+      'node-taiwan': {
+        crs:55, state:'developing',
+        metrics:[['P(Escalation)','41%','amber'],['GEE Confidence','Developing','amber'],['Gap to CONFIRMED','‚àí19pp','dim'],['Model Horizon','T+72h','teal']],
+        signals:[['M2 ‚Äî PLA Exercise Cycle','0.81‚Üí','amber'],['M12 ‚Äî TSMC Supply Risk','0.80‚Üë','amber'],['M6 ‚Äî US 7th Fleet Posture','0.78‚Üí','amber'],['NIB: Chip Export Controls','0.74‚Üí','amber']],
+        pathways:[['‚Üí TSM SHORT','direct chip exposure','neg','61%'],['‚Üí JPY LONG','Asia safe haven','pos','58%'],['‚Üí China (geo)','source escalation','neg','61%'],['‚Üí Japan (geo)','regional contagion','neg','55%'],['‚Üí SOXX SHORT','semi chain conditional','neg','40%']],
+        trades:[['TSM SHORT','short'],['US/EU Defense LONG','long'],['JPY LONG','long'],['SOXX SHORT (conditional)','short']]
+      },
+      'node-russia': {
+        crs:62, state:'confirmed',
+        metrics:[['CRS','62 / 100','red'],['Linked Events','Ukraine War','red'],['Sanctions Active','Yes','amber'],['Model Confidence','68%','teal']],
+        signals:[['M7 ‚Äî Ceasefire Terms','0.85‚Üí','amber'],['M8 ‚Äî Sanctions Track','0.83‚Üí','amber'],['M3 ‚Äî Energy Leverage','0.76‚Üí','amber']],
+        pathways:[['‚Üí Ukraine (active front)','source of conflict','neg','85%'],['‚Üí Iran (axis)','indirect alignment','pos','48%'],['‚Üí EU (economic)','energy/sanctions pressure','neg','65%']],
+        trades:[['EU Defense LONG','long'],['Nat Gas SHORT','short']]
+      },
+      'node-china': {
+        crs:48, state:'watch',
+        metrics:[['CRS','48 / 100','amber'],['Taiwan Link','Strong','red'],['Economic Exposure','TSMC/Trade','amber'],['GEE Confidence','Watch','teal']],
+        signals:[['M2 ‚Äî PLA Exercises','0.81‚Üí','amber'],['M12 ‚Äî Chip Dependence','0.80‚Üí','amber']],
+        pathways:[['‚Üí Taiwan (escalation source)','coercive signal','neg','61%'],['‚Üí SOXX (indirect)','semi supply chain','neg','40%']],
+        trades:[['SOXX SHORT (conditional)','short'],['TSM SHORT','short']]
+      },
+      'node-saudi': {
+        crs:45, state:'watch',
+        metrics:[['CRS','45 / 100','amber'],['Iran Proximity','High','red'],['OPEC+ Alignment','Active','amber'],['GEE Confidence','Watch','teal']],
+        signals:[['M1 ‚Äî Hormuz Proximity','0.94‚Üí','red'],['M4 ‚Äî Gulf Tensions','0.70‚Üí','amber']],
+        pathways:[['‚Üí Iran (regional)','conflict spillover','neg','65%'],['‚Üí WTI (indirect)','OPEC production risk','pos','55%']],
+        trades:[['WTI LONG','long'],['Gold LONG','long']]
+      },
+      'node-eu': {
+        crs:42, state:'watch',
+        metrics:[['CRS','42 / 100','amber'],['Ukraine Exposure','High','red'],['Energy Dependency','Reducing','amber'],['GEE Confidence','Watch','teal']],
+        signals:[['M8 ‚Äî EU/NATO Response','0.83‚Üí','amber'],['M3 ‚Äî Energy Sanctions','0.76‚Üë','amber']],
+        pathways:[['‚Üí Ukraine (policy spill)','economic/military cost','neg','68%'],['‚Üí EUR/USD','recovery narrative','pos','42%'],['‚Üí EU Defense ETF','rearmament budget','pos','52%']],
+        trades:[['EUR/USD LONG','long'],['EU Defense LONG','long']]
+      },
+      'node-usa': {
+        crs:28, state:'watch',
+        metrics:[['CRS','28 / 100','teal'],['Predicted Contagion','T+7d','teal'],['Policy Risk','Low','green'],['GEE Confidence','Low','teal']],
+        signals:[['NIB: Policy Watch','0.55‚Üí','dim'],['M6 ‚Äî 7th Fleet Posture','0.78‚Üí','amber']],
+        pathways:[['‚Üê Ukraine (predicted)','aid/policy feedback','pos','35%'],['‚Üê Taiwan (indirect)','chip supply + defense','neg','41%']],
+        trades:[['US Defense LONG','long'],['VIX LONG (hedge)','long']]
+      },
+      'node-japan': {
+        crs:35, state:'watch',
+        metrics:[['CRS','35 / 100','teal'],['Taiwan Exposure','Medium','amber'],['Safe Haven Role','Active','green'],['GEE Confidence','Low','teal']],
+        signals:[['M2 ‚Äî PLA Exercises','0.81‚Üí','amber'],['NIB: Japan Defense','0.62‚Üí','dim']],
+        pathways:[['‚Üê Taiwan (regional)','proximity contagion','neg','55%'],['‚Üí JPY (safe haven)','capital flight','pos','58%']],
+        trades:[['JPY LONG','long'],['US Defense LONG','long']]
+      }
+    };
+
+    /* 6 ‚Äî Node click ‚Üí sidebar */
+    window.cmapNodeClick = function(el) {
+      var id    = el.id;
+      var label = el.getAttribute('data-label') || id;
+      var state = el.getAttribute('data-state') || 'watch';
+      document.querySelectorAll('#cmapSvg .cmap-node').forEach(function(n) { n.classList.remove('selected'); });
+      el.classList.add('selected');
+      var sb = document.getElementById('cmapSidebar');
+      if (sb) sb.classList.add('open');
+      var sbTitle = document.getElementById('cmapSbTitle');
+      if (sbTitle) sbTitle.textContent = label.toUpperCase().slice(0, 28);
+      var sbBody = document.getElementById('cmapSbBody');
+      if (sbBody) sbBody.innerHTML = buildCmapSb(id, label, state);
+    };
+
+    window.cmapCloseSidebar = function() {
+      var sb = document.getElementById('cmapSidebar');
+      if (sb) sb.classList.remove('open');
+      document.querySelectorAll('#cmapSvg .cmap-node').forEach(function(n) { n.classList.remove('selected'); });
+    };
+
+    function buildCmapSb(id, label, state) {
+      var d = cmapDb[id];
+      if (!d) {
+        return '<div class="cmap-sb-empty"><div class="cmap-sb-empty-icon">‚óà</div><div>Asset node ‚Äî CRS driven by upstream geo signal weights via the Bayesian propagation engine.</div></div>';
+      }
+      var sc = d.state === 'confirmed' ? 'confirmed' : d.state === 'developing' ? 'developing' : 'watch';
+      var h  = '<div class="cmap-sb-name">' + label + '<span class="cmap-sb-badge ' + sc + '">' + d.state.toUpperCase() + '</span></div>';
+      /* metrics */
+      h += '<div class="cmap-sb-sec"><div class="cmap-sb-sec-ttl">RISK METRICS</div>';
+      d.metrics.forEach(function(m) { h += '<div class="cmap-sb-row"><span class="cmap-sb-row-l">' + m[0] + '</span><span class="cmap-sb-row-v ' + m[2] + '">' + m[1] + '</span></div>'; });
+      /* signals */
+      h += '</div><div class="cmap-sb-sec"><div class="cmap-sb-sec-ttl">DRIVING SIGNALS</div>';
+      d.signals.forEach(function(s) { h += '<div class="cmap-sb-row"><span class="cmap-sb-row-l">' + s[0] + '</span><span class="cmap-sb-row-v ' + s[2] + '">' + s[1] + '</span></div>'; });
+      /* pathways */
+      h += '</div><div class="cmap-sb-sec"><div class="cmap-sb-sec-ttl">CONTAGION PATHWAYS</div>';
+      d.pathways.forEach(function(p) {
+        var pc = p[2] === 'pos' ? 'green' : 'red';
+        h += '<div class="cmap-sb-path"><div class="cmap-sb-path-hdr"><span class="' + pc + '">' + p[0] + '</span><span class="' + pc + '">' + p[3] + '</span></div><div class="cmap-sb-path-desc">' + p[1] + '</div></div>';
+      });
+      /* trades */
+      h += '</div><div class="cmap-sb-sec"><div class="cmap-sb-sec-ttl">LINKED TRADE IDEAS</div>';
+      d.trades.forEach(function(t) { h += '<div class="cmap-sb-trade ' + t[1] + '"><span class="' + (t[1]==='long'?'green':'red') + '">' + (t[1]==='long'?'‚ñ≤ ':'‚ñº ') + t[0] + '</span></div>'; });
+      h += '</div>';
+      return h;
+    }
+
+  })();
 
 })();
 </script>
