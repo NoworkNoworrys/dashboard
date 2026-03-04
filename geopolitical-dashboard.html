@@ -1424,6 +1424,73 @@
     .cmap-rs-bar-wrap { width: 70px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
     .cmap-rs-bar { height: 100%; background: linear-gradient(90deg, var(--amber), var(--red)); border-radius: 3px; transition: width 0.5s ease; }
 
+    /* ‚îÄ‚îÄ‚îÄ FEATURE 6: UK & CRYPTO MONITOR  ¬∑  orange #f7931a ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ */
+    .ukc-wrap { margin-bottom: 24px; }
+    .ukc-header { background: rgba(247,147,26,0.06); border: 1px solid rgba(247,147,26,0.28); border-top: 2px solid #f7931a; border-left: 4px solid #f7931a; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+    .ukc-header-left { display: flex; align-items: center; gap: 12px; }
+    .ukc-header-right { display: flex; align-items: center; gap: 10px; }
+    .ukc-live-dot { width: 8px; height: 8px; border-radius: 50%; background: #f7931a; animation: ukcPulse 1.4s ease-in-out infinite; flex-shrink: 0; }
+    @keyframes ukcPulse { 0%,100% { opacity:1; box-shadow:0 0 0 0 rgba(247,147,26,0.6); } 50% { opacity:0.7; box-shadow:0 0 0 5px rgba(247,147,26,0); } }
+    .ukc-title-block { display: flex; flex-direction: column; gap: 2px; }
+    .ukc-title { color: #f7931a; font-size: 13px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; }
+    .ukc-subtitle { color: var(--dim); font-size: 10px; }
+    .ukc-badge { font-size: 9px; padding: 2px 8px; background: rgba(247,147,26,0.12); border: 1px solid rgba(247,147,26,0.35); color: #f7931a; font-weight: bold; letter-spacing: 1px; }
+    .ukc-body { display: flex; gap: 0; background: var(--bg2); border: 1px solid var(--border); border-top: none; min-height: 260px; }
+    .ukc-left { width: 270px; flex-shrink: 0; padding: 12px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid var(--border); }
+    .ukc-right { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .ukc-card { background: var(--bg3); border: 1px solid var(--border); padding: 10px 12px; }
+    .ukc-btc { border-color: rgba(247,147,26,0.40); }
+    .ukc-card-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .ukc-card-icon { font-size: 13px; }
+    .ukc-card-title { color: #f7931a; font-size: 11px; font-weight: bold; letter-spacing: 1.5px; flex: 1; }
+    .ukc-card-badge { font-size: 8px; padding: 1px 5px; background: rgba(247,147,26,0.12); border: 1px solid rgba(247,147,26,0.30); color: #f7931a; font-weight: bold; letter-spacing: 0.8px; }
+    .ukc-card-badge.ukc-meme { background: rgba(208,64,184,0.12); border-color: rgba(208,64,184,0.30); color: #d040b8; }
+    .ukc-btc-price { color: #f7931a; font-size: 22px; font-weight: bold; font-family: 'Courier New', monospace; letter-spacing: 1px; margin-bottom: 8px; }
+    .ukc-trend-row { display: flex; gap: 8px; }
+    .ukc-trend-item { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .ukc-trend-label { color: var(--dim); font-size: 8px; letter-spacing: 0.8px; }
+    .ukc-trend-val { font-size: 10px; font-family: 'Courier New', monospace; font-weight: bold; }
+    .ukc-bar-wrap { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+    .ukc-bar { height: 100%; border-radius: 2px; transition: width 0.6s ease; width: 50%; }
+    .ukc-bar.pos { background: #28c060; }
+    .ukc-bar.neg { background: #e03030; }
+    .ukc-neet { border-color: rgba(208,64,184,0.35); }
+    .ukc-neet-price { color: #d040b8; font-size: 16px; font-weight: bold; font-family: 'Courier New', monospace; margin-bottom: 2px; }
+    .ukc-neet-change { font-size: 10px; font-family: 'Courier New', monospace; }
+    .ukc-uk-panel { background: var(--bg3); border: 1px solid var(--border); padding: 8px 10px; }
+    .ukc-uk-header { color: var(--dim); font-size: 9px; letter-spacing: 1.5px; margin-bottom: 6px; }
+    .ukc-uk-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .ukc-uk-row:last-child { border-bottom: none; }
+    .ukc-uk-row.ukc-alert-row { background: rgba(255,140,0,0.06); border-radius: 2px; }
+    .ukc-uk-label { color: var(--dim); font-size: 9px; letter-spacing: 0.8px; width: 58px; flex-shrink: 0; }
+    .ukc-uk-val { color: var(--fg); font-size: 11px; font-family: 'Courier New', monospace; font-weight: bold; flex: 1; }
+    .ukc-uk-chg { font-size: 10px; font-family: 'Courier New', monospace; font-weight: bold; width: 62px; text-align: right; }
+    .ukc-uk-chg.pos { color: #28c060; }
+    .ukc-uk-chg.neg { color: #e03030; }
+    .ukc-panel-title { color: var(--dim); font-size: 9px; letter-spacing: 1.5px; margin-bottom: 6px; }
+    .ukc-dim { color: var(--dim); }
+    .ukc-corr-panel, .ukc-alert-panel, .ukc-macro-panel { background: var(--bg3); border: 1px solid var(--border); padding: 8px 10px; }
+    .ukc-corr-table { width: 100%; border-collapse: collapse; font-size: 10px; font-family: 'Courier New', monospace; }
+    .ukc-corr-table th { color: var(--dim); font-size: 8px; letter-spacing: 1px; text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
+    .ukc-corr-table td { padding: 3px 4px; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--fg); }
+    .ukc-corr-table tr:last-child td { border-bottom: none; }
+    .ukc-corr-table td:nth-child(2) { font-weight: bold; width: 38px; }
+    .ukc-corr-r-pos { color: #28c060; }
+    .ukc-corr-r-neg { color: #e03030; }
+    .ukc-corr-r-neu { color: var(--dim); }
+    .ukc-corr-sig-pos { color: #28c060; font-size: 9px; }
+    .ukc-corr-sig-neg { color: #e03030; font-size: 9px; }
+    .ukc-corr-sig-neu { color: var(--dim); font-size: 9px; }
+    .ukc-alert-feed { max-height: 108px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+    .ukc-alert-item { display: flex; gap: 6px; align-items: flex-start; font-size: 10px; padding: 4px 6px; border-left: 2px solid var(--border); background: rgba(255,255,255,0.02); }
+    .ukc-alert-item.ukc-alert-warn { border-color: var(--amber); background: rgba(255,176,0,0.04); }
+    .ukc-alert-item.ukc-alert-crit { border-color: var(--red);   background: rgba(224,48,48,0.04); }
+    .ukc-alert-item.ukc-alert-info { border-color: var(--blue);  background: rgba(64,148,224,0.04); }
+    .ukc-alert-item.ukc-alert-pos  { border-color: var(--green); background: rgba(40,192,96,0.04); }
+    .ukc-alert-time { color: var(--dim); font-size: 8px; letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0; font-family: 'Courier New', monospace; margin-top: 1px; }
+    .ukc-alert-msg { color: var(--fg); line-height: 1.4; }
+    .ukc-macro-body { font-size: 10px; color: var(--fg); line-height: 1.5; }
+
     /* scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
@@ -4316,6 +4383,136 @@
   </div><!-- /cmap-wrap -->
 
   <!-- ‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê
+       FEATURE 6 ‚Äî UK & CRYPTO MONITOR
+       ‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê -->
+  <div class="ukc-wrap" id="ukcWrap">
+
+    <!-- Header bar -->
+    <div class="ukc-header">
+      <div class="ukc-header-left">
+        <span class="ukc-live-dot"></span>
+        <div class="ukc-title-block">
+          <span class="ukc-title">‚Çø UK &amp; CRYPTO MONITOR</span>
+          <span class="ukc-subtitle">Bitcoin ¬∑ NEET ¬∑ Gilts ¬∑ FTSE 100 ¬∑ GBP/USD ‚Äî 60s cadence ¬∑ Pearson correlations ¬∑ event alerts</span>
+        </div>
+      </div>
+      <div class="ukc-header-right">
+        <span class="ukc-badge" id="ukcLastUpdate">INITIALISING‚Ä¶</span>
+      </div>
+    </div>
+
+    <!-- Two-column body -->
+    <div class="ukc-body">
+
+      <!-- LEFT ‚Äî asset cards -->
+      <div class="ukc-left">
+
+        <!-- BTC Card -->
+        <div class="ukc-card ukc-btc">
+          <div class="ukc-card-header">
+            <span class="ukc-card-icon">‚Çø</span>
+            <span class="ukc-card-title">BITCOIN</span>
+            <span class="ukc-card-badge">LIVE SIM</span>
+          </div>
+          <div class="ukc-btc-price" id="ukcBtcPrice">$84,230</div>
+          <div class="ukc-trend-row">
+            <div class="ukc-trend-item">
+              <span class="ukc-trend-label">1H</span>
+              <span class="ukc-trend-val" id="ukcBtc1h">‚Äî</span>
+              <div class="ukc-bar-wrap"><div class="ukc-bar" id="ukcBtc1hBar" style="width:50%"></div></div>
+            </div>
+            <div class="ukc-trend-item">
+              <span class="ukc-trend-label">24H</span>
+              <span class="ukc-trend-val" id="ukcBtc24h">‚Äî</span>
+              <div class="ukc-bar-wrap"><div class="ukc-bar" id="ukcBtc24hBar" style="width:50%"></div></div>
+            </div>
+            <div class="ukc-trend-item">
+              <span class="ukc-trend-label">7D</span>
+              <span class="ukc-trend-val" id="ukcBtc7d">‚Äî</span>
+              <div class="ukc-bar-wrap"><div class="ukc-bar" id="ukcBtc7dBar" style="width:50%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- NEET Meme Coin Card -->
+        <div class="ukc-card ukc-neet">
+          <div class="ukc-card-header">
+            <span class="ukc-card-icon">üêï</span>
+            <span class="ukc-card-title">NEET</span>
+            <span class="ukc-card-badge ukc-meme">MEME</span>
+          </div>
+          <div class="ukc-neet-price" id="ukcNeetPrice">$0.00412</div>
+          <div class="ukc-neet-change" id="ukcNeetChange" style="color:var(--dim)">cycle Œî: ‚Äî</div>
+        </div>
+
+        <!-- UK Assets -->
+        <div class="ukc-uk-panel">
+          <div class="ukc-uk-header">üá¨üáß UK ASSETS</div>
+          <div class="ukc-uk-row" id="ukcGiltRow">
+            <span class="ukc-uk-label">GILT 10Y</span>
+            <span class="ukc-uk-val" id="ukcGiltYield">4.65%</span>
+            <span class="ukc-uk-chg" id="ukcGiltChg" style="color:var(--dim)">+0bps</span>
+          </div>
+          <div class="ukc-uk-row" id="ukcFtseRow">
+            <span class="ukc-uk-label">FTSE 100</span>
+            <span class="ukc-uk-val" id="ukcFtseVal">8,312</span>
+            <span class="ukc-uk-chg" id="ukcFtseChg" style="color:var(--dim)">+0.00%</span>
+          </div>
+          <div class="ukc-uk-row" id="ukcGbpRow">
+            <span class="ukc-uk-label">GBP/USD</span>
+            <span class="ukc-uk-val" id="ukcGbpVal">1.2682</span>
+            <span class="ukc-uk-chg" id="ukcGbpChg" style="color:var(--dim)">+0.00%</span>
+          </div>
+        </div>
+
+      </div><!-- /ukc-left -->
+
+      <!-- RIGHT ‚Äî correlations + alerts + macro -->
+      <div class="ukc-right">
+
+        <!-- Correlation engine table -->
+        <div class="ukc-corr-panel">
+          <div class="ukc-panel-title">CORRELATION ENGINE <span class="ukc-dim">(30-cycle rolling Pearson ¬∑ updates each tick)</span></div>
+          <table class="ukc-corr-table">
+            <thead>
+              <tr><th>PAIR</th><th>r</th><th>SIGNAL</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>BTC ‚Üî UK Gilts (yield)</td><td id="ukcCorrBtcGilt" class="ukc-corr-r-neu">‚Äî</td><td id="ukcCorrBtcGiltSig" class="ukc-corr-sig-neu">awaiting data</td></tr>
+              <tr><td>BTC ‚Üî FTSE 100</td>        <td id="ukcCorrBtcFtse" class="ukc-corr-r-neu">‚Äî</td><td id="ukcCorrBtcFtseSig" class="ukc-corr-sig-neu">awaiting data</td></tr>
+              <tr><td>BTC ‚Üî GBP/USD</td>         <td id="ukcCorrBtcGbp"  class="ukc-corr-r-neu">‚Äî</td><td id="ukcCorrBtcGbpSig"  class="ukc-corr-sig-neu">awaiting data</td></tr>
+              <tr><td>BTC ‚Üî WTI Crude</td>       <td id="ukcCorrBtcWti"  class="ukc-corr-r-neu">‚Äî</td><td id="ukcCorrBtcWtiSig"  class="ukc-corr-sig-neu">awaiting data</td></tr>
+              <tr><td>BTC ‚Üî Gold</td>             <td id="ukcCorrBtcGold" class="ukc-corr-r-neu">‚Äî</td><td id="ukcCorrBtcGoldSig" class="ukc-corr-sig-neu">awaiting data</td></tr>
+              <tr><td>FTSE 100 ‚Üî GBP/USD</td>    <td id="ukcCorrFtseGbp" class="ukc-corr-r-neu">‚Äî</td><td id="ukcCorrFtseGbpSig" class="ukc-corr-sig-neu">awaiting data</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Bitcoin Impact Feed -->
+        <div class="ukc-alert-panel">
+          <div class="ukc-panel-title">BITCOIN IMPACT FEED <span class="ukc-dim">event-driven ¬∑ auto-generates plain-language alerts</span></div>
+          <div class="ukc-alert-feed" id="ukcAlertFeed">
+            <div class="ukc-alert-item ukc-alert-info">
+              <span class="ukc-alert-time">INIT</span>
+              <span class="ukc-alert-msg">Monitor initialising ‚Äî first cycle completing in ~5s‚Ä¶</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- BTC Macro Context -->
+        <div class="ukc-macro-panel">
+          <div class="ukc-panel-title">BTC MACRO CONTEXT <span class="ukc-dim">plain-language synthesis</span></div>
+          <div class="ukc-macro-body" id="ukcMacroBody">
+            <span class="ukc-dim">Awaiting first cycle‚Ä¶</span>
+          </div>
+        </div>
+
+      </div><!-- /ukc-right -->
+
+    </div><!-- /ukc-body -->
+  </div><!-- /ukc-wrap -->
+
+  <!-- ‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê
        SECTION 1 ‚Äî GLOBAL STATUS MAP
        ‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê‚ïê -->
   <div class="section">
@@ -6999,6 +7196,278 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
   })();
+
+})();
+
+/* ‚îÄ‚îÄ UK & CRYPTO MONITOR ‚Äî Feature 6 ‚Äî Interactive Logic ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ */
+(function() {
+
+  /* ‚îÄ‚îÄ Base prices ‚îÄ‚îÄ */
+  var BTC_BASE  = 84230;
+  var NEET_BASE = 0.00412;
+  var GILT_BASE = 4.65;    // 10y yield %
+  var FTSE_BASE = 8312;
+  var GBP_BASE  = 1.2682;
+  var WTI_BASE  = 72.0;
+  var GOLD_BASE = 1945.0;
+
+  /* ‚îÄ‚îÄ Current simulated prices ‚îÄ‚îÄ */
+  var prices = { btc: BTC_BASE, neet: NEET_BASE, gilt: GILT_BASE, ftse: FTSE_BASE, gbp: GBP_BASE };
+  var wtiPrice  = WTI_BASE;
+  var goldPrice = GOLD_BASE;
+
+  /* ‚îÄ‚îÄ 1h / 24h / 7d price anchors (drift slowly each cycle) ‚îÄ‚îÄ */
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+  var anchors = {
+    btc1h:  BTC_BASE  * (1 + rnd(-0.006, 0.006)),
+    btc24h: BTC_BASE  * (1 + rnd(-0.025, 0.025)),
+    btc7d:  BTC_BASE  * (1 + rnd(-0.08,  0.08))
+  };
+
+  /* ‚îÄ‚îÄ Rolling return history for Pearson (30 cycles) ‚îÄ‚îÄ */
+  var hist = { btc:[], gilt:[], ftse:[], gbp:[], wti:[], gold:[] };
+  var MAX_HIST = 30;
+
+  /* ‚îÄ‚îÄ Cycle counter + alert debounce ‚îÄ‚îÄ */
+  var cycleClock = 0;
+  var lastAlertCycle = {};
+
+  /* ‚îÄ‚îÄ Gaussian noise ‚îÄ‚îÄ */
+  function gauss(mean, std) {
+    var u = 0, v = 0;
+    while (!u) u = Math.random();
+    while (!v) v = Math.random();
+    return mean + std * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  /* ‚îÄ‚îÄ Random walk step ‚îÄ‚îÄ */
+  function step(p, drift, vol) { return Math.max(p * (1 + gauss(drift, vol)), 0.0000001); }
+
+  /* ‚îÄ‚îÄ Pearson correlation (returns null if < 5 samples) ‚îÄ‚îÄ */
+  function pearson(a, b) {
+    var n = Math.min(a.length, b.length);
+    if (n < 5) return null;
+    var A = a.slice(-n), B = b.slice(-n);
+    var mA = A.reduce(function(s,v){return s+v;},0)/n;
+    var mB = B.reduce(function(s,v){return s+v;},0)/n;
+    var num=0, da=0, db=0;
+    for (var i=0;i<n;i++){var dA=A[i]-mA,dB=B[i]-mB;num+=dA*dB;da+=dA*dA;db+=dB*dB;}
+    var den = Math.sqrt(da*db);
+    return den < 1e-12 ? 0 : num/den;
+  }
+
+  /* ‚îÄ‚îÄ Format helpers ‚îÄ‚îÄ */
+  function fPct(v, dp) { dp = dp||2; return (v>=0?'+':'')+v.toFixed(dp)+'%'; }
+  function clr(v, thr) { thr=thr||0; return v>thr?'pos':v<-thr?'neg':''; }
+
+  /* ‚îÄ‚îÄ Debounce: only alert once every N cycles per key ‚îÄ‚îÄ */
+  function canAlert(key, minCycles) {
+    minCycles = minCycles || 5;
+    if (lastAlertCycle[key] && (cycleClock - lastAlertCycle[key]) < minCycles) return false;
+    lastAlertCycle[key] = cycleClock;
+    return true;
+  }
+
+  /* ‚îÄ‚îÄ Push an alert to the impact feed ‚îÄ‚îÄ */
+  var alertFeed = document.getElementById('ukcAlertFeed');
+  function pushAlert(type, msg) {
+    if (!alertFeed) return;
+    var now = new Date();
+    var ts  = now.getHours().toString().padStart(2,'0') + ':' +
+              now.getMinutes().toString().padStart(2,'0') + ':' +
+              now.getSeconds().toString().padStart(2,'0');
+    var item = document.createElement('div');
+    item.className = 'ukc-alert-item ukc-alert-' + type;
+    item.innerHTML = '<span class="ukc-alert-time">'+ts+'</span>' +
+                     '<span class="ukc-alert-msg">'+msg+'</span>';
+    alertFeed.insertBefore(item, alertFeed.firstChild);
+    while (alertFeed.children.length > 12) alertFeed.removeChild(alertFeed.lastChild);
+  }
+
+  /* ‚îÄ‚îÄ Update one correlation table row ‚îÄ‚îÄ */
+  function setCorr(tdId, sigId, r) {
+    var td  = document.getElementById(tdId);
+    var sig = document.getElementById(sigId);
+    if (!td || !sig || r === null) return;
+    var rCls = Math.abs(r) >= 0.5 ? (r>0?'ukc-corr-r-pos':'ukc-corr-r-neg') : 'ukc-corr-r-neu';
+    td.className  = rCls;
+    td.textContent = r.toFixed(2);
+    var sTxt, sCls;
+    if      (Math.abs(r) < 0.3) { sTxt='~ NEUTRAL';   sCls='ukc-corr-sig-neu'; }
+    else if (r >= 0.3)           { sTxt='‚ñ≤ POSITIVE';  sCls='ukc-corr-sig-pos'; }
+    else                         { sTxt='‚ñº NEGATIVE';  sCls='ukc-corr-sig-neg'; }
+    sig.className  = sCls;
+    sig.textContent = sTxt;
+  }
+
+  /* ‚îÄ‚îÄ Macro context narrative ‚îÄ‚îÄ */
+  function updateMacro(btcPct24h, giltBps, ftsePct, gbpPct, corrBtcGilt) {
+    var el = document.getElementById('ukcMacroBody');
+    if (!el) return;
+    var lines = [];
+    if (Math.abs(giltBps) >= 3) {
+      var gd = giltBps>0?'rose':'fell', rd = giltBps>0?'risk-off: may pressure BTC as capital rotates to bonds':'yields easing ‚Äî mild tailwind for risk assets incl. BTC';
+      lines.push('UK gilt yields '+gd+' '+Math.abs(giltBps).toFixed(1)+'bps from base ‚Äî '+rd+'.');
+    }
+    if (Math.abs(btcPct24h) >= 1.5) {
+      var bd = btcPct24h>0?'rallying':'selling off';
+      lines.push('BTC '+bd+' '+fPct(btcPct24h)+' (24h) ‚Äî '+(btcPct24h>0?'momentum positive; watch UK institutional follow-through.':'risk-off dominant; gilts and USD likely benefiting.'));
+    }
+    if (Math.abs(ftsePct) >= 0.3) {
+      lines.push('FTSE 100 '+fPct(ftsePct)+' from base ‚Äî '+(ftsePct>0?'UK equity strength may lag crypto rotation.':'equity weakness could ripple into broader risk-off, pressuring BTC.'));
+    }
+    if (Math.abs(gbpPct) >= 0.2) {
+      lines.push('GBP/USD '+fPct(gbpPct)+' ‚Äî '+(gbpPct>0?'USD softness historically supportive for BTC.':'USD strength typically a headwind for BTC.'));
+    }
+    if (corrBtcGilt !== null && Math.abs(corrBtcGilt) >= 0.4) {
+      lines.push('BTC‚ÄìGilt correlation r='+corrBtcGilt.toFixed(2)+' ‚Äî '+(corrBtcGilt<0?'inverse regime active: gilt yield spikes bearish for BTC.':'unusual positive co-movement ‚Äî possible regime shift, monitor closely.'));
+    }
+    if (!lines.length) lines.push('No significant macro signals detected. Markets drifting within normal ranges.');
+    el.innerHTML = lines.map(function(l){return '<div style="margin-bottom:4px">‚ñ∏ '+l+'</div>';}).join('');
+  }
+
+  /* ‚îÄ‚îÄ UK asset row updater ‚îÄ‚îÄ */
+  function setUkRow(rowId, valId, chgId, valTxt, chgTxt, isAlert) {
+    var row = document.getElementById(rowId);
+    var vel = document.getElementById(valId);
+    var cel = document.getElementById(chgId);
+    if (row) row.classList.toggle('ukc-alert-row', isAlert);
+    if (vel) vel.textContent = valTxt;
+    if (cel) { cel.textContent = chgTxt; cel.className = 'ukc-uk-chg ' + (parseFloat(chgTxt)>=0?'pos':'neg'); }
+  }
+
+  /* ‚îÄ‚îÄ Main tick ‚îÄ‚îÄ */
+  function tick() {
+    cycleClock++;
+
+    var prevBtc  = prices.btc;
+    var prevGilt = prices.gilt;
+    var prevFtse = prices.ftse;
+    var prevGbp  = prices.gbp;
+    var prevNeet = prices.neet;
+    var prevWti  = wtiPrice;
+    var prevGold = goldPrice;
+
+    prices.btc  = step(prices.btc,  0.00004, 0.0030);
+    prices.gilt = step(prices.gilt, 0.00001, 0.0015);
+    prices.ftse = step(prices.ftse, 0.00003, 0.0020);
+    prices.gbp  = step(prices.gbp,  0.00001, 0.0012);
+    prices.neet = step(prices.neet, 0.00008, 0.0085);
+    wtiPrice    = step(wtiPrice,    0.00003, 0.0026);
+    goldPrice   = step(goldPrice,   0.00002, 0.0016);
+
+    /* Returns for correlation */
+    var rBtc  = (prices.btc  - prevBtc)  / prevBtc;
+    var rGilt = (prices.gilt - prevGilt) / prevGilt;
+    var rFtse = (prices.ftse - prevFtse) / prevFtse;
+    var rGbp  = (prices.gbp  - prevGbp)  / prevGbp;
+    var rWti  = (wtiPrice    - prevWti)  / prevWti;
+    var rGold = (goldPrice   - prevGold) / prevGold;
+    hist.btc.push(rBtc);   hist.gilt.push(rGilt); hist.ftse.push(rFtse);
+    hist.gbp.push(rGbp);   hist.wti.push(rWti);   hist.gold.push(rGold);
+    if (hist.btc.length > MAX_HIST) {
+      hist.btc.shift(); hist.gilt.shift(); hist.ftse.shift();
+      hist.gbp.shift(); hist.wti.shift();  hist.gold.shift();
+    }
+
+    /* ‚îÄ‚îÄ BTC display ‚îÄ‚îÄ */
+    var elBtcP = document.getElementById('ukcBtcPrice');
+    if (elBtcP) elBtcP.textContent = '$' + Math.round(prices.btc).toLocaleString();
+
+    var btcPct1h  = (prices.btc - anchors.btc1h)  / anchors.btc1h  * 100;
+    var btcPct24h = (prices.btc - anchors.btc24h) / anchors.btc24h * 100;
+    var btcPct7d  = (prices.btc - anchors.btc7d)  / anchors.btc7d  * 100;
+
+    function setTrend(vId, bId, pct) {
+      var ve = document.getElementById(vId), be = document.getElementById(bId);
+      if (ve) { ve.textContent = fPct(pct); ve.style.color = pct>=0?'#28c060':'#e03030'; }
+      if (be) { be.style.width = Math.min(Math.abs(pct)*12,100)+'%'; be.className='ukc-bar '+(pct>=0?'pos':'neg'); }
+    }
+    setTrend('ukcBtc1h',  'ukcBtc1hBar',  btcPct1h);
+    setTrend('ukcBtc24h', 'ukcBtc24hBar', btcPct24h);
+    setTrend('ukcBtc7d',  'ukcBtc7dBar',  btcPct7d);
+
+    /* Drift anchors slowly */
+    anchors.btc1h  = prices.btc * (1 + gauss(0, 0.002));
+    anchors.btc24h = prices.btc * (1 + gauss(0, 0.010));
+    anchors.btc7d  = prices.btc * (1 + gauss(0, 0.035));
+
+    /* ‚îÄ‚îÄ NEET display ‚îÄ‚îÄ */
+    var neetPct = (prices.neet - prevNeet) / prevNeet * 100;
+    var elNP = document.getElementById('ukcNeetPrice');
+    var elNC = document.getElementById('ukcNeetChange');
+    if (elNP) elNP.textContent = '$' + prices.neet.toFixed(5);
+    if (elNC) { elNC.textContent = 'cycle Œî: '+fPct(neetPct,1); elNC.style.color = neetPct>=0?'#d040b8':'#e03030'; }
+
+    /* ‚îÄ‚îÄ UK assets ‚îÄ‚îÄ */
+    var giltBps = (prices.gilt - GILT_BASE) * 100;
+    var ftsePct = (prices.ftse - FTSE_BASE) / FTSE_BASE * 100;
+    var gbpPct  = (prices.gbp  - GBP_BASE)  / GBP_BASE  * 100;
+    setUkRow('ukcGiltRow','ukcGiltYield','ukcGiltChg',
+      prices.gilt.toFixed(2)+'%',
+      (giltBps>=0?'+':'')+giltBps.toFixed(1)+'bps',
+      Math.abs(giltBps)>=5);
+    setUkRow('ukcFtseRow','ukcFtseVal','ukcFtseChg',
+      Math.round(prices.ftse).toLocaleString(), fPct(ftsePct), Math.abs(ftsePct)>=0.3);
+    setUkRow('ukcGbpRow','ukcGbpVal','ukcGbpChg',
+      prices.gbp.toFixed(4), fPct(gbpPct), Math.abs(gbpPct)>=0.3);
+
+    /* ‚îÄ‚îÄ Correlations ‚îÄ‚îÄ */
+    var cBtcGilt = pearson(hist.btc, hist.gilt);
+    var cBtcFtse = pearson(hist.btc, hist.ftse);
+    var cBtcGbp  = pearson(hist.btc, hist.gbp);
+    var cBtcWti  = pearson(hist.btc, hist.wti);
+    var cBtcGold = pearson(hist.btc, hist.gold);
+    var cFtseGbp = pearson(hist.ftse, hist.gbp);
+    setCorr('ukcCorrBtcGilt','ukcCorrBtcGiltSig', cBtcGilt);
+    setCorr('ukcCorrBtcFtse','ukcCorrBtcFtseSig', cBtcFtse);
+    setCorr('ukcCorrBtcGbp', 'ukcCorrBtcGbpSig',  cBtcGbp);
+    setCorr('ukcCorrBtcWti', 'ukcCorrBtcWtiSig',  cBtcWti);
+    setCorr('ukcCorrBtcGold','ukcCorrBtcGoldSig', cBtcGold);
+    setCorr('ukcCorrFtseGbp','ukcCorrFtseGbpSig', cFtseGbp);
+
+    /* ‚îÄ‚îÄ Event-driven alerts (debounced: 5 cycle cooldown per pair) ‚îÄ‚îÄ */
+    if (Math.abs(giltBps) >= 5 && canAlert('gilt')) {
+      pushAlert(giltBps>0?'warn':'info',
+        'UK gilt yields '+(giltBps>0?'rose':'fell')+' '+Math.abs(giltBps).toFixed(1)+'bps from base ‚Äî '+(giltBps>0?'risk-off signal: investors rotating to bonds may weigh on BTC.':'yields easing ‚Äî mild positive for BTC via reduced bond competition.'));
+    }
+    if (Math.abs(btcPct24h) >= 1.5 && canAlert('btc24h')) {
+      pushAlert(btcPct24h>0?'pos':'crit',
+        'BTC 24h: '+fPct(btcPct24h)+' ‚Äî '+(btcPct24h>0?'bullish momentum; UK macro backdrop currently stable.':'significant BTC drawdown; monitor gilts & GBP for safe-haven flows.'));
+    }
+    if (Math.abs(ftsePct) >= 0.3 && canAlert('ftse')) {
+      pushAlert(ftsePct>0?'info':'warn',
+        'FTSE 100 '+fPct(ftsePct)+' from base ‚Äî '+(ftsePct>0?'UK equities gaining; crypto may lag equity rotation.':'UK equity weakness ‚Äî possible contagion to risk assets incl. BTC.'));
+    }
+    if (Math.abs(neetPct) >= 5 && canAlert('neet')) {
+      pushAlert(neetPct>0?'pos':'warn',
+        'NEET meme coin '+fPct(neetPct,1)+' this cycle ‚Äî '+(neetPct>0?'meme momentum active; sentiment indicator mildly positive for risk.':'meme coin selling ‚Äî retail risk sentiment may be deteriorating.'));
+    }
+    if (Math.abs(gbpPct) >= 0.3 && canAlert('gbp')) {
+      pushAlert(gbpPct>0?'info':'warn',
+        'GBP/USD '+fPct(gbpPct)+' ‚Äî '+(gbpPct>0?'GBP strength / USD softness ‚Äî historically supportive for BTC.':'USD strengthening ‚Äî typically a headwind for BTC and risk assets.'));
+    }
+
+    /* ‚îÄ‚îÄ Macro context ‚îÄ‚îÄ */
+    updateMacro(btcPct24h, giltBps, ftsePct, gbpPct, cBtcGilt);
+
+    /* ‚îÄ‚îÄ Timestamp ‚îÄ‚îÄ */
+    var badge = document.getElementById('ukcLastUpdate');
+    if (badge) {
+      var n = new Date();
+      badge.textContent = 'LAST: ' + n.getHours().toString().padStart(2,'0') + ':' +
+                          n.getMinutes().toString().padStart(2,'0') + ':' +
+                          n.getSeconds().toString().padStart(2,'0');
+    }
+  }
+
+  /* First tick immediately (5s delay so DOM is ready), then every 60s ¬±2s jitter */
+  setTimeout(function() {
+    tick();
+    setInterval(function() {
+      setTimeout(tick, Math.max(0, Math.random() * 4000 - 2000));
+    }, 60000);
+  }, 5000);
 
 })();
 </script>
