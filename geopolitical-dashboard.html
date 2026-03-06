@@ -8921,7 +8921,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (Math.abs(chg) >= 4) {
           var dir = chg>0?'surges':'drops';
           ingest(sym+' '+dir+' '+Math.abs(chg).toFixed(1)+'% — significant crypto move',
-            'Price: $'+parseFloat(t.lastPrice).toLocaleString(undefined,{maximumFractionDigits:+})+
+            'Price: $'+parseFloat(t.lastPrice).toLocaleString(undefined,{maximumFractionDigits:2})+
             ' | Vol: $'+parseFloat(t.quoteVolume||0).toLocaleString(undefined,{maximumFractionDigits:0}),
             'BINANCE', {signal: Math.min(68, Math.abs(chg)*3.5), assets:[sym]});
         }
@@ -9018,6 +9018,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 4000);
   });
 
+})();
 
 /* ─── FEATURE 9 · ESCALATION CHAIN DETECTION ENGINE · #e040fb ──────────────
    Analyses sequences of geopolitical events to detect escalation chains.
