@@ -11,8 +11,9 @@ identical stories look unrelated.
 
 Solution: Two events are treated as the "same story" if:
   1. Same region (IRAN, UKRAINE, TAIWAN, etc.) — pre-filtered in SQL
-  2. Shared at least 1 high-severity keyword (SEV weight ≥ 0.70)
+  2. Shared at least 1 high-severity keyword (SEV weight ≥ 0.83)
   3. Both appeared within a 90-minute window
+  4. The existing event has not yet hit the _MAX_SRC_COUNT cap (8)
 
 When matched, the existing event's src_count is incremented, its source
 list is extended, and it is re-scored with the higher src_count.
@@ -27,12 +28,18 @@ from typing import List, Dict, Optional, Union
 from config import DB_PATH, MAX_EVENTS_DB
 from keyword_detector import dedupe_key, score_event, SEV
 
-# Keywords considered "high confidence" for corroboration matching
-_HIGH_SEV_THRESHOLD       = 0.70
+# Keywords considered "high confidence" for corroboration matching.
+# Threshold raised to 0.83 to exclude common co-occurrence words like 'war'
+# (0.82) and 'missile' (0.75) which fire on too many unrelated stories.
+# Only unambiguous action words (airstrike, bombing, invasion…) count.
+_HIGH_SEV_THRESHOLD       = 0.83
 _HIGH_SEV_KEYWORDS        = frozenset(k for k, v in SEV.items() if v >= _HIGH_SEV_THRESHOLD)
 
 # Max age of an event to be eligible for corroboration (ms)
 _CORROBORATION_WINDOW_MS  = 90 * 60 * 1000   # 90 minutes
+
+# Maximum sources an event can accumulate — prevents common-keyword runaway
+_MAX_SRC_COUNT            = 8
 
 
 def _shared_high_keywords(kws_a: list, kws_b: list) -> set:
@@ -113,6 +120,9 @@ class EventStore:
                 ).fetchall()
 
                 for row in candidates:
+                    # Skip events that have already hit the source cap
+                    if row['src_count'] >= _MAX_SRC_COUNT:
+                        continue
                     existing_kws = json.loads(row['keywords'] or '[]')
                     shared = _shared_high_keywords(new_kws, existing_kws)
                     if len(shared) >= 1 and len(shared) > len(best_shared):

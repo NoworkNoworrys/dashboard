@@ -2831,19 +2831,20 @@
           <div class="gee-mod-hdr" onclick="toggleGMod('gmod-7')">
             <span class="gee-mod-num">07</span>
             <span class="gee-mod-name">Macro Regime &amp; Volatility State Detection</span>
-            <span class="gee-mod-sum">Active regimes: Energy Shock + Risk-Off + Partial Tightening · Combined multiplier: ×1.21</span>
+            <span class="gee-mod-sum" id="liveRegimeSummary">Active regimes: Energy Shock + Risk-Off + Partial Tightening · Combined multiplier: ×1.21</span>
             <span class="gee-mod-key amb">Escalation P multiplied ×1.21 before output</span>
             <span class="gee-mod-exp">▼</span>
           </div>
           <div class="gee-mod-body">
-            <div class="gee-sec-lbl amb">◈ Active Regime Classification</div>
-            <div class="gee-regime-tags">
+            <div class="gee-sec-lbl amb">◈ Active Regime Classification <span id="liveRegimeTs" style="font-size:9px;color:var(--dim);margin-left:8px"></span></div>
+            <div class="gee-regime-tags" id="liveRegimeTags">
               <span class="gee-rtag on-energy">⚡ ENERGY SHOCK</span>
               <span class="gee-rtag on-riskoff">▼ RISK-OFF</span>
               <span class="gee-rtag on-tight">◉ TIGHTENING CYCLE (partial)</span>
               <span class="gee-rtag off">Election Cycle Volatility: INACTIVE</span>
               <span class="gee-rtag off">Liquidity Stress: INACTIVE (monitoring)</span>
             </div>
+            <div id="liveRegimeBiases" style="margin-top:8px"></div>
             <div class="gee-sec-lbl amb">◈ Conditional Multipliers Applied</div>
             <table class="gee-mtbl">
               <thead><tr><th>Variable</th><th>Energy Shock ×</th><th>Risk-Off ×</th><th>Tightening ×</th><th>Combined Final ×</th><th>Effect on Output</th></tr></thead>
@@ -9920,14 +9921,111 @@ document.addEventListener('DOMContentLoaded', function() {
       .catch(function() { /* backend offline — use IC.events only */ });
   }
 
+  /* ── Fetch live macro regime from backend ────────────────────────────── */
+  function fetchRegime() {
+    fetch('http://localhost:8765/api/regime')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var regime = d.regime || 'UNKNOWN';
+        var vix    = d.vix   != null ? d.vix.toFixed(1)   : '—';
+        var dxy    = d.dxy   != null ? d.dxy.toFixed(2)   : '—';
+        var us10y  = d.us10y != null ? d.us10y.toFixed(2) : '—';
+        var biases = d.asset_biases || {};
+        var desc   = d.regime_desc  || '';
+
+        var regimeColor = {
+          CRISIS:        '#e03030',
+          RISK_OFF:      '#e08020',
+          TRANSITIONING: '#e0c020',
+          RISK_ON:       '#28c060',
+          UNKNOWN:       '#666',
+        }[regime] || '#666';
+
+        // ── Header summary line ───────────────────────────────────────────
+        var sumEl = document.getElementById('liveRegimeSummary');
+        if (sumEl) {
+          var sumParts = ['LIVE: ' + regime];
+          if (d.vix   != null) sumParts.push('VIX ' + vix);
+          if (d.dxy   != null) sumParts.push('DXY ' + dxy);
+          if (d.us10y != null) sumParts.push('US10Y ' + us10y + '%');
+          if (desc) sumParts.push(desc.split('.')[0]);
+          sumEl.textContent = sumParts.join(' · ');
+          sumEl.style.color = regimeColor;
+        }
+
+        // ── Timestamp ─────────────────────────────────────────────────────
+        var tsEl = document.getElementById('liveRegimeTs');
+        if (tsEl) {
+          var now = new Date();
+          tsEl.textContent = 'updated ' + now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
+        }
+
+        // ── Regime tags ───────────────────────────────────────────────────
+        var tagsEl = document.getElementById('liveRegimeTags');
+        if (tagsEl) {
+          var tagMap = {
+            CRISIS:        ['🔴 CRISIS',        '#e03030'],
+            RISK_OFF:      ['▼ RISK-OFF',        '#e08020'],
+            TRANSITIONING: ['⚡ TRANSITIONING',  '#e0c020'],
+            RISK_ON:       ['▲ RISK-ON',         '#28c060'],
+            UNKNOWN:       ['◌ AWAITING DATA',   '#666'],
+          };
+          var tInfo  = tagMap[regime] || ['◌ UNKNOWN', '#666'];
+          var tLabel = tInfo[0], tColor = tInfo[1];
+
+          var html = '<span class="gee-rtag" style="border-color:' + tColor + ';color:' + tColor + ';font-weight:700">' + tLabel + '</span>';
+
+          if (d.vix   != null) html += ' <span class="gee-rtag" style="color:var(--dim)">VIX ' + vix + '</span>';
+          if (d.dxy   != null) {
+            var dxyDir = d.dxy_chg24h != null ? (d.dxy_chg24h >= 0 ? ' ▲' : ' ▼') : '';
+            html += ' <span class="gee-rtag" style="color:var(--dim)">DXY ' + dxy + dxyDir + '</span>';
+          }
+          if (d.us10y != null) {
+            var yldDir = d.yield_note ? (d.yield_note.indexOf('falling') > -1 ? ' ▼' : ' ▲') : '';
+            html += ' <span class="gee-rtag" style="color:var(--dim)">US10Y ' + us10y + '%' + yldDir + '</span>';
+          }
+          if (d.dxy_confirming === false) {
+            html += ' <span class="gee-rtag" style="color:#e0c020">⚠ DXY DIVERGING</span>';
+          }
+          if (d.yield_note) {
+            html += ' <span class="gee-rtag" style="color:var(--dim);font-size:9px">' + d.yield_note + '</span>';
+          }
+
+          tagsEl.innerHTML = html;
+        }
+
+        // ── Asset bias table ──────────────────────────────────────────────
+        var biasEl = document.getElementById('liveRegimeBiases');
+        if (biasEl && Object.keys(biases).length) {
+          var biasColors = { LONG:'#28c060', SHORT:'#e03030', CROWDED:'#e08020', NEUTRAL:'var(--dim)' };
+          var rows = '';
+          Object.keys(biases).forEach(function(asset) {
+            var b = biases[asset];
+            var color = biasColors[b.bias] || 'var(--dim)';
+            rows += '<tr>' +
+              '<td style="color:var(--text);padding:2px 6px">' + asset + '</td>' +
+              '<td style="color:' + color + ';font-weight:700;padding:2px 6px">' + b.bias + '</td>' +
+              '<td style="font-size:10px;color:var(--dim);padding:2px 6px">' + (b.reason || '') + '</td>' +
+              '</tr>';
+          });
+          biasEl.innerHTML =
+            '<div class="gee-sec-lbl amb" style="margin-top:8px">◈ Live Asset Directional Bias — VIX-derived</div>' +
+            '<table class="gee-mtbl"><thead><tr><th>Asset</th><th>Bias</th><th>Driver</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody></table>';
+        }
+      })
+      .catch(function() { /* backend offline — regime section keeps last known values */ });
+  }
+
   /* ── Init ────────────────────────────────────────────────────────────── */
   function init() {
     hookInternalTables();
     wireControls();
     render();
     fetchBackend();
+    fetchRegime();
     // Refresh every 60s in sync with pipeline cycle
-    setInterval(function() { render(); fetchBackend(); }, 60000);
+    setInterval(function() { render(); fetchBackend(); fetchRegime(); }, 60000);
   }
 
   if (document.readyState === 'loading') {
