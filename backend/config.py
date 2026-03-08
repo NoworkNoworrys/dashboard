@@ -35,24 +35,27 @@ GDELT_URL = (
 RSS_FEEDS = [
     # ── Tier 1: Wire services & global broadcasters ───────────────────────
     ('https://feeds.bbci.co.uk/news/world/rss.xml',                'BBC'),
-    ('https://www.reuters.com/arc/outboundfeeds/rss/?outputType=xml','REUTERS'),
-    ('https://rsshub.app/apnews/topics/ap-top-news',               'AP'),
-    ('https://www.aljazeera.com/xml/rss/all.xml',                   'ALJAZ'),
-    ('https://www.theguardian.com/world/rss',                       'GUARDIAN'),
-    ('https://rss.dw.com/xml/rss-en-world',                        'DW'),
-    ('https://feeds.npr.org/1004/rss.xml',                         'NPR'),
+    ('https://www.france24.com/en/rss',                            'FRANCE24'),  # replaces Reuters
+    ('https://api.axios.com/feed/',                                'AXIOS'),     # replaces AP
+    ('https://www.aljazeera.com/xml/rss/all.xml',                  'ALJAZ'),
+    ('https://www.theguardian.com/world/rss',                      'GUARDIAN'),
+    ('https://rss.dw.com/xml/rss-en-world',                       'DW'),
+    ('https://feeds.npr.org/1004/rss.xml',                        'NPR'),
     # ── Tier 2: Defence & geopolitics specialists ─────────────────────────
-    ('https://breakingdefense.com/feed',                            'BRKDEF'),
-    ('https://www.defensenews.com/arc/outboundfeeds/rss/',          'DEFNEWS'),
-    ('https://warontherocks.com/feed/',                             'WOTR'),
-    ('https://foreignpolicy.com/feed/',                             'FP'),
-    ('https://www.globalsecurity.org/rss/newslinks.rss',           'GLOBSEC'),
-    # ── Tier 3: Regional specialists (Ukraine / ME / Asia) ────────────────
-    ('https://kyivindependent.com/national/feed/',                  'KYIV'),
-    ('https://www.jpost.com/rss/rssfeedsheadlines.aspx',           'JPOST'),
-    ('https://www.middleeasteye.net/rss',                           'MEE'),
-    ('https://thediplomat.com/feed/',                               'DIPLOMAT'),
-    ('https://www.scmp.com/rss/91/feed',                           'SCMP'),
+    ('https://taskandpurpose.com/feed/',                           'TASKPURP'), # replaces BRKDEF (403)
+    ('https://www.defensenews.com/arc/outboundfeeds/rss/',         'DEFNEWS'),
+    ('https://warontherocks.com/feed/',                            'WOTR'),
+    ('https://foreignpolicy.com/feed/',                            'FP'),
+    ('https://www.rfi.fr/en/rss',                                 'RFI'),      # replaces GLOBSEC
+    # ── Tier 3: Regional specialists (Ukraine / ME / Asia / S.Asia) ──────
+    ('https://www.themoscowtimes.com/rss/news',                    'MOSNEWS'),  # replaces KYIV
+    ('https://www.jpost.com/rss/rssfeedsheadlines.aspx',          'JPOST'),
+    ('https://www.middleeasteye.net/rss',                          'MEE'),
+    ('https://www.timesofisrael.com/feed/',                        'TOI'),
+    ('https://english.alaraby.co.uk/rss.xml',                      'ALARABY'),
+    ('https://thediplomat.com/feed/',                              'DIPLOMAT'),
+    ('https://www.scmp.com/rss/91/feed',                          'SCMP'),
+    ('https://www.dawn.com/feeds/home',                            'DAWN'),
 ]
 
 # ── Reddit ───────────────────────────────────────────────────────────────────

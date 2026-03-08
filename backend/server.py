@@ -7,7 +7,7 @@ import json
 import time
 from typing import AsyncIterator, Set
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
@@ -60,7 +60,7 @@ def broadcast_market(prices: dict):
 # ── SSE stream endpoint ───────────────────────────────────────────────────────
 
 @app.get('/stream')
-async def stream(request):
+async def stream(request: Request):
     """
     Server-Sent Events endpoint.
     The frontend connects here and receives real-time events and market data.
