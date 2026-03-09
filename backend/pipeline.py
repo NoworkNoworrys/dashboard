@@ -5,6 +5,7 @@ deduplicating via EventStore, and broadcasting new events via SSE.
 """
 import asyncio
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict
 
@@ -27,6 +28,14 @@ _broadcast_market = None
 
 # Cycle counter — used to throttle expensive / rate-limited sources
 _cycle_n = 0
+
+# Rolling price-change history for correlation computation (last 30 cycles)
+_price_history: deque = deque(maxlen=30)
+
+
+def get_price_history() -> list:
+    """Return a copy of the rolling price-change snapshot list."""
+    return list(_price_history)
 
 
 def set_broadcast_fns(event_fn, market_fn):
@@ -151,6 +160,11 @@ async def _pipeline_cycle():
     # Prune + decay old events every cycle
     await asyncio.get_event_loop().run_in_executor(_executor, store.prune)
     await asyncio.get_event_loop().run_in_executor(_executor, store.decay_old_events)
+
+    # Store price-change snapshot for rolling correlation (chg24h per ticker)
+    if market:
+        snapshot = {k: (v.get('chg24h') if v else None) for k, v in market.items()}
+        _price_history.append(snapshot)
 
     # Broadcast market prices
     if market and _broadcast_market:

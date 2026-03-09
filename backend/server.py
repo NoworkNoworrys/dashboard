@@ -180,6 +180,21 @@ async def api_learning(limit: int = 200):
         src_counter[e.get('source', '?')] += 1
     top_sources = src_counter.most_common(8)
 
+    # Signal quality calibration — corroboration rate per bucket
+    # "Predicted" = bucket midpoint (what we'd expect if scoring is accurate)
+    # "Actual"    = % of events that got srcCount ≥ 2 (multi-source confirmed)
+    calibration = {}
+    for bk, lo, hi in [('20-39', 20, 39), ('40-59', 40, 59),
+                        ('60-79', 60, 79), ('80-100', 80, 100)]:
+        bk_evts = [e for e in events if lo <= e.get('signal', 0) <= hi]
+        n    = len(bk_evts)
+        corr = sum(1 for e in bk_evts if e.get('srcCount', 1) >= 2)
+        calibration[bk] = {
+            'total':     n,
+            'rate':      round(corr / n * 100) if n > 0 else None,
+            'predicted': (lo + hi + 1) // 2,
+        }
+
     return JSONResponse(content={
         'metrics': {
             'total':     total,
@@ -192,6 +207,7 @@ async def api_learning(limit: int = 200):
         'top_keywords': dict(top_keywords),
         'top_assets':   dict(top_assets),
         'top_sources':  dict(top_sources),
+        'calibration':  calibration,
         'events':       events,
         'ts':           int(time.time() * 1000),
     })
@@ -353,6 +369,56 @@ async def api_regime():
         'yield_note':    yield_note,
         'asset_biases':  asset_biases,
         'ts':            int(time.time() * 1000),
+    })
+
+
+@app.get('/api/correlation')
+async def api_correlation():
+    """
+    Compute pairwise Pearson correlation on 24h price-change percentages
+    accumulated across the last 30 pipeline cycles (~30 min of data).
+    Returns the correlation matrix for WTI, GLD, DXY, BTC, VIX.
+    """
+    from pipeline import get_price_history
+    history = get_price_history()
+    assets  = ['WTI', 'GLD', 'DXY', 'BTC', 'VIX']
+
+    if len(history) < 5:
+        return JSONResponse(content={
+            'ready':     False,
+            'snapshots': len(history),
+            'assets':    assets,
+        })
+
+    def pearson(ak: str, bk: str):
+        pairs = [
+            (snap.get(ak), snap.get(bk))
+            for snap in history
+            if snap.get(ak) is not None and snap.get(bk) is not None
+        ]
+        if len(pairs) < 3:
+            return None
+        n  = len(pairs)
+        xs = [p[0] for p in pairs]
+        ys = [p[1] for p in pairs]
+        mx, my = sum(xs) / n, sum(ys) / n
+        num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+        sx  = sum((x - mx) ** 2 for x in xs) ** 0.5
+        sy  = sum((y - my) ** 2 for y in ys) ** 0.5
+        if sx == 0 or sy == 0:
+            return None
+        return round(num / (sx * sy), 2)
+
+    matrix = {
+        a: {b: (1.0 if a == b else pearson(a, b)) for b in assets}
+        for a in assets
+    }
+    return JSONResponse(content={
+        'ready':     True,
+        'snapshots': len(history),
+        'assets':    assets,
+        'matrix':    matrix,
+        'ts':        int(time.time() * 1000),
     })
 
 

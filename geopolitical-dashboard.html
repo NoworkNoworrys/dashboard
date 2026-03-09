@@ -3965,8 +3965,8 @@
 
     <!-- Cross-asset correlation grid -->
     <div class="scan-corr-wrap">
-      <div class="scan-corr-title">Live Cross-Asset Correlation State — 30-day rolling · Regime-adjusted</div>
-      <div class="scan-corr-grid">
+      <div class="scan-corr-title" id="liveCorrTitle">Live Cross-Asset Correlation State — loading…</div>
+      <div class="scan-corr-grid" id="liveCorrGrid">
         <div class="scan-corr-hdr"></div>
         <div class="scan-corr-hdr">OIL</div>
         <div class="scan-corr-hdr">GOLD</div>
@@ -4160,7 +4160,7 @@
         </div>
 
         <!-- Calibration chart -->
-        <div class="lrn-cal-section">
+        <div class="lrn-cal-section" id="liveCalSection">
           <div class="lrn-col-title" style="margin-top:0">GEE Calibration — Predicted vs Actual by Horizon</div>
 
           <div class="lrn-cal-row">
@@ -9922,8 +9922,85 @@ document.addEventListener('DOMContentLoaded', function() {
         updateSourceBar();
         renderTable();
         drawTrend();
+        updateCalibration(data.calibration);
       })
       .catch(function() { /* backend offline — use IC.events only */ });
+  }
+
+  /* ── Calibration update — called from fetchBackend() ────────────────── */
+  function updateCalibration(cal) {
+    var el = document.getElementById('liveCalSection');
+    if (!el || !cal) return;
+    var labels = { '20-39': 'Signal 20–39', '40-59': 'Signal 40–59',
+                   '60-79': 'Signal 60–79', '80-100': 'Signal 80–100' };
+    var html = '<div class="lrn-col-title" style="margin-top:0">' +
+               'Signal Calibration — Multi-source corroboration rate (live DB)</div>';
+    Object.keys(cal).forEach(function(bk) {
+      var c = cal[bk];
+      if (!c.total) return;
+      var pred = c.predicted;
+      var act  = c.rate != null ? c.rate : 0;
+      var err  = act - pred;
+      var errCls = Math.abs(err) <= 8 ? 'good' : 'ok';
+      var errSign = err >= 0 ? '+' : '';
+      html += '<div class="lrn-cal-row">' +
+        '<div class="lrn-cal-horizon"><span>' + labels[bk] + '</span>' +
+        '<span>' + c.total + ' events</span></div>' +
+        '<div class="lrn-cal-bar-wrap">' +
+          '<div class="lrn-cal-bar-lbl">Expected</div>' +
+          '<div class="lrn-cal-track"><div class="lrn-cal-fill pred" style="width:' + pred + '%"></div></div>' +
+          '<div class="lrn-cal-pct">' + pred + '%</div>' +
+        '</div>' +
+        '<div class="lrn-cal-bar-wrap">' +
+          '<div class="lrn-cal-bar-lbl">Corroborated</div>' +
+          '<div class="lrn-cal-track"><div class="lrn-cal-fill act" style="width:' + act + '%"></div></div>' +
+          '<div class="lrn-cal-pct">' + act + '%</div>' +
+        '</div>' +
+        '<div class="lrn-cal-error ' + errCls + '">Delta: <span>' +
+          errSign + err + 'pp</span> · ' +
+          (errCls === 'good' ? 'Model well-calibrated' : 'Check signal scoring') +
+        '</div></div>';
+    });
+    el.innerHTML = html;
+  }
+
+  /* ── Fetch live correlation matrix ──────────────────────────────────── */
+  function fetchCorrelation() {
+    fetch('http://localhost:8765/api/correlation')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var grid = document.getElementById('liveCorrGrid');
+        if (!grid) return;
+        if (!d.ready) {
+          grid.innerHTML = '<div style="padding:12px;color:var(--dim);font-size:10px">' +
+            'Collecting price data… (' + (d.snapshots||0) + '/5 cycles needed)</div>';
+          return;
+        }
+        var assets = d.assets;
+        var matrix = d.matrix;
+        var lbl = { WTI:'OIL', GLD:'GOLD', DXY:'DXY', BTC:'BTC', VIX:'VIX' };
+        var html = '<div class="scan-corr-hdr"></div>';
+        assets.forEach(function(a) {
+          html += '<div class="scan-corr-hdr">' + (lbl[a]||a) + '</div>';
+        });
+        assets.forEach(function(a) {
+          html += '<div class="scan-corr-row-lbl">' + (lbl[a]||a) + '</div>';
+          assets.forEach(function(b) {
+            if (a === b) { html += '<div class="scan-corr-cell diag">—</div>'; return; }
+            var v = matrix[a] && matrix[a][b];
+            if (v == null) { html += '<div class="scan-corr-cell nt">—</div>'; return; }
+            var cls = v >= 0.5 ? 'sp' : v >= 0.2 ? 'mp' : v <= -0.5 ? 'sn' : v <= -0.2 ? 'mn' : 'nt';
+            html += '<div class="scan-corr-cell ' + cls + '">' +
+              (v >= 0 ? '+' : '') + v.toFixed(2) + '</div>';
+          });
+        });
+        grid.innerHTML = html;
+        var titleEl = document.getElementById('liveCorrTitle');
+        if (titleEl) titleEl.textContent =
+          'Live Cross-Asset Correlation — ' + d.snapshots + '-cycle rolling · ' +
+          new Date(d.ts).toLocaleTimeString();
+      })
+      .catch(function() {});
   }
 
   /* ── Fetch live macro regime from backend ────────────────────────────── */
@@ -10066,8 +10143,9 @@ document.addEventListener('DOMContentLoaded', function() {
     render();
     fetchBackend();
     fetchRegime();
+    fetchCorrelation();
     // Refresh every 60s in sync with pipeline cycle
-    setInterval(function() { render(); fetchBackend(); fetchRegime(); }, 60000);
+    setInterval(function() { render(); fetchBackend(); fetchRegime(); fetchCorrelation(); }, 60000);
   }
 
   if (document.readyState === 'loading') {
