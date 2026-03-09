@@ -236,6 +236,38 @@ class EventStore:
             """, (max_rows,))
             self._conn.commit()
 
+    def decay_old_events(self) -> None:
+        """
+        Apply age-based signal caps so old events don't crowd out fresh ones.
+
+        Uses MIN(signal, cap) — idempotent, only ever reduces signal, safe to
+        call every cycle without compounding errors.
+
+        Age brackets:
+          6–24 h  → cap at 70  (still contextually relevant)
+          24–72 h → cap at 50  (background context)
+          >72 h   → cap at 25  (historical record only)
+        """
+        now_ms = int(time.time() * 1000)
+        h6  = now_ms - 6  * 3600 * 1000
+        h24 = now_ms - 24 * 3600 * 1000
+        h72 = now_ms - 72 * 3600 * 1000
+
+        with self._lock:
+            self._conn.execute(
+                "UPDATE events SET signal = MIN(signal, 70)"
+                " WHERE ts < ? AND ts >= ?", (h6, h24)
+            )
+            self._conn.execute(
+                "UPDATE events SET signal = MIN(signal, 50)"
+                " WHERE ts < ? AND ts >= ?", (h24, h72)
+            )
+            self._conn.execute(
+                "UPDATE events SET signal = MIN(signal, 25)"
+                " WHERE ts < ?", (h72,)
+            )
+            self._conn.commit()
+
     def count(self) -> int:
         with self._lock:
             return self._conn.execute(

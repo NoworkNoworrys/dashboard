@@ -25,6 +25,9 @@ _executor = ThreadPoolExecutor(max_workers=6)
 _broadcast_event  = None
 _broadcast_market = None
 
+# Cycle counter — used to throttle expensive / rate-limited sources
+_cycle_n = 0
+
 
 def set_broadcast_fns(event_fn, market_fn):
     """Called by server.py to wire up the SSE broadcast callbacks."""
@@ -39,19 +42,22 @@ async def _run_sync(fn, *args):
     return await loop.run_in_executor(_executor, fn, *args)
 
 
-async def _ingest_events() -> List[Dict]:
+async def _ingest_events(run_gdelt: bool = True) -> List[Dict]:
     """
     Fetch from all news sources concurrently.
+    run_gdelt=False skips GDELT to avoid rate-limiting on most cycles.
     return_exceptions=True ensures one failure doesn't abort the rest.
     """
-    results = await asyncio.gather(
-        _run_sync(fetch_gdelt),
+    tasks = [
         _run_sync(fetch_rss),
         _run_sync(fetch_reddit),
-        return_exceptions=True,
-    )
+    ]
+    if run_gdelt:
+        tasks.append(_run_sync(fetch_gdelt))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     events = []
-    names  = ['GDELT', 'RSS', 'Reddit']
+    names  = ['RSS', 'Reddit'] + (['GDELT'] if run_gdelt else [])
     for name, r in zip(names, results):
         if isinstance(r, Exception):
             print(f'[PIPELINE] {name} raised: {r}')
@@ -68,48 +74,83 @@ async def _ingest_market() -> Dict:
     return result or {}
 
 
+def _regime_multiplier(market: Dict) -> float:
+    """
+    Return a signal multiplier based on VIX level.
+    CRISIS regime amplifies signals (same event = bigger deal during panic).
+    RISK_ON dampens signals (markets are complacent, events matter less).
+    """
+    vix = (market.get('VIX') or {}).get('price')
+    if vix is None:
+        return 1.0
+    if vix >= 30:
+        return 1.20   # CRISIS — amplify
+    if vix >= 20:
+        return 1.10   # RISK_OFF
+    if vix < 15:
+        return 0.90   # RISK_ON — dampen
+    return 1.0        # TRANSITIONING
+
+
 async def _pipeline_cycle():
     """One complete pipeline run: fetch → deduplicate → store → broadcast."""
+    global _cycle_n
+    _cycle_n += 1
+
     store   = get_store()
     t_start = time.time()
-    print(f'[PIPELINE] cycle starting...')
+
+    # GDELT is rate-limited to ~12 req/hour — only call every 5 cycles (~5 min)
+    run_gdelt = (_cycle_n % 5 == 1)
+    print(f'[PIPELINE] cycle {_cycle_n} starting… (GDELT: {"yes" if run_gdelt else "skip"})')
 
     # Run news ingestion and market data concurrently
-    events_task = asyncio.create_task(_ingest_events())
+    events_task = asyncio.create_task(_ingest_events(run_gdelt=run_gdelt))
     market_task = asyncio.create_task(_ingest_market())
 
     events = await events_task
     market = await market_task
 
+    # Compute regime multiplier from live VIX
+    mult = _regime_multiplier(market)
+    regime_label = (
+        'CRISIS'       if mult >= 1.20 else
+        'RISK_OFF'     if mult >= 1.10 else
+        'RISK_ON'      if mult <  1.00 else
+        'NEUTRAL'
+    )
+
     # Process and broadcast new events
-    new_count   = 0
+    new_count    = 0
     corroborated = 0
     for evt in events:
-        # Score filter — skip noise below signal 20
-        if evt.get('signal', 0) < 20:
+        raw_signal = evt.get('signal', 0)
+        if raw_signal < 20:
             continue
+
+        # Apply regime multiplier before storing
+        if mult != 1.0:
+            evt['signal'] = min(100, max(0, round(raw_signal * mult)))
 
         result = await asyncio.get_event_loop().run_in_executor(
             _executor, store.insert, evt
         )
 
         if result is True:
-            # Brand-new event — broadcast as-is
             if _broadcast_event:
                 _broadcast_event(evt)
             new_count += 1
 
         elif isinstance(result, dict):
-            # Existing event corroborated by a new source — re-broadcast
-            # the enriched version so the dashboard updates src_count + signal
             if _broadcast_event:
                 _broadcast_event(result)
             corroborated += 1
 
         # result is False → exact duplicate, discard silently
 
-    # Prune database
+    # Prune + decay old events every cycle
     await asyncio.get_event_loop().run_in_executor(_executor, store.prune)
+    await asyncio.get_event_loop().run_in_executor(_executor, store.decay_old_events)
 
     # Broadcast market prices
     if market and _broadcast_market:
@@ -117,9 +158,10 @@ async def _pipeline_cycle():
 
     elapsed = time.time() - t_start
     print(
-        f'[PIPELINE] cycle done in {elapsed:.1f}s — '
+        f'[PIPELINE] cycle {_cycle_n} done in {elapsed:.1f}s — '
         f'{len(events)} fetched, {new_count} new, '
         f'{corroborated} corroborated, '
+        f'regime: {regime_label} (×{mult}), '
         f'market tickers: {list(market.keys())}'
     )
 
