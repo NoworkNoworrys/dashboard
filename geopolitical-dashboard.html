@@ -2017,6 +2017,37 @@
     .ee-log-action.dim   { color:var(--dim); }
     .ee-log-msg     { flex:1; color:var(--text); line-height:1.5; }
 
+    /* ── EE Analytics ──────────────────────────────────────────────────────── */
+    .ee-analytics { margin-top: 16px; }
+    .ee-an-header { font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#ff9500; border-bottom:1px solid rgba(255,149,0,0.25); padding-bottom:8px; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+    .ee-an-header span { font-size:8px; color:var(--dim); font-weight:normal; letter-spacing:0; }
+    .ee-an-kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px; }
+    @media (max-width:900px) { .ee-an-kpis { grid-template-columns:repeat(3,1fr); } }
+    .ee-an-kpi { background:var(--bg2); border:1px solid var(--border); border-top:2px solid rgba(255,149,0,0.35); padding:10px 12px; }
+    .ee-an-kpi-lbl { font-size:8px; color:var(--dim); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:5px; }
+    .ee-an-kpi-val { font-size:20px; font-weight:700; color:#ff9500; line-height:1; }
+    .ee-an-kpi-val.green { color:var(--green); }
+    .ee-an-kpi-val.red   { color:var(--red);   }
+    .ee-an-kpi-val.dim   { color:var(--dim);   font-size:14px; }
+    .ee-an-kpi-sub { font-size:8px; color:var(--dim); margin-top:4px; }
+    .ee-an-wr-row  { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+    .ee-an-wr-card { background:var(--bg2); border:1px solid var(--border); padding:10px 12px; text-align:center; }
+    .ee-an-wr-tf   { font-size:8px; color:var(--dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
+    .ee-an-wr-val  { font-size:26px; font-weight:700; color:#ff9500; }
+    .ee-an-wr-val.good { color:var(--green); }
+    .ee-an-wr-val.bad  { color:var(--red);   }
+    .ee-an-wr-sub  { font-size:8px; color:var(--dim); margin-top:3px; }
+    .ee-an-charts-full  { background:var(--bg2); border:1px solid var(--border); padding:12px 14px; margin-bottom:12px; }
+    .ee-an-charts-2col  { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+    @media (max-width:700px) { .ee-an-charts-2col { grid-template-columns:1fr; } }
+    .ee-an-chart-panel  { background:var(--bg2); border:1px solid var(--border); padding:12px 14px; overflow:hidden; }
+    .ee-an-chart-title  { font-size:9px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--dim); margin-bottom:8px; }
+    .ee-an-canvas { display:block; max-width:100%; }
+    .ee-an-dur-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .ee-an-dur-cell { background:var(--bg3); border:1px solid var(--border); padding:7px 10px; }
+    .ee-an-dur-lbl  { font-size:8px; color:var(--dim); text-transform:uppercase; letter-spacing:0.5px; }
+    .ee-an-dur-val  { font-size:14px; font-weight:700; color:var(--text); margin-top:2px; }
+
   </style>
 </head>
 <body>
@@ -4875,6 +4906,100 @@
         <div id="eeActivityLog"><div class="ee-placeholder">No activity yet.</div></div>
       </div>
     </div>
+
+    <!-- ── Strategy Analytics ─────────────────────────────────────── -->
+    <div class="ee-analytics" id="eeAnalytics">
+
+      <div class="ee-an-header">
+        &#9083; Strategy Analytics
+        <span>Updates after each closed trade &middot; Canvas charts</span>
+      </div>
+
+      <!-- Win rate: Today / Week / All Time -->
+      <div class="ee-an-wr-row">
+        <div class="ee-an-wr-card">
+          <div class="ee-an-wr-tf">Win Rate — Today</div>
+          <div class="ee-an-wr-val dim" id="eeAnWinDay">—</div>
+          <div class="ee-an-wr-sub" id="eeAnWinDaySub">No trades today</div>
+        </div>
+        <div class="ee-an-wr-card">
+          <div class="ee-an-wr-tf">Win Rate — 7 Days</div>
+          <div class="ee-an-wr-val dim" id="eeAnWinWeek">—</div>
+          <div class="ee-an-wr-sub" id="eeAnWinWeekSub">No trades this week</div>
+        </div>
+        <div class="ee-an-wr-card">
+          <div class="ee-an-wr-tf">Win Rate — All Time</div>
+          <div class="ee-an-wr-val dim" id="eeAnWinAll">—</div>
+          <div class="ee-an-wr-sub" id="eeAnWinAllSub">No closed trades</div>
+        </div>
+      </div>
+
+      <!-- Core KPIs -->
+      <div class="ee-an-kpis">
+        <div class="ee-an-kpi">
+          <div class="ee-an-kpi-lbl">Max Drawdown</div>
+          <div class="ee-an-kpi-val red" id="eeAnMaxDD">—</div>
+          <div class="ee-an-kpi-sub">Peak-to-trough decline</div>
+        </div>
+        <div class="ee-an-kpi">
+          <div class="ee-an-kpi-lbl">Avg Win</div>
+          <div class="ee-an-kpi-val green" id="eeAnAvgWin">—</div>
+          <div class="ee-an-kpi-sub">Mean winning trade %</div>
+        </div>
+        <div class="ee-an-kpi">
+          <div class="ee-an-kpi-lbl">Avg Loss</div>
+          <div class="ee-an-kpi-val red" id="eeAnAvgLoss">—</div>
+          <div class="ee-an-kpi-sub">Mean losing trade %</div>
+        </div>
+        <div class="ee-an-kpi">
+          <div class="ee-an-kpi-lbl">Profit Factor</div>
+          <div class="ee-an-kpi-val" id="eeAnPF">—</div>
+          <div class="ee-an-kpi-sub">Gross wins / gross losses</div>
+        </div>
+        <div class="ee-an-kpi">
+          <div class="ee-an-kpi-lbl">Expectancy</div>
+          <div class="ee-an-kpi-val" id="eeAnExpect">—</div>
+          <div class="ee-an-kpi-sub">Avg outcome per trade</div>
+        </div>
+      </div>
+
+      <!-- Equity curve (full width) -->
+      <div class="ee-an-charts-full">
+        <div class="ee-an-chart-title">Cumulative Profit Curve (USD)</div>
+        <canvas class="ee-an-canvas" id="eeChartEquity" height="160"></canvas>
+      </div>
+
+      <!-- Win/loss distribution + Duration stats -->
+      <div class="ee-an-charts-2col">
+        <div class="ee-an-chart-panel">
+          <div class="ee-an-chart-title">Win / Loss Distribution</div>
+          <canvas class="ee-an-canvas" id="eeChartDist" height="140"></canvas>
+        </div>
+        <div class="ee-an-chart-panel">
+          <div class="ee-an-chart-title">Trade Duration Statistics</div>
+          <div class="ee-an-dur-grid" style="margin-bottom:10px">
+            <div class="ee-an-dur-cell"><div class="ee-an-dur-lbl">Avg Duration</div><div class="ee-an-dur-val" id="eeAnAvgDur">—</div></div>
+            <div class="ee-an-dur-cell"><div class="ee-an-dur-lbl">Shortest</div>   <div class="ee-an-dur-val" id="eeAnMinDur">—</div></div>
+            <div class="ee-an-dur-cell"><div class="ee-an-dur-lbl">Longest</div>    <div class="ee-an-dur-val" id="eeAnMaxDur">—</div></div>
+          </div>
+          <div class="ee-an-chart-title" style="margin-top:8px">Trades per Asset</div>
+          <canvas class="ee-an-canvas" id="eeChartAsset" height="140"></canvas>
+        </div>
+      </div>
+
+      <!-- Asset + Region breakdowns -->
+      <div class="ee-an-charts-2col">
+        <div class="ee-an-chart-panel">
+          <div class="ee-an-chart-title">Performance by Asset</div>
+          <canvas class="ee-an-canvas" id="eeChartAssetPnl" height="160"></canvas>
+        </div>
+        <div class="ee-an-chart-panel">
+          <div class="ee-an-chart-title">Performance by Region</div>
+          <canvas class="ee-an-canvas" id="eeChartRegion" height="160"></canvas>
+        </div>
+      </div>
+
+    </div><!-- /ee-analytics -->
 
   </div><!-- /ee-wrap -->
 

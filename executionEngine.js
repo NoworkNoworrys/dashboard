@@ -454,6 +454,8 @@
     // Show/hide live mode warning
     var warn = document.getElementById('eeLiveWarning');
     if (warn) warn.classList.toggle('show', _cfg.mode === 'LIVE');
+    // Refresh strategy analytics panel
+    renderAnalytics();
   }
 
   function renderStatusBar() {
@@ -595,6 +597,428 @@
     if (d > 0) return d + 'd ago';
     if (h > 0) return h + 'h ago';
     return m + 'm ago';
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════════════
+     STRATEGY ANALYTICS
+     ══════════════════════════════════════════════════════════════════════════════ */
+
+  /* Compute all analytics metrics from closed trade history */
+  function calcAnalytics() {
+    var closed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
+    var sorted = closed.slice().sort(function (a, b) {
+      return new Date(a.timestamp_close) - new Date(b.timestamp_close);
+    });
+
+    var wins   = closed.filter(function (t) { return (t.pnl_usd || 0) > 0; });
+    var losses = closed.filter(function (t) { return (t.pnl_usd || 0) <= 0; });
+
+    /* Equity curve ─ cumulative P&L */
+    var equity = [];
+    var cumPnl = 0;
+    sorted.forEach(function (t) {
+      cumPnl += (t.pnl_usd || 0);
+      equity.push({ ts: t.timestamp_close, bal: cumPnl });
+    });
+
+    /* Max drawdown */
+    var maxDDPct = 0, maxDDUsd = 0, peak = 0, running = 0;
+    sorted.forEach(function (t) {
+      running += (t.pnl_usd || 0);
+      if (running > peak) peak = running;
+      var dd = peak - running;
+      if (dd > maxDDUsd) {
+        maxDDUsd = dd;
+        maxDDPct = peak > 0 ? dd / peak * 100 : 0;
+      }
+    });
+
+    /* Averages */
+    function avg(arr, key) {
+      return arr.length ? arr.reduce(function (s, t) { return s + (t[key] || 0); }, 0) / arr.length : 0;
+    }
+    var avgWinPct  = avg(wins,   'pnl_pct');
+    var avgLossPct = avg(losses, 'pnl_pct');
+    var avgWinUsd  = avg(wins,   'pnl_usd');
+    var avgLossUsd = avg(losses, 'pnl_usd');
+
+    /* Profit factor */
+    var grossWins = wins.reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
+    var grossLoss = Math.abs(losses.reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0));
+    var profitFactor = grossLoss > 0 ? grossWins / grossLoss : (grossWins > 0 ? Infinity : null);
+
+    /* Expectancy */
+    var winRate    = closed.length ? wins.length / closed.length : 0;
+    var expectancy = winRate * avgWinUsd + (1 - winRate) * avgLossUsd;
+
+    /* Timeframe win rates */
+    var now = Date.now();
+    function tfStats(sinceMs) {
+      var tf = closed.filter(function (t) {
+        return sinceMs === null ||
+          (now - new Date(t.timestamp_close).getTime()) <= sinceMs;
+      });
+      var w = tf.filter(function (t) { return (t.pnl_usd || 0) > 0; }).length;
+      return { wins: w, losses: tf.length - w, total: tf.length,
+               pct: tf.length ? Math.round(w / tf.length * 100) : null };
+    }
+    var wrDay  = tfStats(86400000);
+    var wrWeek = tfStats(604800000);
+    var wrAll  = tfStats(null);
+
+    /* Duration stats (hours) */
+    var durs = sorted.filter(function (t) {
+      return t.timestamp_close && t.timestamp_open;
+    }).map(function (t) {
+      return (new Date(t.timestamp_close) - new Date(t.timestamp_open)) / 3600000;
+    });
+    var avgDur = durs.length ? durs.reduce(function (s, v) { return s + v; }, 0) / durs.length : null;
+    var minDur = durs.length ? Math.min.apply(null, durs) : null;
+    var maxDur = durs.length ? Math.max.apply(null, durs) : null;
+
+    /* Per-asset breakdown */
+    var assetMap = {};
+    closed.forEach(function (t) {
+      var k = t.asset || 'Unknown';
+      if (!assetMap[k]) assetMap[k] = { wins: 0, losses: 0, pnl_usd: 0 };
+      if ((t.pnl_usd || 0) > 0) assetMap[k].wins++; else assetMap[k].losses++;
+      assetMap[k].pnl_usd += (t.pnl_usd || 0);
+    });
+
+    /* Per-region breakdown */
+    var regionMap = {};
+    closed.forEach(function (t) {
+      var k = t.region || 'GLOBAL';
+      if (!regionMap[k]) regionMap[k] = { wins: 0, losses: 0, pnl_usd: 0 };
+      if ((t.pnl_usd || 0) > 0) regionMap[k].wins++; else regionMap[k].losses++;
+      regionMap[k].pnl_usd += (t.pnl_usd || 0);
+    });
+
+    /* P&L distribution buckets */
+    var buckets = { '<-5%': 0, '-5~-2%': 0, '-2~0%': 0, '0~2%': 0, '2~5%': 0, '>5%': 0 };
+    closed.forEach(function (t) {
+      var p = t.pnl_pct || 0;
+      if      (p < -5) buckets['<-5%']++;
+      else if (p < -2) buckets['-5~-2%']++;
+      else if (p <  0) buckets['-2~0%']++;
+      else if (p <  2) buckets['0~2%']++;
+      else if (p <  5) buckets['2~5%']++;
+      else             buckets['>5%']++;
+    });
+
+    return {
+      closed: closed.length, equity: equity,
+      maxDDPct: maxDDPct, maxDDUsd: maxDDUsd,
+      avgWinPct: avgWinPct, avgLossPct: avgLossPct,
+      avgWinUsd: avgWinUsd, avgLossUsd: avgLossUsd,
+      profitFactor: profitFactor, expectancy: expectancy,
+      wrDay: wrDay, wrWeek: wrWeek, wrAll: wrAll,
+      avgDur: avgDur, minDur: minDur, maxDur: maxDur,
+      assetMap: assetMap, regionMap: regionMap, buckets: buckets
+    };
+  }
+
+  /* ── Canvas chart helpers ──────────────────────────────────────────────── */
+
+  function _setupCanvas(id) {
+    var el = document.getElementById(id);
+    if (!el) return null;
+    var dpr  = window.devicePixelRatio || 1;
+    var cw   = el.offsetWidth || 400;
+    var ch   = parseInt(el.getAttribute('height'), 10) || 160;
+    el.width  = Math.round(cw * dpr);
+    el.height = Math.round(ch * dpr);
+    el.style.width  = cw + 'px';
+    el.style.height = ch + 'px';
+    var ctx = el.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx: ctx, w: cw, h: ch };
+  }
+
+  function _clearCanvas(ctx, w, h) {
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  function _noData(ctx, w, h, msg) {
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(msg || 'No data yet', w / 2, h / 2);
+  }
+
+  /* Cumulative equity / P&L curve */
+  function drawEquityCurve(canvasId, points) {
+    var c = _setupCanvas(canvasId);
+    if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h;
+    _clearCanvas(ctx, w, h);
+
+    if (!points || !points.length) { _noData(ctx, w, h, 'No closed trades yet'); return; }
+
+    var pad = { t: 10, r: 10, b: 24, l: 52 };
+    var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+    var allVals = [0].concat(points.map(function (p) { return p.bal; }));
+    var minV = Math.min.apply(null, allVals), maxV = Math.max.apply(null, allVals);
+    var range = maxV - minV || 1;
+
+    /* Horizontal grid */
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for (var gi = 0; gi <= 4; gi++) {
+      var gy = pad.t + ch - (gi / 4) * ch;
+      ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(pad.l + cw, gy); ctx.stroke();
+      var lv = minV + (gi / 4) * range;
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.font = '8px monospace'; ctx.textAlign = 'right';
+      ctx.fillText((lv >= 0 ? '+$' : '-$') + _num(Math.abs(lv)), pad.l - 4, gy + 3);
+    }
+
+    /* Zero dashed line */
+    var zeroY = pad.t + ch - ((0 - minV) / range * ch);
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(pad.l, zeroY); ctx.lineTo(pad.l + cw, zeroY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    /* Plot coordinates */
+    var coords = allVals.map(function (v, i) {
+      return { x: pad.l + (i / (allVals.length - 1 || 1)) * cw,
+               y: pad.t + ch - ((v - minV) / range * ch) };
+    });
+
+    var lastBal  = allVals[allVals.length - 1];
+    var lineCol  = lastBal >= 0 ? '#00c8a0' : '#ff4444';
+    var fillTop  = lastBal >= 0 ? 'rgba(0,200,160,0.22)' : 'rgba(255,68,68,0.22)';
+
+    /* Fill under curve */
+    var grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
+    grad.addColorStop(0, fillTop); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath();
+    ctx.moveTo(coords[0].x, pad.t + ch);
+    coords.forEach(function (p) { ctx.lineTo(p.x, p.y); });
+    ctx.lineTo(coords[coords.length - 1].x, pad.t + ch);
+    ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+
+    /* Line */
+    ctx.beginPath();
+    ctx.moveTo(coords[0].x, coords[0].y);
+    coords.slice(1).forEach(function (p) { ctx.lineTo(p.x, p.y); });
+    ctx.strokeStyle = lineCol; ctx.lineWidth = 2; ctx.stroke();
+
+    /* Terminal dot */
+    var last = coords[coords.length - 1];
+    ctx.beginPath(); ctx.arc(last.x, last.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = lineCol; ctx.fill();
+  }
+
+  /* P&L distribution — vertical bar chart */
+  function drawDistribution(canvasId, buckets) {
+    var c = _setupCanvas(canvasId);
+    if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h;
+    _clearCanvas(ctx, w, h);
+
+    var pad  = { t: 14, r: 10, b: 38, l: 20 };
+    var cw   = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+    var lbls = Object.keys(buckets);
+    var vals = lbls.map(function (k) { return buckets[k]; });
+    var maxV = Math.max.apply(null, vals) || 1;
+    var bw   = cw / lbls.length;
+    var bp   = 4;
+    var cols = ['#cc3333','#ee6644','#ffaa44','#44aa88','#00c8a0','#00ddbb'];
+
+    lbls.forEach(function (lbl, i) {
+      var v   = vals[i];
+      var bh  = ch * (v / maxV);
+      var x   = pad.l + i * bw + bp;
+      var bww = bw - bp * 2;
+      var y   = pad.t + ch - bh;
+
+      ctx.fillStyle = cols[i] || '#888';
+      ctx.fillRect(x, y, bww, bh);
+
+      if (v > 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.font = '9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(v, x + bww / 2, y - 3);
+      }
+
+      ctx.fillStyle = 'rgba(255,255,255,0.32)';
+      ctx.font = '7px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(lbl, x + bww / 2, pad.t + ch + 12);
+    });
+  }
+
+  /* Trades per asset — stacked win/loss vertical bars */
+  function drawTradesPerAsset(canvasId, assetMap) {
+    var c = _setupCanvas(canvasId);
+    if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h;
+    _clearCanvas(ctx, w, h);
+
+    var entries = Object.keys(assetMap).map(function (k) {
+      var d = assetMap[k];
+      return { label: k, wins: d.wins, losses: d.losses, total: d.wins + d.losses };
+    }).sort(function (a, b) { return b.total - a.total; }).slice(0, 8);
+
+    if (!entries.length) { _noData(ctx, w, h); return; }
+
+    var pad  = { t: 14, r: 10, b: 36, l: 10 };
+    var cw   = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+    var maxT = Math.max.apply(null, entries.map(function (e) { return e.total; })) || 1;
+    var bw   = cw / entries.length, bp = 3;
+
+    entries.forEach(function (e, i) {
+      var x    = pad.l + i * bw + bp;
+      var bww  = bw - bp * 2;
+      var winH = ch * (e.wins   / maxT);
+      var losH = ch * (e.losses / maxT);
+
+      ctx.fillStyle = 'rgba(0,200,160,0.72)';
+      ctx.fillRect(x, pad.t + ch - winH - losH, bww, winH);
+      ctx.fillStyle = 'rgba(255,68,68,0.72)';
+      ctx.fillRect(x, pad.t + ch - losH, bww, losH);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.font = '8px monospace'; ctx.textAlign = 'center';
+      if (e.total > 0) ctx.fillText(e.total, x + bww / 2, pad.t + ch - winH - losH - 3);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.32)';
+      ctx.font = '7px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(e.label.split(' ')[0].substring(0, 6), x + bww / 2, pad.t + ch + 14);
+    });
+  }
+
+  /* Horizontal bar chart — asset P&L or region P&L */
+  function drawHBar(canvasId, items, valueKey, labelKey, colorFn) {
+    var c = _setupCanvas(canvasId);
+    if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h;
+    _clearCanvas(ctx, w, h);
+
+    var slice = (items || []).slice(0, 8);
+    if (!slice.length) { _noData(ctx, w, h); return; }
+
+    var labW = 82, valW = 52;
+    var barAreaW = w - labW - valW - 8;
+    var rowH = h / slice.length;
+    var vals = slice.map(function (d) { return Math.abs(d[valueKey] || 0); });
+    var maxV = Math.max.apply(null, vals) || 1;
+
+    slice.forEach(function (d, i) {
+      var v   = d[valueKey] || 0;
+      var bw  = barAreaW * (Math.abs(v) / maxV);
+      var y   = i * rowH;
+      var midY = y + rowH / 2;
+
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.025)' : 'transparent';
+      ctx.fillRect(0, y, w, rowH);
+
+      var col = colorFn ? colorFn(v) : (v >= 0 ? '#00c8a0' : '#ff4444');
+      ctx.fillStyle = col;
+      ctx.fillRect(labW, midY - rowH * 0.3, bw, rowH * 0.6);
+
+      /* Label */
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.font = '8px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(String(d[labelKey] || '').substring(0, 11), labW - 5, midY + 3);
+
+      /* Value */
+      ctx.fillStyle = col;
+      ctx.textAlign = 'left';
+      ctx.fillText((v >= 0 ? '+$' : '-$') + _num(Math.abs(v)), labW + bw + 5, midY + 3);
+    });
+  }
+
+  /* ── renderAnalytics — updates all KPIs and redraws all charts ─────────── */
+
+  function renderAnalytics() {
+    var a = calcAnalytics();
+
+    var set = function (id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+
+    /* ── Win rates ── */
+    function wrText(wr) { return wr.total === 0 ? '—' : wr.pct + '%'; }
+    function wrSub(wr)  {
+      if (wr.total === 0) return 'No closed trades';
+      return wr.wins + 'W / ' + wr.losses + 'L  (' + wr.total + ')';
+    }
+    function applyWrCls(id, wr) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.className = 'ee-an-wr-val' +
+        (wr.total === 0 ? ' dim' : wr.pct >= 55 ? ' good' : wr.pct < 45 ? ' bad' : '');
+    }
+
+    set('eeAnWinDay',     wrText(a.wrDay));
+    set('eeAnWinDaySub',  wrSub(a.wrDay));
+    applyWrCls('eeAnWinDay', a.wrDay);
+
+    set('eeAnWinWeek',    wrText(a.wrWeek));
+    set('eeAnWinWeekSub', wrSub(a.wrWeek));
+    applyWrCls('eeAnWinWeek', a.wrWeek);
+
+    set('eeAnWinAll',    wrText(a.wrAll));
+    set('eeAnWinAllSub', wrSub(a.wrAll));
+    applyWrCls('eeAnWinAll', a.wrAll);
+
+    /* ── KPIs ── */
+    set('eeAnMaxDD',  a.closed ? '-' + a.maxDDPct.toFixed(1) + '%' : '—');
+    set('eeAnAvgWin', a.closed ? '+' + a.avgWinPct.toFixed(2) + '%' : '—');
+    set('eeAnAvgLoss', a.closed ? a.avgLossPct.toFixed(2) + '%' : '—');
+
+    var pfEl = document.getElementById('eeAnPF');
+    if (pfEl) {
+      if (a.profitFactor === null) {
+        pfEl.textContent = '—'; pfEl.className = 'ee-an-kpi-val dim';
+      } else if (!isFinite(a.profitFactor)) {
+        pfEl.textContent = '∞'; pfEl.className = 'ee-an-kpi-val green';
+      } else {
+        pfEl.textContent = a.profitFactor.toFixed(2);
+        pfEl.className = 'ee-an-kpi-val ' +
+          (a.profitFactor >= 1.5 ? 'green' : a.profitFactor < 1 ? 'red' : '');
+      }
+    }
+
+    var exEl = document.getElementById('eeAnExpect');
+    if (exEl) {
+      if (!a.closed) { exEl.textContent = '—'; exEl.className = 'ee-an-kpi-val dim'; }
+      else {
+        exEl.textContent = (a.expectancy >= 0 ? '+$' : '-$') + _num(Math.abs(a.expectancy));
+        exEl.className = 'ee-an-kpi-val ' + (a.expectancy > 0 ? 'green' : 'red');
+      }
+    }
+
+    /* ── Duration stats ── */
+    function fmtDur(hrs) {
+      if (hrs === null) return '—';
+      if (hrs < 1)  return Math.round(hrs * 60) + 'm';
+      if (hrs < 24) return hrs.toFixed(1) + 'h';
+      return (hrs / 24).toFixed(1) + 'd';
+    }
+    set('eeAnAvgDur', fmtDur(a.avgDur));
+    set('eeAnMinDur', fmtDur(a.minDur));
+    set('eeAnMaxDur', fmtDur(a.maxDur));
+
+    /* ── Charts ── */
+    drawEquityCurve('eeChartEquity', a.equity);
+    drawDistribution('eeChartDist', a.buckets);
+    drawTradesPerAsset('eeChartAsset', a.assetMap);
+
+    var assetPnlItems = Object.keys(a.assetMap).map(function (k) {
+      return { label: k, pnl_usd: a.assetMap[k].pnl_usd };
+    }).sort(function (x, y) { return Math.abs(y.pnl_usd) - Math.abs(x.pnl_usd); });
+    drawHBar('eeChartAssetPnl', assetPnlItems, 'pnl_usd', 'label',
+      function (v) { return v >= 0 ? '#00c8a0' : '#ff4444'; });
+
+    var regionItems = Object.keys(a.regionMap).map(function (k) {
+      return { label: k, pnl_usd: a.regionMap[k].pnl_usd };
+    }).sort(function (x, y) { return Math.abs(y.pnl_usd) - Math.abs(x.pnl_usd); });
+    drawHBar('eeChartRegion', regionItems, 'pnl_usd', 'label',
+      function (v) { return v >= 0 ? '#00c8a0' : '#ff4444'; });
   }
 
   /* ══════════════════════════════════════════════════════════════════════════════
