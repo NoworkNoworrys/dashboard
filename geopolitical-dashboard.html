@@ -2095,6 +2095,29 @@
     .sim-flat   { color:var(--dim); font-size:9px; }
     .ee-sim-note { font-size:9px; color:var(--dim); margin-top:8px; text-align:right; font-style:italic; }
 
+    /* ── Learning Loop panel ────────────────────────────────────────────── */
+    .ee-lrn-wrap   { margin-top:16px; }
+    .ee-lrn-stats  { font-size:9px; color:var(--dim); margin-bottom:10px; font-style:italic; }
+    .ee-lrn-table  { width:100%; border-collapse:collapse; font-size:11px; }
+    .ee-lrn-table th { font-size:8px; letter-spacing:0.8px; text-transform:uppercase; color:var(--dim);
+                       font-weight:600; padding:5px 8px; text-align:left; border-bottom:1px solid var(--border); }
+    .ee-lrn-table th:nth-child(4),
+    .ee-lrn-table th:nth-child(5),
+    .ee-lrn-table th:nth-child(6) { text-align:right; }
+    .ee-lrn-table td { padding:5px 8px; border-bottom:1px solid rgba(255,255,255,0.04); font-size:10px; }
+    .ee-lrn-table td:nth-child(4),
+    .ee-lrn-table td:nth-child(5),
+    .ee-lrn-table td:nth-child(6) { text-align:right; font-variant-numeric:tabular-nums; }
+    .lrn-kw   { color:var(--dim); font-size:9px; }
+    .lrn-base { color:var(--dim); }
+    .lrn-eff  { color:var(--text); font-weight:600; }
+    .lrn-pos  { color:#00c8a0; }
+    .lrn-neg  { color:#ff4444; }
+    .ee-lrn-reset { font-size:9px; padding:3px 10px; background:transparent;
+                    border:1px solid var(--border); color:var(--dim); cursor:pointer;
+                    letter-spacing:0.5px; margin-top:10px; }
+    .ee-lrn-reset:hover { border-color:#ff4444; color:#ff4444; }
+
   </style>
 </head>
 <body>
@@ -5142,6 +5165,44 @@
       </div>
 
     </div><!-- /ee-sim-wrap -->
+
+    <!-- ── Learning Loop Panel ─────────────────────────────────────── -->
+    <div class="ee-lrn-wrap" id="eeLrnWrap">
+
+      <div class="ee-an-header">
+        &#129504; Learning Loop
+        <span>Trade outcomes feed back into asset weights automatically</span>
+      </div>
+
+      <p style="font-size:10px;color:var(--dim);margin:0 0 10px">
+        Every time a trade closes, the keywords that triggered it have their impact scores
+        nudged up (TP hit) or down (SL hit) by <b style="color:var(--text)">0.3 points</b>.
+        Over time the model learns which geopolitical signals actually make money.
+      </p>
+
+      <div class="ee-lrn-stats" id="eeLearnStats">No trades learned from yet.</div>
+
+      <table class="ee-lrn-table">
+        <thead>
+          <tr>
+            <th>Keyword</th>
+            <th>Asset</th>
+            <th>Dir</th>
+            <th>Base</th>
+            <th>Adjustment</th>
+            <th>Effective</th>
+          </tr>
+        </thead>
+        <tbody id="eeLearnTable">
+          <tr><td colspan="6" style="text-align:center;color:var(--dim);padding:18px;font-size:10px">
+            No weight adjustments yet — close some trades to start learning.
+          </td></tr>
+        </tbody>
+      </table>
+
+      <button class="ee-lrn-reset" onclick="EE.resetLearning()">&#9851; Reset All Learning</button>
+
+    </div><!-- /ee-lrn-wrap -->
 
   </div><!-- /ee-wrap -->
 
@@ -9353,6 +9414,41 @@ document.addEventListener('DOMContentLoaded', function() {
   window._lrnGEO  = GEO;
   window._lrnMKTM = MKTMAP;
 
+  /* ══════════════════════════════════════════════════════════════════════════════
+     LEARNING LOOP — V17
+     Adjusts IMPACT_MAP weights based on trade outcomes (TP = boost, SL = penalise).
+     Weights are stored as deltas on top of base scores, persisted to localStorage.
+     ══════════════════════════════════════════════════════════════════════════════ */
+
+  var LEARN_KEY  = 'geodash_learned_weights_v1';
+  var LEARN_RATE = 0.3;   /* weight shift per closed trade */
+  var LEARN_MAX  = 5.0;   /* max cumulative delta in either direction */
+
+  var _learnedWeights = {};  /* "keyword_ticker_dir" → cumulative delta */
+  var _learnStats = { tp: 0, sl: 0, lastTs: null };
+
+  function loadLearnedWeights() {
+    try {
+      var raw = localStorage.getItem(LEARN_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        _learnedWeights = parsed.weights || {};
+        _learnStats     = parsed.stats   || { tp: 0, sl: 0, lastTs: null };
+      }
+    } catch (e) { _learnedWeights = {}; _learnStats = { tp: 0, sl: 0, lastTs: null }; }
+  }
+
+  function saveLearnedWeights() {
+    try { localStorage.setItem(LEARN_KEY, JSON.stringify({ weights: _learnedWeights, stats: _learnStats })); } catch (e) {}
+  }
+
+  /* Returns effective impact score for a keyword+entry, with learned delta applied */
+  function getEffectiveImpact(kw, entry) {
+    var k     = kw + '_' + entry.t + '_' + entry.d;
+    var delta = _learnedWeights[k] || 0;
+    return Math.max(0.5, Math.min(10.0, entry.i + delta));
+  }
+
   /* ── REGION EXTRACTION MAP ─────────────────────────────────────────────── */
   var REGIONS = [
     ['hormuz','IRAN'],['iran','IRAN'],['tehran','IRAN'],['revolutionary guard','IRAN'],
@@ -9634,23 +9730,27 @@ document.addEventListener('DOMContentLoaded', function() {
           if (!text.includes(kw)) return;
 
           IMPACT_MAP[kw].forEach(function(entry) {
-            var k       = entry.t + '_' + entry.d;
-            var rawScore = entry.i * sigW * probW;
+            var k            = entry.t + '_' + entry.d;
+            var effImpact    = getEffectiveImpact(kw, entry);  /* learned weight applied */
+            var rawScore     = effImpact * sigW * probW;
 
             if (!candidates[k]) {
               candidates[k] = {
-                asset:    entry.t,
-                dir:      entry.d,
-                score:    0,
-                priority: entry.p,
-                conf:     baseConf,
-                reason:   (st.scenario || r).slice(0, 36),
-                region:   r
+                asset:      entry.t,
+                dir:        entry.d,
+                score:      0,
+                priority:   entry.p,
+                conf:       baseConf,
+                reason:     (st.scenario || r).slice(0, 36),
+                region:     r,
+                matchedKws: []           /* track which keywords contributed */
               };
             }
             candidates[k].score    += rawScore;
             candidates[k].conf      = Math.max(candidates[k].conf, baseConf);
             candidates[k].priority  = Math.min(candidates[k].priority, entry.p);
+            /* record keyword if not already listed */
+            if (candidates[k].matchedKws.indexOf(kw) === -1) candidates[k].matchedKws.push(kw);
           });
         });
       });
@@ -9699,12 +9799,13 @@ document.addEventListener('DOMContentLoaded', function() {
       var impactMult  = parseFloat(Math.min(2.0, Math.max(0.5, c.score / 3)).toFixed(2));
 
       return {
-        asset:      c.asset,
-        dir:        c.dir,
-        conf:       finalConf,
-        reason:     c.reason,
-        region:     c.region,
-        impactMult: impactMult
+        asset:           c.asset,
+        dir:             c.dir,
+        conf:            finalConf,
+        reason:          c.reason,
+        region:          c.region,
+        impactMult:      impactMult,
+        matchedKeywords: c.matchedKws || []   /* passed to EE → stored on trade */
       };
     });
 
@@ -9760,7 +9861,108 @@ document.addEventListener('DOMContentLoaded', function() {
     renderTimeline();
     renderTrades();
     updateStats();
+    renderLearning();
   }
+
+  /* ── LEARNING LOOP ─────────────────────────────────────────────────────── */
+
+  /* Called by executionEngine.js closeTrade() after every trade closes.
+     Adjusts IMPACT_MAP weights based on outcome, saves, re-renders panel. */
+  window.onTradeClose = function(trade) {
+    var kws = trade.matched_keywords;
+    if (!kws || !kws.length) return;
+    if (trade.close_reason !== 'TAKE_PROFIT' && trade.close_reason !== 'STOP_LOSS') return;
+
+    var asset   = trade.asset;
+    var dir     = trade.direction;
+    var outcome = trade.close_reason === 'TAKE_PROFIT' ? 1 : -1;
+
+    kws.forEach(function(kw) {
+      var entries = IMPACT_MAP[kw];
+      if (!entries) return;
+      /* Only adjust entries that actually match this (asset, direction) pair */
+      entries.forEach(function(entry) {
+        if (entry.t !== asset || entry.d !== dir) return;
+        var k       = kw + '_' + asset + '_' + dir;
+        var current = _learnedWeights[k] || 0;
+        var shift   = outcome * LEARN_RATE;
+        /* Clamp: base + delta must stay in [0.5, 10.0] */
+        var newDelta = current + shift;
+        newDelta = Math.max(-LEARN_MAX, Math.min(LEARN_MAX, newDelta));
+        /* Also ensure base + delta stays in bounds */
+        newDelta = Math.max(0.5 - entry.i, Math.min(10.0 - entry.i, newDelta));
+        _learnedWeights[k] = parseFloat(newDelta.toFixed(3));
+      });
+    });
+
+    if (trade.close_reason === 'TAKE_PROFIT') _learnStats.tp++;
+    else _learnStats.sl++;
+    _learnStats.lastTs = new Date().toISOString();
+
+    saveLearnedWeights();
+    renderLearning();
+  };
+
+  /* Renders the learning panel showing all adjusted weights */
+  function renderLearning() {
+    var el = document.getElementById('eeLearnTable');
+    if (!el) return;
+
+    /* Stats bar */
+    var sEl = document.getElementById('eeLearnStats');
+    if (sEl) {
+      var total = _learnStats.tp + _learnStats.sl;
+      sEl.textContent = total + ' trades learned from  ·  '
+        + _learnStats.tp + ' TP  ·  ' + _learnStats.sl + ' SL'
+        + (_learnStats.lastTs ? '  ·  Last: ' + new Date(_learnStats.lastTs).toLocaleTimeString() : '');
+    }
+
+    var keys = Object.keys(_learnedWeights).filter(function(k) {
+      return Math.abs(_learnedWeights[k]) >= 0.05;
+    });
+
+    if (!keys.length) {
+      el.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--dim);padding:18px;font-size:10px">'
+        + 'No weight adjustments yet — close some trades to start learning.'
+        + '</td></tr>';
+      return;
+    }
+
+    /* Sort by absolute delta descending */
+    keys.sort(function(a, b) { return Math.abs(_learnedWeights[b]) - Math.abs(_learnedWeights[a]); });
+
+    el.innerHTML = keys.slice(0, 30).map(function(k) {
+      var parts   = k.split('_');
+      /* key format: "keyword_TICKER_DIR" — keyword may contain underscores so take last 2 */
+      var dir     = parts[parts.length - 1];
+      var ticker  = parts[parts.length - 2];
+      var kw      = parts.slice(0, parts.length - 2).join('_');
+      var delta   = _learnedWeights[k];
+      var entries = IMPACT_MAP[kw] || [];
+      var base    = 0;
+      entries.forEach(function(e) { if (e.t === ticker && e.d === dir) base = e.i; });
+      var effective = Math.max(0.5, Math.min(10.0, base + delta));
+      var cls     = delta > 0 ? 'lrn-pos' : 'lrn-neg';
+      var arrow   = delta > 0 ? '&#9650;' : '&#9660;';
+      var dirCls  = dir === 'LONG' ? 'sl-long' : 'sl-short';
+      return '<tr>' +
+        '<td class="lrn-kw">' + kw + '</td>' +
+        '<td>' + ticker + '</td>' +
+        '<td><span class="ee-sl-dir ' + dirCls + '">' + dir + '</span></td>' +
+        '<td class="lrn-base">' + base.toFixed(1) + '</td>' +
+        '<td class="' + cls + '">' + arrow + ' ' + (delta > 0 ? '+' : '') + delta.toFixed(2) + '</td>' +
+        '<td class="lrn-eff">' + effective.toFixed(1) + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  /* Reset hook — called by EE.resetLearning() */
+  window.onLearnReset = function() {
+    _learnedWeights = {};
+    _learnStats     = { tp: 0, sl: 0, lastTs: null };
+    saveLearnedWeights();
+    renderLearning();
+  };
 
   /* ── DATA SOURCES ──────────────────────────────────────────────────────── */
 
@@ -9968,6 +10170,10 @@ document.addEventListener('DOMContentLoaded', function() {
       btn.style.color = '#28c060';
       fetchFRED(key);
     });
+
+    // Restore learned weight deltas from localStorage
+    loadLearnedWeights();
+    renderLearning();
 
     // Start 4s after Feature 7, stagger to avoid API pile-up
     setTimeout(function(){

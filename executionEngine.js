@@ -443,12 +443,13 @@
       pnl_pct:         null,
       pnl_usd:         null,
       close_reason:    null,
-      region:          sig.region  || 'GLOBAL',
-      reason:          sig.reason  || '',
-      broker:          _cfg.mode === 'LIVE' ? _cfg.broker : 'SIMULATION',
+      region:           sig.region           || 'GLOBAL',
+      reason:           sig.reason           || '',
+      matched_keywords: sig.matchedKeywords  || [],  // learning loop: keywords that triggered this trade
+      broker:           _cfg.mode === 'LIVE' ? _cfg.broker : 'SIMULATION',
       // Broker integration stubs — set by adapter on live execution
-      broker_order_id: null,
-      broker_status:   null
+      broker_order_id:  null,
+      broker_status:    null
     };
   }
 
@@ -528,6 +529,9 @@
       trade.pnl_pct >= 0 ? 'green' : 'red');
 
     renderUI();
+
+    /* Learning loop feedback: notify dashboard of trade outcome */
+    if (typeof window.onTradeClose === 'function') window.onTradeClose(trade);
   }
 
   /* ══════════════════════════════════════════════════════════════════════════════
@@ -1424,6 +1428,20 @@
 
     /* ── Risk Simulator: called by slider oninput events ── */
     updateSim: function () { renderSim(); },
+
+    /* ── Reset all learned weight adjustments (called by learning panel) ── */
+    resetLearning: function () {
+      if (!confirm('Reset all learned weight adjustments?\n\nThis clears the model\'s training history. The IMPACT_MAP base scores will be used instead.')) return;
+      if (typeof window._learnedWeights !== 'undefined') {
+        // Clear via dashboard's exposed reset hook
+        if (typeof window.onLearnReset === 'function') window.onLearnReset();
+        else {
+          try { localStorage.removeItem('geodash_learned_weights_v1'); } catch(e) {}
+          log('LEARN', 'Learning weights reset — all adjustments cleared', 'amber');
+          renderUI();
+        }
+      }
+    },
 
     /* ── Toggle auto-execution on/off ── */
     toggleAuto: function () {
