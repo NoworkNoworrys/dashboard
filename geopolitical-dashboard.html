@@ -9734,10 +9734,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     Object.keys(IC.regionStates).forEach(function(r) {
       var st = IC.regionStates[r];
-      if (st.prob < 30) return;
+      var decayedProb = getDecayedProb(st);            /* V19: time-decay applied */
+      if (decayedProb < 30) return;
 
-      var baseConf = Math.min(95, Math.round(st.prob * 0.88 + st.signalCount * 1.5));
-      var probW    = st.prob / 100;
+      var baseConf = Math.min(95, Math.round(decayedProb * 0.88 + st.signalCount * 1.5));
+      var probW    = decayedProb / 100;
 
       /* Scan recent events for this region */
       var evts = IC.events.filter(function(e){ return e.region === r; }).slice(0, 5);
@@ -9808,10 +9809,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     /* Stage 3 — final confidence + impact multiplier */
+    var regime = detectRegime();                       /* V19: detect market regime once */
     var sigs = Object.keys(resolved).map(function(ticker) {
       var c = resolved[ticker];
 
-      var impactBonus = Math.min(15, Math.round(c.score * 3));
+      var impactBonus = Math.min(15, Math.round(c.score * 3 * _regimeMult(c.asset, c.dir, regime)));
       var priBonus    = (c.priority === 1) ? 4 : (c.priority === 2) ? 2 : 0;
       var finalConf   = Math.min(95, c.conf + impactBonus + priBonus);
 
@@ -9838,7 +9840,18 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    el.innerHTML = sigs.slice(0, 7).map(function(s, i) {
+    /* V19: regime banner */
+    var REGIME_META = {
+      RISK_OFF: { color: 'var(--red)',   label: '\u26A0 RISK-OFF \u2014 defensive posture' },
+      RISK_ON:  { color: 'var(--green)', label: '\u25B2 RISK-ON \u2014 growth posture' },
+      NEUTRAL:  { color: 'var(--amber)', label: '\u2014 NEUTRAL \u2014 no regime bias' }
+    };
+    var rm = REGIME_META[regime] || REGIME_META.NEUTRAL;
+    var regimeBanner = '<div style="font-size:9px;font-weight:700;letter-spacing:1px;' +
+      'padding:3px 8px 3px 8px;color:' + rm.color + ';opacity:0.85;' +
+      'border-bottom:1px solid rgba(255,255,255,0.07)">' + rm.label + '</div>';
+
+    el.innerHTML = regimeBanner + sigs.slice(0, 7).map(function(s, i) {
       var bc      = s.dir === 'LONG' ? 'var(--green)' : s.dir === 'SHORT' ? 'var(--red)' : 'var(--amber)';
       var meta    = ASSET_REGISTRY[s.asset] || {};
       var typeTag = meta.type ? '<span style="font-size:8px;color:var(--dim);margin-left:4px">' + meta.type + '</span>' : '';
@@ -10006,6 +10019,53 @@ document.addEventListener('DOMContentLoaded', function() {
     saveLearnedWeights();
     renderLearning();
   };
+
+  /* ── V19: Signal Decay ──────────────────────────────────────────────────── */
+  /* Probability decays exponentially with time. Half-life = 72 h so a signal
+     3 days old retains only 50% conviction. Does NOT mutate regionStates.    */
+  function getDecayedProb(state) {
+    if (!state.lastEvt) return state.prob;
+    var hoursSince = (Date.now() - state.lastEvt) / 3600000;
+    return Math.max(0, Math.round(state.prob * Math.pow(0.5, hoursSince / 72)));
+  }
+
+  /* ── V19: Regime Detection ──────────────────────────────────────────────── */
+  /* Scans IC events from the last 24 h and classifies market regime:
+     RISK_OFF → ≥3 high-severity events (signal ≥65) OR average signal ≥65
+     RISK_ON  → 0 high-severity events AND average signal < 40
+     NEUTRAL  → everything else                                               */
+  function detectRegime() {
+    var cutoff  = Date.now() - 86400000;   /* 24 h window */
+    var recent  = IC.events.filter(function(e){ return (e.ts || 0) >= cutoff; });
+    if (!recent.length) return 'NEUTRAL';
+    var highSev = recent.filter(function(e){ return (e.signal || 50) >= 65; });
+    var avgSig  = recent.reduce(function(s, e){ return s + (e.signal || 50); }, 0) / recent.length;
+    if (highSev.length >= 3 || avgSig >= 65) return 'RISK_OFF';
+    if (highSev.length === 0 && avgSig < 40)  return 'RISK_ON';
+    return 'NEUTRAL';
+  }
+
+  /* ── V19: Regime Multiplier ─────────────────────────────────────────────── */
+  /* Scales per-asset impact score up/down based on sector vs regime.         */
+  function _regimeMult(asset, dir, regime) {
+    if (regime === 'NEUTRAL') return 1.0;
+    var sector = (ASSET_REGISTRY[asset] && ASSET_REGISTRY[asset].sector) || '';
+    if (regime === 'RISK_OFF') {
+      if (sector === 'vol')                                               return 1.40;
+      if (sector === 'safe-haven')                                        return 1.30;
+      if (sector === 'defense')                                           return 1.25;
+      if ((sector === 'equities' || sector === 'semis') && dir === 'LONG') return 0.65;
+      if (sector === 'crypto')                                            return 0.80;
+      if (sector === 'airlines')                                          return 0.75;
+    }
+    if (regime === 'RISK_ON') {
+      if ((sector === 'equities' || sector === 'semis') && dir === 'LONG') return 1.30;
+      if (sector === 'crypto'   && dir === 'LONG')                        return 1.20;
+      if (sector === 'safe-haven')                                        return 0.75;
+      if (sector === 'vol')                                               return 0.60;
+    }
+    return 1.0;
+  }
 
   /* ── DATA SOURCES ──────────────────────────────────────────────────────── */
 
