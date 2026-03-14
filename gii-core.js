@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v4
+/* GII Core — gii-core.js v5
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -57,7 +57,10 @@
   var _feedback    = {};   // loaded from localStorage
   var _lastCycleTs = 0;
   var _hormuzActive = false;
-  var _lastSignals = [];
+  var _lastSignals     = [];
+  var _prevGTI         = null;  // Module 4: market lag detection
+  var _lagBoost        = 1.0;   // Module 4: applied in portfolioDecision
+  var _marketLagActive = false; // Module 4: exposed in status()
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -90,7 +93,8 @@
     { name: 'liquidity',  global: 'GII_AGENT_LIQUIDITY'  },
     { name: 'calendar',   global: 'GII_AGENT_CALENDAR'   },
     { name: 'chokepoint', global: 'GII_AGENT_CHOKEPOINT' },
-    { name: 'narrative',  global: 'GII_AGENT_NARRATIVE'  }
+    { name: 'narrative',  global: 'GII_AGENT_NARRATIVE'  },
+    { name: 'escalation', global: 'GII_AGENT_ESCALATION' }
   ];
 
   function _getAgent(def) { return window[def.global] || null; }
@@ -118,6 +122,8 @@
         all.push(Object.assign({}, s, { _agentName: def.name }));
       });
     });
+    // Module 5: tag correlated signals with discount before Bayesian update
+    _deduplicateSignals(all);
     _lastSignals = all;
     return all;
   }
@@ -133,6 +139,60 @@
     if (wr >= 0.50) return 0.8;
     if (wr >= 0.40) return 0.6;
     return 0.4;
+  }
+
+  // ── Module 2: Signal reliability scoring ──────────────────────────────────
+  // Blends LR toward neutral based on source credibility × recency
+
+  var SOURCE_CREDIBILITY = {
+    'macro': 0.88, 'regime': 0.85, 'escalation': 0.83, 'conflict': 0.82,
+    'sanctions': 0.80, 'polymarket': 0.82, 'maritime': 0.78, 'chokepoint': 0.78,
+    'satellite': 0.78, 'energy': 0.75, 'liquidity': 0.75, 'historical': 0.72,
+    'calendar': 0.70, 'narrative': 0.65, 'social': 0.60
+  };
+
+  function _reliabilityScore(signal) {
+    var cred = SOURCE_CREDIBILITY[signal.source] || 0.70;
+    var ageMs = Date.now() - (signal.timestamp || Date.now());
+    var recency = ageMs < 3600000  ? 1.00 :
+                  ageMs < 21600000 ? 0.90 :
+                  ageMs < 43200000 ? 0.78 : 0.62;
+    return _clamp(cred * recency, 0.20, 1.0);
+  }
+
+  // ── Module 5: Signal deduplication / correlation discounting ──────────────
+  // Tags correlated signals (same region+asset+bias+overlapping evidenceKeys)
+  // with a _correlationDiscount so Bayesian LR isn't multiplied naively.
+
+  function _deduplicateSignals(signals) {
+    // Group by region+asset+bias
+    var groups = {};
+    signals.forEach(function (sig) {
+      var gk = (sig.region || 'GLOBAL') + '|' + (sig.asset || '') + '|' + (sig.bias || 'long');
+      if (!groups[gk]) groups[gk] = [];
+      groups[gk].push(sig);
+    });
+
+    Object.keys(groups).forEach(function (gk) {
+      var grp = groups[gk];
+      // First signal in group = primary (no discount)
+      grp.forEach(function (sig, i) {
+        if (i === 0) { sig._correlationDiscount = 0; return; }
+        // Measure evidenceKey overlap with all earlier signals in this group
+        var prevKeys = [];
+        grp.slice(0, i).forEach(function (prev) {
+          (prev.evidenceKeys || []).forEach(function (k) {
+            if (prevKeys.indexOf(k) === -1) prevKeys.push(k);
+          });
+        });
+        var myKeys  = sig.evidenceKeys || [];
+        var overlap = myKeys.filter(function (k) { return prevKeys.indexOf(k) !== -1; });
+        // Discount proportional to overlap; max 50% reduction
+        sig._correlationDiscount = _clamp(overlap.length * 0.15, 0, 0.50);
+      });
+    });
+
+    return signals; // modified in-place; all agents' signals preserved for convergence
   }
 
   // ── Bayesian engine ────────────────────────────────────────────────────────
@@ -165,8 +225,17 @@
     var w = _agentWeight(agentName, relevant[0].asset, relevant[0].bias);
     avgConf = avgConf * w;
 
+    // Module 2: apply reliability score (blends LR toward neutral)
+    var reliability = relevant.reduce(function (s, sig) { return s + _reliabilityScore(sig); }, 0) / relevant.length;
+
+    // Module 5: apply correlation discount (reduces LR if signals are correlated)
+    var avgDiscount = relevant.reduce(function (s, sig) { return s + (sig._correlationDiscount || 0); }, 0) / relevant.length;
+
     // Map [0,1] → [0.3, 3.5];  conf=0.5 → LR≈1.9
-    return _clamp(0.3 + avgConf * 3.2, 0.3, 3.5);
+    var lr = _clamp(0.3 + avgConf * 3.2, 0.3, 3.5);
+    // Reliability blends LR toward 1.0; discount further reduces deviation from neutral
+    var adjustedLR = 1.0 + (lr - 1.0) * reliability * (1.0 - avgDiscount);
+    return _clamp(adjustedLR, 0.3, 3.5);
   }
 
   function _bayesianUpdate(region, signals) {
@@ -312,6 +381,7 @@
   // ── Global Tension Index ───────────────────────────────────────────────────
 
   function _computeGTI() {
+    _prevGTI = _gti; // Module 4: save previous GTI before computing new one
     var IC = window.__IC;
     var PM = window.PM;
 
@@ -397,6 +467,38 @@
     if (_volatilityBoost > 1.0) _volatilityBoost = Math.max(1.0, _volatilityBoost - 0.05);
   }
 
+  // ── Module 4: Market reaction lag detection ───────────────────────────────
+  // Detects when GTI rises faster than prediction markets price in the risk.
+  // Returns a confidence boost multiplier (1.0 = no lag, 1.25 = strong lag).
+
+  function _detectMarketLag() {
+    _marketLagActive = false;
+    if (_prevGTI === null || _gti === null) return 1.0;
+    var gtiDelta = _gti - _prevGTI;
+    if (gtiDelta < 8) return 1.0; // GTI not rising fast enough to flag lag
+
+    // Check if Polymarket is pricing in the move (low avg edge = PM has caught up)
+    var pmAgent = window.GII_AGENT_POLYMARKET;
+    if (!pmAgent) {
+      _marketLagActive = true;
+      return 1.15; // no PM data available — moderate lag assumption
+    }
+    try {
+      var pmSt = pmAgent.status();
+      var avgEdge = pmSt.avgAbsEdge || pmSt.avgEdge || 0;
+      if (avgEdge < 0.05) {
+        // GTI spiked but PM prices haven't moved — strong lag
+        _marketLagActive = true;
+        return 1.25;
+      } else if (avgEdge < 0.10) {
+        // Mild lag
+        _marketLagActive = true;
+        return 1.12;
+      }
+    } catch (e) {}
+    return 1.0;
+  }
+
   // ── portfolio decision ─────────────────────────────────────────────────────
 
   function _portfolioDecision(signals) {
@@ -425,10 +527,14 @@
 
       var impactMult = _clamp(_volatilityBoost * conv.boost, 1.0, 3.0);
 
+      // Module 4: apply market lag boost if detected
+      if (_lagBoost > 1.0) rawConf = _clamp(rawConf * _lagBoost, 0, 95);
+
       var reasonParts = ['GII'];
       if (conv.level) reasonParts.push(conv.agentCount + '-agent ' + conv.level + ' convergence');
       if (s.pmEdge) reasonParts.push('PM edge ' + (s.pmEdge * 100).toFixed(0) + '%');
       if (_hormuzActive) reasonParts.push('Hormuz-pattern active');
+      if (_lagBoost > 1.0) reasonParts.push('mkt-lag ×' + _lagBoost.toFixed(2));
 
       toEmit.push({
         asset:           s.asset,
@@ -501,6 +607,16 @@
     // 7. GTI
     _computeGTI();
 
+    // 7b. Module 4: market lag detection (uses new _gti vs _prevGTI)
+    _lagBoost = _detectMarketLag();
+
+    // 7c. Module 6: meta-agent coordination analysis
+    if (window.GII_META && typeof window.GII_META.coordinate === 'function') {
+      try { window.GII_META.coordinate(allSignals); } catch (e) {
+        console.warn('[GII] GII_META.coordinate() error: ' + (e.message || String(e)));
+      }
+    }
+
     // 8. Portfolio decision
     _portfolioDecision(allSignals);
 
@@ -520,14 +636,19 @@
     });
     if (!closed.length) return;
 
-    var winner = trade.pnl > 0;
+    var winner  = trade.pnl > 0;
+    var stopped = trade.exitReason === 'stop_loss' || (!winner && trade.pnl < 0);
     closed.forEach(function (s) {
       var key = s._agentName + '_' + s.asset + '_' + (s.bias || 'long');
-      if (!_feedback[key]) _feedback[key] = { total: 0, correct: 0, winRate: null, lastTs: null };
+      if (!_feedback[key]) _feedback[key] = { total: 0, correct: 0, fp: 0, winRate: null, fpr: null, reputation: null, lastTs: null };
       _feedback[key].total++;
-      if (winner) _feedback[key].correct++;
-      _feedback[key].winRate = _feedback[key].correct / _feedback[key].total;
-      _feedback[key].lastTs = new Date().toISOString();
+      if (winner)  _feedback[key].correct++;
+      if (stopped) _feedback[key].fp = (_feedback[key].fp || 0) + 1;
+      _feedback[key].winRate   = _feedback[key].correct / _feedback[key].total;
+      _feedback[key].fpr       = (_feedback[key].fp || 0) / _feedback[key].total;
+      // Module 3: composite reputation = winRate penalised by false positive rate
+      _feedback[key].reputation = _clamp(_feedback[key].winRate * (1 - (_feedback[key].fpr || 0) * 0.5), 0.10, 1.0);
+      _feedback[key].lastTs    = new Date().toISOString();
     });
     _saveFeedback();
   }
@@ -540,21 +661,37 @@
       if (!region) return null;
       return _posteriors[region.toUpperCase()] || null;
     },
-    signals: function () { return _lastSignals.slice(); },
-    feedback: function () { return Object.assign({}, _feedback); },
-    gtiHistory: function () { return _gtiHistory.slice(); },
+    signals:       function () { return _lastSignals.slice(); },
+    feedback:      function () { return Object.assign({}, _feedback); },
+    gtiHistory:    function () { return _gtiHistory.slice(); },
     onTradeResult: _onTradeResult,
+    // Module 3: agent reputation scores
+    agentReputations: function () {
+      var out = {};
+      Object.keys(_feedback).forEach(function (key) {
+        var fb = _feedback[key];
+        out[key] = {
+          winRate:    fb.winRate,
+          fpr:        fb.fpr || 0,
+          reputation: fb.reputation || fb.winRate,
+          total:      fb.total
+        };
+      });
+      return out;
+    },
     status: function () {
       return {
-        lastCycle: _lastCycleTs,
-        gti: _gti,
-        gtiLevel: _gtiLevel,
-        hormuzActive: _hormuzActive,
-        volatilityBoost: _volatilityBoost,
-        agentCount: AGENTS.filter(function (d) { return !!_getAgent(d); }).length,
-        signalCount: _lastSignals.length,
+        lastCycle:        _lastCycleTs,
+        gti:              _gti,
+        gtiLevel:         _gtiLevel,
+        hormuzActive:     _hormuzActive,
+        volatilityBoost:  _volatilityBoost,
+        marketLagActive:  _marketLagActive,   // Module 4
+        lagBoost:         _lagBoost,           // Module 4
+        agentCount:       AGENTS.filter(function (d) { return !!_getAgent(d); }).length,
+        signalCount:      _lastSignals.length,
         posteriorRegions: Object.keys(_posteriors).length,
-        convergence: Object.assign({}, _convergence)
+        convergence:      Object.assign({}, _convergence)
       };
     },
     pollNow: function () { _cycle(); }
