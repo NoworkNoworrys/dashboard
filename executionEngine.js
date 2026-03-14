@@ -22,7 +22,7 @@
   'use strict';
 
   /* ── Storage keys ──────────────────────────────────────────────────────────── */
-  var CFG_KEY     = 'geodash_ee_config_v1';
+  var CFG_KEY     = 'geodash_ee_config_v2';
   var TRADES_KEY  = 'geodash_ee_trades_v1';
   var SIGLOG_KEY  = 'geodash_ee_siglog_v1';
 
@@ -38,15 +38,15 @@
   var DEFAULTS = {
     mode:                  'SIMULATION', // 'SIMULATION' | 'LIVE'
     enabled:               true,         // auto-execution always on by default
-    min_confidence:        65,           // minimum IC confidence % to auto-execute
+    min_confidence:        50,           // minimum IC confidence % to auto-execute
     virtual_balance:       10000,        // starting virtual balance (USD)
-    risk_per_trade_pct:    2,            // % of balance risked per trade
+    risk_per_trade_pct:    3,            // % of balance risked per trade
     stop_loss_pct:         3,            // % distance from entry for stop-loss
     take_profit_ratio:     2,            // R:R multiplier (TP = SL distance × ratio)
-    max_open_trades:       5,            // max concurrent open trades
-    max_per_region:        2,            // max open trades per geopolitical region
-    max_exposure_pct:      20,           // max % of balance in open positions
-    cooldown_ms:           300000,       // 5 min cooldown between same-asset signals
+    max_open_trades:       8,            // max concurrent open trades
+    max_per_region:        3,            // max open trades per geopolitical region
+    max_exposure_pct:      30,           // max % of balance in open positions
+    cooldown_ms:           120000,       // 2 min cooldown between same-asset signals
     broker:                'SIMULATION', // future: 'BINANCE' | 'ALPACA' | 'POLYMARKET'
     auto_start:            true,         // if false, auto-execution stays OFF on page load
     max_siglog:            200           // max entries kept in signal log
