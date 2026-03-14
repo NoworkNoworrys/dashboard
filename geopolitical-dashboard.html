@@ -10177,6 +10177,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     renderLearning();
+    if (window.GII && typeof GII.onTradeResult === 'function') GII.onTradeResult(trade);
   };
 
   /* Renders the learning panel showing all adjusted weights */
@@ -12510,5 +12511,17 @@ function _modalKeyHandler(e) {
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
 <script src="executionEngine.js?v=6"></script>
+
+<!-- GII Multi-Agent Intelligence System — agents first, then core, then UI -->
+<script src="agents/gii-energy.js?v=1"></script>
+<script src="agents/gii-conflict.js?v=1"></script>
+<script src="agents/gii-macro.js?v=1"></script>
+<script src="agents/gii-sanctions.js?v=1"></script>
+<script src="agents/gii-maritime.js?v=1"></script>
+<script src="agents/gii-social.js?v=1"></script>
+<script src="agents/gii-polymarket.js?v=1"></script>
+<script src="agents/gii-regime.js?v=1"></script>
+<script src="gii-core.js?v=1"></script>
+<script src="gii-ui.js?v=1"></script>
 </body>
 </html>
