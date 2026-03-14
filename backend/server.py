@@ -5,6 +5,7 @@ Exposes SSE stream, REST endpoints, and static health check.
 import asyncio
 import json
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Set
@@ -20,10 +21,17 @@ _DASHBOARD_HTML = os.path.join(_PROJECT_ROOT, 'geopolitical-dashboard.html')
 
 from config import HOST, PORT, SSE_KEEPALIVE
 from event_store import get_store
+import trades_store
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialise trades DB
+    trades_store.init_db()
+    # Start auto-backup thread (6 h interval)
+    t = threading.Thread(target=trades_store.backup_loop, daemon=True)
+    t.start()
+
     from pipeline import start_pipeline, set_broadcast_fns
     set_broadcast_fns(broadcast_event, broadcast_market)
     asyncio.create_task(start_pipeline())
@@ -40,11 +48,13 @@ app.add_middleware(
     allow_origins=[
         'null',                    # file:// pages (Chrome/Firefox)
         'http://localhost',
+        'http://localhost:3008',   # geo-dashboard Python HTTP server
         'http://localhost:8765',
         'http://127.0.0.1',
+        'http://127.0.0.1:3008',
         'http://127.0.0.1:8765',
     ],
-    allow_methods=['GET'],
+    allow_methods=['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allow_headers=['*'],
 )
 
@@ -458,6 +468,75 @@ async def api_correlation():
         'matrix':    matrix,
         'ts':        int(time.time() * 1000),
     })
+
+
+# ── Trades API ────────────────────────────────────────────────────────────────
+
+@app.get('/api/trades')
+async def trades_list():
+    """Return all trades from the SQLite database."""
+    trades = await asyncio.get_event_loop().run_in_executor(None, trades_store.get_all)
+    return JSONResponse(content={'trades': trades, 'count': len(trades)})
+
+
+@app.post('/api/trades')
+async def trades_create(request: Request):
+    """Insert or replace a trade (upsert by trade_id)."""
+    body = await request.json()
+    if isinstance(body, list):
+        # Bulk insert
+        for trade in body:
+            await asyncio.get_event_loop().run_in_executor(None, trades_store.upsert, trade)
+        return JSONResponse(content={'ok': True, 'count': len(body)})
+    else:
+        await asyncio.get_event_loop().run_in_executor(None, trades_store.upsert, body)
+        return JSONResponse(content={'ok': True, 'trade_id': body.get('trade_id')})
+
+
+@app.patch('/api/trades/{trade_id}')
+async def trades_patch(trade_id: str, request: Request):
+    """Update specific fields on an existing trade (e.g. close a trade)."""
+    updates = await request.json()
+    ok = await asyncio.get_event_loop().run_in_executor(
+        None, trades_store.patch, trade_id, updates
+    )
+    if not ok:
+        return JSONResponse(content={'ok': False, 'error': 'not found'}, status_code=404)
+    return JSONResponse(content={'ok': True, 'trade_id': trade_id})
+
+
+@app.delete('/api/trades/{trade_id}')
+async def trades_delete(trade_id: str):
+    """Delete a trade record."""
+    ok = await asyncio.get_event_loop().run_in_executor(
+        None, trades_store.delete, trade_id
+    )
+    if not ok:
+        return JSONResponse(content={'ok': False, 'error': 'not found'}, status_code=404)
+    return JSONResponse(content={'ok': True, 'trade_id': trade_id})
+
+
+@app.get('/api/trades/export')
+async def trades_export():
+    """Download all trades as a JSON file (also triggers a backup snapshot)."""
+    trades = await asyncio.get_event_loop().run_in_executor(None, trades_store.export_json)
+    payload = json.dumps(
+        {'ts': int(time.time() * 1000), 'count': len(trades), 'trades': trades},
+        indent=2
+    )
+    from fastapi.responses import Response
+    return Response(
+        content=payload,
+        media_type='application/json',
+        headers={'Content-Disposition': 'attachment; filename="ee_trades_export.json"'}
+    )
+
+
+@app.post('/api/trades/backup')
+async def trades_backup():
+    """Trigger an immediate backup to /backups/."""
+    path, n = await asyncio.get_event_loop().run_in_executor(None, trades_store.do_backup)
+    return JSONResponse(content={'ok': True, 'path': path, 'count': n})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

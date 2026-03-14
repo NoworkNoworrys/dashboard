@@ -4933,6 +4933,14 @@
       </div>
     </div>
 
+    <!-- Data safety banner — shown until user has closed trades on record -->
+    <div id="eeDataSafetyBanner" style="display:none;margin-bottom:12px;padding:10px 14px;background:rgba(232,160,32,0.1);border:1px solid var(--amber);border-left:4px solid var(--amber);font-size:11px;line-height:1.6">
+      <span style="color:var(--amber);font-weight:bold">&#9888; NO CLOSED TRADE HISTORY</span>
+      <span style="color:var(--dim);margin-left:8px">LocalStorage only — data is lost if you clear browser storage or change port.</span>
+      <span style="color:var(--text);margin-left:8px">Back up regularly before going live:</span>
+      <button onclick="EE.exportJSON()" style="margin-left:10px;padding:2px 10px;background:var(--amber);color:var(--bg);border:none;font-family:inherit;font-size:10px;font-weight:bold;cursor:pointer;letter-spacing:1px">&#8595; EXPORT TRADES</button>
+    </div>
+
     <!-- Open trades + Closed trades -->
     <div class="ee-body">
       <div class="ee-panel">
@@ -9669,6 +9677,10 @@ document.addEventListener('DOMContentLoaded', function() {
   function hhmm() { return new Date().toTimeString().slice(0,5); }
   function dedupeKey(t) { return t.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,48); }
 
+  /* M5 — Polymarket minimum YES probability required to trigger a PM signal boost.
+     Tunable: lower = more boosts (more sensitive), higher = fewer/stronger boosts. */
+  var IC_PM_MIN_PROB = 0.45;
+
   function scoreEvent(evt) {
     var text = (evt.title + ' ' + (evt.desc||'')).toLowerCase();
     // 1. Severity 0-25
@@ -9695,8 +9707,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // pmBoost: +0 to +18 pts when Polymarket confirms this geo event
     // Sources: probability strength (0-12) + OB imbalance (0-3) + whale direction (0-3)
     var pmBoost = 0;
-    if (evt.pmFeed && typeof evt.pmYesProb === 'number' && evt.pmYesProb >= 0.45) {
-      var probBoost  = Math.round((evt.pmYesProb - 0.45) / 0.55 * 12);                       // 0-12 pts
+    if (evt.pmFeed && typeof evt.pmYesProb === 'number' && evt.pmYesProb >= IC_PM_MIN_PROB) {
+      var probBoost  = Math.round((evt.pmYesProb - IC_PM_MIN_PROB) / (1 - IC_PM_MIN_PROB) * 12); // 0-12 pts
       var obBonus    = (typeof evt.pmImbalance === 'number' && evt.pmImbalance > 0.15)
         ? Math.min(3, Math.round(evt.pmImbalance * 6)) : 0;                                   // 0-3 pts
       var whaleBonus = (typeof evt.pmWhaleNet === 'number' && evt.pmWhaleNet > 0)
@@ -9805,7 +9817,7 @@ document.addEventListener('DOMContentLoaded', function() {
       };
     }
 
-    var text = (evt.title + ' ' + evt.desc).toLowerCase();
+    var text = ((evt.title || '') + ' ' + (evt.desc || '')).toLowerCase();
     var kwHits = 0;
     if (pKey && ESC[pKey]) {
       kwHits = ESC[pKey].kws.filter(function(k){ return text.includes(k); }).length;
@@ -12111,54 +12123,8 @@ function _modalKeyHandler(e) {
     return 0;
   }
 
-  /* ── Seed data — seeded from Trade Verification Log on first run ─────────── */
-  var SEED = [
-    {
-      signal_id: 'SIG-SEED-001', source: 'GEE',
-      timestamp: '2026-03-05T09:00:00.000Z',
-      asset: 'WTI Crude Oil', direction: 'LONG',
-      entry_price: 81.40, target_price: 95.00, stop_loss: 76.00,
-      confidence: 0.72, duration_target: '6w',
-      outcome: 'open', close_price: null, close_time: null, pnl_pct: null,
-      notes: 'Iran/Hormuz thesis — GEE P:72%'
-    },
-    {
-      signal_id: 'SIG-SEED-002', source: 'GEE',
-      timestamp: '2026-03-05T09:05:00.000Z',
-      asset: 'GDX (Gold Miners)', direction: 'LONG',
-      entry_price: 33.20, target_price: 38.50, stop_loss: 30.80,
-      confidence: 0.68, duration_target: '6w',
-      outcome: 'open', close_price: null, close_time: null, pnl_pct: null,
-      notes: 'Safe-haven / Iran risk hedge'
-    },
-    {
-      signal_id: 'SIG-SEED-003', source: 'TOE',
-      timestamp: '2026-02-10T08:30:00.000Z',
-      asset: 'EUR/USD', direction: 'SHORT',
-      entry_price: 1.0890, target_price: 1.0600, stop_loss: 1.1050,
-      confidence: 0.71, duration_target: '2w',
-      outcome: 'hit', close_price: 1.0635, close_time: '2026-02-21T14:00:00.000Z',
-      pnl_pct: 2.34, notes: 'Ukraine Phase 2→3 transition, USD strength'
-    },
-    {
-      signal_id: 'SIG-SEED-004', source: 'TOE',
-      timestamp: '2026-01-28T10:00:00.000Z',
-      asset: 'TSM (TSMC)', direction: 'SHORT',
-      entry_price: 178.50, target_price: 155.00, stop_loss: 190.00,
-      confidence: 0.42, duration_target: '2w',
-      outcome: 'miss', close_price: 189.20, close_time: '2026-02-05T09:00:00.000Z',
-      pnl_pct: -6.00, notes: 'PLA drill concern — stood down before target. Entry P<45% threshold'
-    },
-    {
-      signal_id: 'SIG-SEED-005', source: 'GEE',
-      timestamp: '2026-01-15T09:00:00.000Z',
-      asset: 'Natural Gas (NG)', direction: 'SHORT',
-      entry_price: 3.42, target_price: 2.90, stop_loss: 3.65,
-      confidence: 0.66, duration_target: '3w',
-      outcome: 'hit', close_price: 2.96, close_time: '2026-01-30T09:00:00.000Z',
-      pnl_pct: 13.45, notes: 'Mild winter + EU storage full — supply glut confirmed'
-    }
-  ];
+  /* ── Seed data — L3: cleared so HRS hit-rate starts from real trades only ─── */
+  var SEED = [];
 
   /* ══════════════════════════════════════════════════════════════════════════ */
   window.HRS = {
@@ -12169,6 +12135,11 @@ function _modalKeyHandler(e) {
     load: function() {
       try {
         var raw = localStorage.getItem(STORE_KEY);
+        // Migration: check legacy key name so version bumps don't lose real signal history
+        if (!raw) {
+          var legacy = localStorage.getItem('geodash_hitrate_v0');
+          if (legacy) { raw = legacy; localStorage.removeItem('geodash_hitrate_v0'); }
+        }
         this.signals = raw ? JSON.parse(raw) : SEED.map(function(s) { return Object.assign({}, s); });
       } catch(e) {
         this.signals = SEED.map(function(s) { return Object.assign({}, s); });
@@ -12533,11 +12504,11 @@ function _modalKeyHandler(e) {
 </script>
 
 <!-- ShadowBroker Integration — injects OSINT feeds into the AI pipeline -->
-<script src="shadowbroker.js?v=21"></script>
+<script src="shadowbroker.js?v=22"></script>
 <!-- Polymarket Integration — prediction market consensus → IC pipeline (paper trading only) -->
-<script src="polymarket.js?v=13"></script>
+<script src="polymarket.js?v=15"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js"></script>
+<script src="executionEngine.js?v=6"></script>
 </body>
 </html>

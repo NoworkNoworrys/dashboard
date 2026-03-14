@@ -21,7 +21,7 @@
      PM.events()                      — return scored geo event cache
      PM.stEvents()                    — return scored ST direction event cache
 
-   V12  2026-03-14
+   V13  2026-03-14
    ══════════════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -44,7 +44,7 @@
     gammaBase: 'https://gamma-api.polymarket.com',
     clobBase:  'https://clob.polymarket.com',
     dataBase:  'https://data-api.polymarket.com',
-    proxy:     'https://corsproxy.io/?',
+    proxy:     'https://api.allorigins.win/get?url=',  // wraps response: {contents:"...",status:{...}}
     panelId:   'pmStatusPanel',
   };
 
@@ -207,9 +207,17 @@
       .catch(function (e) { clearTimeout(timer); cb(e.message || 'fetch error', null); });
   }
 
+  /* Unwrap allorigins {contents, status} envelope → actual payload string */
+  function _unwrapAllorigins(raw) {
+    if (raw && typeof raw === 'object' && raw.contents !== undefined) return raw.contents;
+    return raw;  // fallback: treat as direct response (future proxy swap)
+  }
+
   function _fetchProxy(url, timeoutMs, cb) {
-    _fetch(_cfg.proxy + encodeURIComponent(url), timeoutMs, function (err, data) {
+    _fetch(_cfg.proxy + encodeURIComponent(url), timeoutMs, function (err, wrapper) {
       if (err) return cb(err, null);
+      var text = _unwrapAllorigins(wrapper);
+      var data; try { data = typeof text === 'string' ? JSON.parse(text) : text; } catch (e) { return cb('JSON parse error', null); }
       cb(null, data);
     });
   }
@@ -221,10 +229,11 @@
       .then(function (r) {
         clearTimeout(timer);
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.text();
+        return r.json();  // allorigins always returns JSON wrapper
       })
-      .then(function (text) {
-        var d; try { d = JSON.parse(text); } catch (e) { d = null; }
+      .then(function (wrapper) {
+        var text = _unwrapAllorigins(wrapper);
+        var d; try { d = JSON.parse(typeof text === 'string' ? text : JSON.stringify(text)); } catch (e) { d = null; }
         cb(null, d);
       })
       .catch(function (e) { clearTimeout(timer); cb(e.message || 'fetch error', null); });
@@ -523,15 +532,20 @@
       });
 
       _markets = filtered.slice(0, 50).map(function (m) {
+        var clobIds = _parseField(m.clobTokenIds, []);
         return {
-          id:           m.id,
-          condition_id: m.condition_id || m.conditionId || m.id,
-          question:     (m.question || '').trim(),
-          outcomePrices: _parseField(m.outcomePrices, ['0.5','0.5']),
-          volume24hr:   parseFloat(m.volume24hr || m.volume || 0),
-          liquidityNum: parseFloat(m.liquidityNum || 0),
-          endDate:      m.endDate || null,
-          tokens:       _parseField(m.tokens, []),
+          id:             m.id,
+          condition_id:   m.condition_id || m.conditionId || m.id,
+          question:       (m.question || '').trim(),
+          outcomePrices:  _parseField(m.outcomePrices, ['0.5','0.5']),
+          volume24hr:     parseFloat(m.volume24hr || m.volume || 0),
+          liquidityNum:   parseFloat(m.liquidityNum || 0),
+          endDate:        m.endDate || null,
+          tokens:         _parseField(m.tokens, []),
+          yesTokenId:     clobIds[0] ? String(clobIds[0]) : null,   // from clobTokenIds[0]
+          bestBid:        parseFloat(m.bestBid || 0),
+          bestAsk:        parseFloat(m.bestAsk || 0),
+          lastTradePrice: parseFloat(m.lastTradePrice || 0),
         };
       });
 
@@ -558,15 +572,18 @@
 
   /* ── POLL: ORDER BOOK (CLOB, via proxy) ──────────────────────────────────── */
   function _pollOrderBook(market) {
-    var tokens   = market.tokens || [];
-    var yesToken = null;
-    for (var i = 0; i < tokens.length; i++) {
-      if ((tokens[i].outcome || '').toLowerCase() === 'yes') {
-        yesToken = tokens[i].token_id || tokens[i].tokenId;
-        break;
+    // Primary: use yesTokenId extracted from clobTokenIds during market normalisation
+    var yesToken = market.yesTokenId || null;
+    // Fallback: legacy tokens array (rarely populated by Gamma API)
+    if (!yesToken) {
+      var tokens = market.tokens || [];
+      for (var i = 0; i < tokens.length; i++) {
+        if ((tokens[i].outcome || '').toLowerCase() === 'yes') {
+          yesToken = tokens[i].token_id || tokens[i].tokenId; break;
+        }
       }
+      if (!yesToken) yesToken = tokens[0] && (tokens[0].token_id || tokens[0].tokenId);
     }
-    if (!yesToken) yesToken = tokens[0] && (tokens[0].token_id || tokens[0].tokenId);
     if (!yesToken) return;
 
     var url = _cfg.clobBase + '/book?token_id=' + yesToken;
@@ -592,37 +609,32 @@
     });
   }
 
-  /* ── POLL: WHALE ACTIVITY (Data API, via proxy) ───────────────────────────── */
+  /* ── POLL: PRICE ACTION SIGNAL (replaces data-api activity, which now requires user auth) */
   function _pollActivity(market) {
-    var url = _cfg.dataBase + '/activity?market=' + market.condition_id + '&limit=50';
-    _fetchProxyText(url, 8000, function (err, data) {
-      if (err || !data) { _status.activity.err = err || 'no data'; return; }
+    // data-api.polymarket.com/activity now requires ?user={wallet} — unusable without auth.
+    // Instead, derive a buy/sell pressure signal from Gamma's bestBid/bestAsk/lastTradePrice
+    // which are already stored on the normalised market object — no extra API call needed.
+    var bid  = market.bestBid  || 0;
+    var ask  = market.bestAsk  || 0;
+    var last = market.lastTradePrice || 0;
+    var yp   = _yesPrice(market);
+    var mid  = (bid + ask) > 0 ? (bid + ask) / 2 : yp;
 
-      var trades = Array.isArray(data) ? data : (data.data || data.activity || []);
-      var whaleBuys = 0, whaleSells = 0, largest = 0;
+    // Last trade above mid = buy pressure; below = sell pressure
+    var netWhales = (last > mid + 0.005) ? 1 : (last < mid - 0.005) ? -1 : 0;
 
-      trades.forEach(function (t) {
-        var usdSize = parseFloat(t.usdcSize || t.size || t.amount || 0);
-        if (usdSize < _cfg.whaleThreshold) return;
-        if (usdSize > largest) largest = usdSize;
-        var outcome = (t.outcome || t.side || '').toLowerCase();
-        if (outcome === 'yes' || outcome === 'buy') whaleBuys++;
-        else whaleSells++;
-      });
-
-      var netWhales = whaleBuys - whaleSells;
-      _actCache[market.condition_id] = {
-        whaleCount: whaleBuys + whaleSells, netWhales: netWhales,
-        largestTrade: largest,
-        whaleBias: netWhales > 0 ? 'BUY' : netWhales < 0 ? 'SELL' : 'NEUTRAL',
-        ts: Date.now(),
-      };
-      _status.activity.ok    = true;
-      _status.activity.count = Object.keys(_actCache).length;
-      _status.activity.last  = _hhmm();
-      _status.activity.err   = '';
-      _renderPanel();
-    });
+    _actCache[market.condition_id] = {
+      whaleCount:   0,
+      netWhales:    netWhales,
+      largestTrade: 0,
+      whaleBias:    netWhales > 0 ? 'BUY' : netWhales < 0 ? 'SELL' : 'NEUTRAL',
+      ts: Date.now(),
+    };
+    _status.activity.ok    = true;
+    _status.activity.count = Object.keys(_actCache).length;
+    _status.activity.last  = _hhmm();
+    _status.activity.err   = '';
+    _renderPanel();
   }
 
   /* ── POLL: ST DISCOVER (find short-expiry direction markets) ─────────────── */
@@ -885,7 +897,7 @@
     _renderPanel();
     setInterval(_renderPanel, 15000);
 
-    console.log('[Polymarket] V12 active | Geo markets + ST direction | Mult: ' + _cfg.pmMult + '× | PAPER ONLY');
+    console.log('[Polymarket] V13 active | Geo markets + ST direction | Mult: ' + _cfg.pmMult + '× | PAPER ONLY');
   }
 
   /* ── PUBLIC API ──────────────────────────────────────────────────────────── */

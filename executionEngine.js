@@ -26,6 +26,14 @@
   var TRADES_KEY  = 'geodash_ee_trades_v1';
   var SIGLOG_KEY  = 'geodash_ee_siglog_v1';
 
+  /* ── SQLite API ─────────────────────────────────────────────────────────────
+     Primary persistence: GeoIntel backend on port 8765.
+     Falls back to localStorage silently if the backend isn't running.         */
+  // API base: override by setting window.GEO_API_BASE before this script loads.
+  // e.g. <script>window.GEO_API_BASE = 'https://your-vps.example.com';</script>
+  var _API_BASE   = (typeof window !== 'undefined' && window.GEO_API_BASE) || 'http://localhost:8765';
+  var _apiOnline  = false;   // set true after first successful /api/status ping
+
   /* ── Default risk configuration ────────────────────────────────────────────── */
   var DEFAULTS = {
     mode:                  'SIMULATION', // 'SIMULATION' | 'LIVE'
@@ -39,7 +47,9 @@
     max_per_region:        2,            // max open trades per geopolitical region
     max_exposure_pct:      20,           // max % of balance in open positions
     cooldown_ms:           300000,       // 5 min cooldown between same-asset signals
-    broker:                'SIMULATION'  // future: 'BINANCE' | 'ALPACA' | 'POLYMARKET'
+    broker:                'SIMULATION', // future: 'BINANCE' | 'ALPACA' | 'POLYMARKET'
+    auto_start:            true,         // if false, auto-execution stays OFF on page load
+    max_siglog:            200           // max entries kept in signal log
   };
 
   /* ── Correlation groups — assets within each group are treated as equivalent
@@ -97,14 +107,18 @@
      ══════════════════════════════════════════════════════════════════════════════ */
 
   /* ── State ─────────────────────────────────────────────────────────────────── */
-  var _cfg       = {};   // active config (merged DEFAULTS + localStorage)
-  var _trades    = [];   // all trades: open + closed
-  var _cooldown  = {};   // asset → timestamp of last signal processed
-  var _log       = [];   // activity log entries
-  var _seq       = 0;    // ID sequence counter
+  var _cfg         = {};   // active config (merged DEFAULTS + localStorage)
+  var _trades      = [];   // all trades: open + closed
+  var _cooldown    = {};   // asset → timestamp of last signal processed
+  var _log         = [];   // activity log entries
+  var _seq         = 0;    // ID sequence counter
   var _livePrice   = {};   // trade_id → most-recently fetched market price
   var _lastSignals = [];   // most recent IC signal batch — used by the re-scan loop
   var _signalLog   = [];   // full history of every IC signal seen (capped at 200)
+  var _pendingOpen = {};   // asset → true while a fetchPrice is in-flight (prevents duplicate opens)
+  var _initialised = false; // reentrancy guard — prevents duplicate intervals if init() called twice
+  var _showAllClosed = false; // UI toggle: show all closed trades vs capped at 25
+  var _backendPrices = {};  // symbol → price, populated by _pollBackendPrices() every 25 s (H4)
 
   /* ── Price source maps ──────────────────────────────────────────────────────── */
 
@@ -173,11 +187,22 @@
 
   var _priceCache   = {};   // token → last known price (any source)
   var _priceCacheTs = {};   // token → ms timestamp of last successful fetch
-  var _CACHE_TTL    = 25000; // 25 s — reuse within same 30-s monitor cycle
+  var _CACHE_TTL    = 15000; // 15 s — shorter than 30-s monitor cycle so prices are fresh
 
   /* ══════════════════════════════════════════════════════════════════════════════
      PERSISTENCE
+     ══════════════════════════════════════════════════════════════════════════════
+     Primary store  : SQLite via GeoIntel backend (http://localhost:8765/api/trades)
+     Fallback store : localStorage (always written as an immediate backup)
+
+     Strategy:
+       1. On init, try API. If online → load from DB (authoritative).
+       2. Migrate any localStorage trades not in the DB (one-time, then clear LS).
+       3. On openTrade / closeTrade → fire async POST/PATCH to API (fire-and-forget).
+       4. localStorage is always written synchronously so the UI works offline.
      ══════════════════════════════════════════════════════════════════════════════ */
+
+  /* ── Config (localStorage only — lightweight, no history needed) ─────────── */
 
   function loadCfg() {
     try {
@@ -190,16 +215,51 @@
     try { localStorage.setItem(CFG_KEY, JSON.stringify(_cfg)); } catch (e) {}
   }
 
+  /* ── Trades — synchronous localStorage (immediate) ───────────────────────── */
+
   function loadTrades() {
     try {
       var raw = localStorage.getItem(TRADES_KEY);
+      // Migration: check legacy key names so version bumps don't silently orphan history
+      if (!raw) {
+        var legacyKeys = ['geodash_ee_trades', 'geodash_ee_trades_v0'];
+        for (var i = 0; i < legacyKeys.length; i++) {
+          var legacyRaw = localStorage.getItem(legacyKeys[i]);
+          if (legacyRaw) {
+            raw = legacyRaw;
+            localStorage.setItem(TRADES_KEY, raw);
+            localStorage.removeItem(legacyKeys[i]);
+            break;
+          }
+        }
+      }
       _trades = raw ? JSON.parse(raw) : [];
     } catch (e) { _trades = []; }
   }
 
   function saveTrades() {
-    try { localStorage.setItem(TRADES_KEY, JSON.stringify(_trades)); } catch (e) {}
+    try {
+      localStorage.setItem(TRADES_KEY, JSON.stringify(_trades));
+    } catch (e) {
+      // QuotaExceededError: browser storage is full — warn the user visibly
+      var isQuota = e && (e.name === 'QuotaExceededError' ||
+                          e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+                          e.code === 22 || e.code === 1014);
+      if (isQuota) {
+        log('ERROR', 'localStorage FULL — trades not saved locally. Export now!', 'red');
+        var banner = document.getElementById('eeDataSafetyBanner');
+        if (banner) {
+          banner.style.display = 'block';
+          banner.innerHTML =
+            '<span style="color:#e84040;font-weight:bold">&#9888; STORAGE FULL</span>' +
+            '<span style="color:var(--dim);margin-left:8px">Browser storage is full — new trades are NOT being saved locally.</span>' +
+            '<button onclick="EE.exportJSON()" style="margin-left:10px;padding:2px 10px;background:#e84040;color:#fff;border:none;font-family:inherit;font-size:10px;font-weight:bold;cursor:pointer">&#8595; EXPORT NOW</button>';
+        }
+      }
+    }
   }
+
+  /* ── Signal log (localStorage only) ────────────────────────────────────────── */
 
   function loadSigLog() {
     try {
@@ -210,6 +270,98 @@
 
   function saveSigLog() {
     try { localStorage.setItem(SIGLOG_KEY, JSON.stringify(_signalLog)); } catch (e) {}
+  }
+
+  /* ── API helpers (async, fire-and-forget) ────────────────────────────────── */
+
+  function _apiFetch(path, opts) {
+    return fetch(_API_BASE + path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
+  }
+
+  /* POST a single trade to the API (insert/upsert) */
+  function _apiPostTrade(trade) {
+    if (!_apiOnline) return;
+    _apiFetch('/api/trades', { method: 'POST', body: JSON.stringify(trade) })
+      .catch(function () { _apiOnline = false; });
+  }
+
+  /* PATCH an existing trade in the API (e.g. after close) */
+  function _apiPatchTrade(tradeId, updates) {
+    if (!_apiOnline) return;
+    _apiFetch('/api/trades/' + encodeURIComponent(tradeId), {
+      method: 'PATCH',
+      body:   JSON.stringify(updates)
+    }).catch(function () { _apiOnline = false; });
+  }
+
+  /* ── API startup: check online, load DB trades, migrate localStorage ──────── */
+
+  function _apiInit() {
+    _apiFetch('/api/status')
+      .then(function (r) {
+        if (!r.ok) throw new Error('status ' + r.status);
+        _apiOnline = true;
+        _pollBackendPrices();                    // H4: prime the price cache immediately
+        setInterval(_pollBackendPrices, 25000);  // H4: refresh every 25 s
+        return _apiFetch('/api/trades');
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var dbTrades = data.trades || [];
+
+        // Build lookup of trade_ids already in DB
+        var inDb = {};
+        dbTrades.forEach(function (t) { inDb[t.trade_id] = true; });
+
+        // Migrate any localStorage trades not yet in DB (one-time)
+        var toMigrate = _trades.filter(function (t) { return !inDb[t.trade_id]; });
+        if (toMigrate.length) {
+          _apiFetch('/api/trades', { method: 'POST', body: JSON.stringify(toMigrate) })
+            .then(function () {
+              log('SYSTEM', 'Migrated ' + toMigrate.length + ' trade(s) from localStorage → SQLite', 'dim');
+            })
+            .catch(function () {});
+        }
+
+        // ID-based merge: union of DB + local, DB wins for same trade_id.
+        // This prevents a count-based comparison from silently discarding trades that
+        // exist locally but not yet in the DB (e.g. opened while backend was offline).
+        var merged = {};
+        _trades.forEach(function (t) { if (t.trade_id) merged[t.trade_id] = t; });
+        dbTrades.forEach(function (t) { if (t.trade_id) merged[t.trade_id] = t; }); // DB wins
+        var mergedArr = Object.keys(merged).map(function (id) { return merged[id]; });
+        mergedArr.sort(function (a, b) {
+          return new Date(b.timestamp_open) - new Date(a.timestamp_open);
+        });
+        _trades = mergedArr;
+        saveTrades();   // keep localStorage in sync
+        renderUI();
+        log('SYSTEM',
+          'SQLite backend online — ' + dbTrades.length + ' DB + ' + toMigrate.length + ' migrated → ' + _trades.length + ' total',
+          'green');
+      })
+      .catch(function (err) {
+        _apiOnline = false;
+        log('SYSTEM', 'SQLite backend offline — using localStorage only', 'dim');
+      });
+  }
+
+  /* H4 — Poll backend /api/market and cache prices in _backendPrices.
+     Runs every 25 s while backend is online. Gives fetchPrice() a privacy-safe
+     step-0 source that avoids corsproxy.io for all backend-tracked symbols.     */
+  function _pollBackendPrices() {
+    if (!_apiOnline) return;
+    _apiFetch('/api/market')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        Object.keys(data).forEach(function (sym) {
+          var entry = data[sym];
+          if (entry && typeof entry.price === 'number' && entry.price > 0) {
+            _backendPrices[sym] = entry.price;
+          }
+        });
+      })
+      .catch(function () {});   // silent — fetchPrice falls through to other sources
   }
 
   /* Record one signal event — action: 'TRADED' | 'SKIPPED' | 'WATCH' */
@@ -224,7 +376,8 @@
       action:      action,
       skip_reason: skipReason || null
     });
-    if (_signalLog.length > 200) _signalLog.length = 200;  // cap at 200
+    var _maxLog = _cfg.max_siglog || 200;
+    if (_signalLog.length > _maxLog) _signalLog.length = _maxLog;  // cap (configurable via max_siglog)
     saveSigLog();
   }
 
@@ -329,6 +482,14 @@
   function fetchPrice(asset, cb) {
     var token = normaliseAsset(asset);
 
+    // 0. Backend market cache — privacy-safe, no corsproxy needed (H4)
+    //    Covers WTI, BRENT, GLD, LMT, TSM, SPY, BTC, ETH, etc.
+    if (_apiOnline && _backendPrices[token] !== undefined) {
+      _cacheSet(token, _backendPrices[token]);
+      cb(_backendPrices[token]);
+      return;
+    }
+
     // 1. Binance — crypto USDT pairs (public, no key, CORS-open)
     if (PRICE_SOURCES[token]) {
       fetch('https://api.binance.com/api/v3/ticker/price?symbol=' + PRICE_SOURCES[token])
@@ -399,6 +560,10 @@
 
     if (open.some(function (t) { return t.asset === sig.asset; }))
       return { ok: false, reason: 'Already have open trade for ' + sig.asset };
+
+    // Pending lock: fetchPrice is async — block second signal for same asset while first is in flight
+    if (_pendingOpen[normaliseAsset(sig.asset)])
+      return { ok: false, reason: 'Price fetch already in progress for ' + sig.asset };
 
     // Correlation guard: block if a correlated asset is already open in the same direction
     var corrGroup = _getCorrGroup(sig.asset);
@@ -491,6 +656,7 @@
     _trades.unshift(trade);
     _cooldown[sig.asset] = Date.now();
     saveTrades();
+    _apiPostTrade(trade);   // async push to SQLite (fire-and-forget)
 
     // Auto-capture in Hit Rate Tracker if available
     if (window.HRS && typeof HRS.capture === 'function') {
@@ -552,6 +718,16 @@
     }
 
     saveTrades();
+    // Async push updated trade to SQLite (fire-and-forget)
+    _apiPatchTrade(trade.trade_id, {
+      status:          trade.status,
+      close_price:     trade.close_price,
+      timestamp_close: trade.timestamp_close,
+      close_reason:    trade.close_reason,
+      pnl_pct:         trade.pnl_pct,
+      pnl_usd:         trade.pnl_usd
+    });
+
     log('CLOSED',
       trade.asset + ' ' + trade.direction +
       ' → ' + reason +
@@ -594,9 +770,12 @@
         return;
       }
 
-      // All checks passed — log as TRADED then fetch price and open
+      // All checks passed — acquire pending lock, then fetch price and open
+      var _lockKey = normaliseAsset(sig.asset);
+      _pendingOpen[_lockKey] = true;
       _logSignal(sig, 'TRADED', null);
       fetchPrice(sig.asset, function (price) {
+        delete _pendingOpen[_lockKey];   // release lock regardless of outcome
         openTrade(sig, price || 100);
       });
     });
@@ -665,7 +844,6 @@
     // Placeholder — implement adapter in a separate file
     // adapter should set _brokerAdapter to an object with placeOrder / cancelOrder / getPrice
     log('BROKER', 'connectBroker(' + brokerName + ') — not yet implemented', 'amber');
-    console.warn('[EE] Broker adapter for', brokerName, 'not yet implemented.');
   }
 
   /* ══════════════════════════════════════════════════════════════════════════════
@@ -715,6 +893,10 @@
     set('eeBadgePnl',     (totPnl >= 0 ? '+$' : '-$') + _num(Math.abs(totPnl)) + ' P&L');
     set('eeBadgeRate',    rate !== null ? rate + '% WIN' : '— WIN');
     set('eeOpenCount',    open.length);
+
+    // Data safety banner: show until there are closed trades on record
+    var banner = document.getElementById('eeDataSafetyBanner');
+    if (banner) banner.style.display = closed.length === 0 ? 'block' : 'none';
 
     var pnlEl = document.getElementById('eeBadgePnl');
     if (pnlEl) {
@@ -803,16 +985,34 @@
   function renderClosedTrades() {
     var el = document.getElementById('eeClosedTrades');
     if (!el) return;
-    var closed = _trades.filter(function (t) { return t.status === 'CLOSED'; }).slice(0, 25);
-    if (!closed.length) {
-      el.innerHTML = '<div class="ee-placeholder">No closed trades yet.</div>';
+    var allClosed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
+    var closed    = _showAllClosed ? allClosed : allClosed.slice(0, 25);
+
+    if (!allClosed.length) {
+      // Show open trades as context instead of a blank panel
+      var open = _trades.filter(function (t) { return t.status === 'OPEN'; });
+      if (open.length) {
+        el.innerHTML = '<div class="ee-placeholder" style="margin-bottom:6px">No closed trades yet — ' + open.length + ' position(s) open.</div>'
+          + open.map(function (t) {
+            return '<div class="ee-closed-row" style="opacity:0.6">'
+              + '<span class="ee-cr-reason" style="color:var(--amber)">●</span>'
+              + '<span class="ee-cr-asset">' + _esc(t.asset) + '</span>'
+              + '<span class="ee-cr-dir ' + t.direction.toLowerCase() + '">' + t.direction + '</span>'
+              + '<span class="ee-cr-pnl" style="color:var(--amber)">OPEN</span>'
+              + '<span class="ee-cr-ts">' + _age(t.timestamp_open) + '</span>'
+            + '</div>';
+          }).join('');
+      } else {
+        el.innerHTML = '<div class="ee-placeholder">No closed trades yet.</div>';
+      }
       return;
     }
-    el.innerHTML = closed.map(function (t) {
+
+    var rows = closed.map(function (t) {
       var pc  = t.pnl_pct || 0;
       var pu  = t.pnl_usd || 0;
       var cls = pc >= 0 ? 'pos' : 'neg';
-      var icon = t.close_reason === 'TAKE_PROFIT' ? '\u2713' : t.close_reason === 'STOP_LOSS' ? '\u2717' : '\u2014';
+      var icon    = t.close_reason === 'TAKE_PROFIT' ? '\u2713' : t.close_reason === 'STOP_LOSS' ? '\u2717' : '\u2014';
       var iconCls = t.close_reason === 'TAKE_PROFIT' ? 'tp' : 'sl';
       return '<div class="ee-closed-row">' +
         '<span class="ee-cr-reason ' + iconCls + '">' + icon + '</span>' +
@@ -823,6 +1023,19 @@
         '<span class="ee-cr-ts">' + _age(t.timestamp_open) + '</span>' +
       '</div>';
     }).join('');
+
+    // Show-all toggle when there are more than 25 closed trades
+    var toggleBtn = '';
+    if (allClosed.length > 25) {
+      var label = _showAllClosed
+        ? '&#9650; Show recent 25'
+        : '&#9660; Show all ' + allClosed.length + ' trades';
+      toggleBtn = '<div style="text-align:center;margin-top:6px">' +
+        '<button onclick="EE.toggleAllClosed()" style="background:none;border:1px solid var(--dim);color:var(--dim);font-family:inherit;font-size:10px;padding:2px 10px;cursor:pointer;letter-spacing:1px">' +
+        label + '</button></div>';
+    }
+
+    el.innerHTML = rows + toggleBtn;
   }
 
   function renderLog(el) {
@@ -1570,7 +1783,13 @@
       document.body.removeChild(a); URL.revokeObjectURL(a.href);
     },
 
-    render: renderUI
+    render: renderUI,
+
+    /* ── Toggle full closed-trade history in the UI ── */
+    toggleAllClosed: function () {
+      _showAllClosed = !_showAllClosed;
+      renderClosedTrades();
+    }
   };
 
   /* ══════════════════════════════════════════════════════════════════════════════
@@ -1578,30 +1797,50 @@
      ══════════════════════════════════════════════════════════════════════════════ */
 
   function init() {
+    if (_initialised) return;   // guard against duplicate intervals if called twice
+    _initialised = true;
+
     loadCfg();
     loadTrades();
     loadSigLog();
 
-    /* Always-on: force auto-execution on every page load.
-       User can still pause mid-session via the STOP AUTO button,
-       but it resets to ON on next reload — by design. */
-    _cfg.enabled = true;
+    /* Auto-start: honour the auto_start config flag (M6).
+       Defaults to true (original behaviour) — set auto_start: false to keep
+       auto-execution OFF on page load (e.g. review mode).                    */
+    if (_cfg.auto_start !== false) {
+      _cfg.enabled = true;
+    }
     saveCfg();
 
     setInterval(monitorTrades, 30000);  // price-check open trades every 30 s
 
     /* Re-scan loop: every 5 minutes re-process the last IC signal batch.
-       Keeps the engine finding trades even when IC cycles are slow / paused. */
+       Only re-evaluates signals for assets that have no open trade AND whose
+       cooldown has expired — prevents re-opening a trade that was just closed. */
     setInterval(function () {
-      if (_cfg.enabled && _lastSignals.length) {
-        log('SCAN', 'Periodic re-scan — ' + _lastSignals.length + ' signal(s) re-evaluated', 'dim');
-        onSignals(_lastSignals);
+      if (!_cfg.enabled || !_lastSignals.length) return;
+      var now  = Date.now();
+      var open = openTrades();
+      var freshSigs = _lastSignals.filter(function (s) {
+        var asset = normaliseAsset(s.asset);
+        // Skip if we already have an open trade for this asset
+        if (open.some(function (t) { return normaliseAsset(t.asset) === asset; })) return false;
+        // Skip if still in cooldown (trade was recently closed or opened)
+        var cd = _cooldown[asset];
+        return !cd || (now - cd) > _cfg.cooldown_ms;
+      });
+      if (freshSigs.length) {
+        log('SCAN', 'Periodic re-scan — ' + freshSigs.length + '/' + _lastSignals.length + ' signal(s) eligible', 'dim');
+        onSignals(freshSigs);
       }
     }, 300000);  // 5 minutes
 
     renderUI();
     log('SYSTEM', 'Execution Engine v1.0 ready — ' + _cfg.mode + ' mode  |  ' +
         'Auto-scan ALWAYS ON  |  ' + openTrades().length + ' open trade(s) restored', 'green');
+
+    // Async: connect to SQLite backend, migrate localStorage data if needed
+    _apiInit();
   }
 
   if (document.readyState === 'loading') {

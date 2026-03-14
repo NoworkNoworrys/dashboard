@@ -183,7 +183,8 @@
   }
 
   /* ── FETCH HELPERS ───────────────────────────────────────────────────────── */
-  var _PROXY = 'https://corsproxy.io/?';
+  var _PROXY         = 'https://corsproxy.io/?';           // primary: raw passthrough
+  var _PROXY_BACKUP  = 'https://api.allorigins.win/get?url='; // fallback: wraps in {contents,status}
 
   /* JSON fetch with timeout */
   function _fetch(url, timeoutMs, cb) {
@@ -213,18 +214,36 @@
       .catch(function (err) { clearTimeout(timer); cb(err, null); });
   }
 
-  /* Fetch + parse RSS XML → array of {title, desc, pubDate, link} */
+  /* Parse RSS XML text → array of {title, desc, pubDate, link}, or null on failure */
+  function _parseRssText(text) {
+    try {
+      var doc   = new DOMParser().parseFromString(text, 'text/xml');
+      var items = Array.from(doc.querySelectorAll('item')).map(function (el) {
+        var get = function (tag) { var n = el.querySelector(tag); return n ? (n.textContent || '') : ''; };
+        return { title: get('title'), desc: get('description'), pubDate: get('pubDate'), link: get('link') };
+      });
+      return items.length ? items : null;
+    } catch (e) { return null; }
+  }
+
+  /* Fetch + parse RSS XML → array of {title, desc, pubDate, link}
+     Primary: corsproxy.io (raw passthrough)
+     Fallback: allorigins.win/get (JSON-wrapped response)            */
   function _fetchRss(url, timeoutMs, cb) {
     _fetchText(_PROXY + encodeURIComponent(url), timeoutMs || 8000, function (err, text) {
-      if (err) { cb(err, null); return; }
-      try {
-        var doc   = new DOMParser().parseFromString(text, 'text/xml');
-        var items = Array.from(doc.querySelectorAll('item')).map(function (el) {
-          var get = function (tag) { var n = el.querySelector(tag); return n ? (n.textContent || '') : ''; };
-          return { title: get('title'), desc: get('description'), pubDate: get('pubDate'), link: get('link') };
-        });
-        cb(items.length ? null : new Error('empty feed'), items);
-      } catch (e) { cb(e, null); }
+      if (!err && text) {
+        var items = _parseRssText(text);
+        if (items) { cb(null, items); return; }
+      }
+      // Primary failed — try allorigins backup
+      _fetchText(_PROXY_BACKUP + encodeURIComponent(url), timeoutMs || 8000, function (err2, raw) {
+        if (err2 || !raw) { cb(err || err2, null); return; }
+        // allorigins wraps in JSON: {"contents":"<rss...>","status":{...}}
+        var xmlText = raw;
+        try { var j = JSON.parse(raw); if (j && j.contents) xmlText = j.contents; } catch (e) {}
+        var items2 = _parseRssText(xmlText);
+        cb(items2 ? null : new Error('empty feed'), items2 || null);
+      });
     });
   }
 
