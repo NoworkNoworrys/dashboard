@@ -550,6 +550,12 @@
     .signal-tag.satellite { background: #20c0a0; color: var(--bg); }
     .signal-tag.osint        { background: #3a4a5a; color: var(--text); }
     .signal-tag.shadowbroker { background: #7b2fff; color: #fff; }
+    .signal-tag.polymarket   { background: #1ec8e0; color: var(--bg); }
+
+    /* Polymarket order book center-origin bar */
+    .pm-ob-bar { width:70px;height:4px;background:var(--bg3);display:inline-block;vertical-align:middle;position:relative;overflow:hidden; }
+    .pm-ob-fill-bid { position:absolute;left:50%;height:100%;background:var(--green); }
+    .pm-ob-fill-ask { position:absolute;right:50%;height:100%;background:var(--red); }
 
     .signal-legend { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); font-size: 11px; align-items: center; }
     .sig-legend-item { display: flex; align-items: center; gap: 8px; }
@@ -6226,6 +6232,80 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════════════
+       POLYMARKET PREDICTION MARKET INTELLIGENCE
+       Gamma API (YES price = wallet cluster consensus) · CLOB order book · Whale trades
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num" style="background:#1ec8e0;color:var(--bg)">PM</span>
+      <span class="section-title" style="color:#1ec8e0">Polymarket Prediction Markets</span>
+      <span class="section-ts">Gamma · CLOB · Whale Trades — geopolitical consensus signals</span>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:12px">
+      <!-- Left: live feed status + market table -->
+      <div class="card" style="border-top:2px solid #1ec8e0">
+        <div class="card-title">
+          <span class="signal-tag polymarket">LIVE</span>
+          Market Feed &amp; Controls
+        </div>
+        <div id="pmStatusPanel" style="font-size:11px;color:var(--dim)">
+          Loading Polymarket feeds&hellip;
+        </div>
+      </div>
+
+      <!-- Right: signal methodology + asset mapping -->
+      <div class="card" style="border-top:2px solid #1ec8e0">
+        <div class="card-title">PM Signal Layers &amp; Asset Mapping</div>
+        <div style="font-size:10px;line-height:1.7">
+          <div style="margin-bottom:8px;color:var(--dim)">
+            <span style="color:#1ec8e0;font-weight:bold">YES price</span> = capital-weighted wallet cluster consensus ·
+            <span style="color:#1ec8e0;font-weight:bold">OB imbalance</span> = active bid/ask pressure ·
+            <span style="color:#1ec8e0;font-weight:bold">Whale ≥$1k</span> = institutional flow
+          </div>
+          <div style="display:grid;grid-template-columns:140px 1fr;gap:3px 10px;color:var(--text)">
+            <span style="color:var(--dim)">Iran / Middle East</span><span>WTI · BRENT · GLD · XAR · LMT</span>
+            <span style="color:var(--dim)">Ukraine / Russia</span><span>WTI · BRENT · GLD · XAR</span>
+            <span style="color:var(--dim)">Taiwan / Strait</span><span>TSM · SMH · GLD · LMT</span>
+            <span style="color:var(--dim)">Strait of Hormuz</span><span>WTI · BRENT · GLD · XLE</span>
+            <span style="color:var(--dim)">Red Sea / Houthi</span><span>WTI · BRENT · XLE · GLD</span>
+            <span style="color:var(--dim)">Energy markets</span><span>WTI · BRENT · XLE</span>
+          </div>
+          <p class="note" style="margin-top:8px;font-size:9px">
+            PM signals inject into IC pipeline via <code>pmFeed</code> tag. scoreEvent() adds up to
+            +18 pts pmBoost when YES probability, OB imbalance and whale direction align.
+            All trades remain paper-only.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- PM Multiplier control -->
+    <div class="card" style="border-left:3px solid #1ec8e0;margin-bottom:0">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:11px">
+        <div>
+          <span style="color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:1px">PM Weight Multiplier</span><br>
+          <span style="color:var(--text);font-size:10px">Scales Polymarket <code>pmYesProb</code> → <code>socialV</code> (S4 scorer). 1.0 = neutral. Higher = more aggressive PM signal weighting.</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="range" id="pmMultSlider" min="0.1" max="3.0" step="0.1" value="1.0"
+            style="width:120px;accent-color:#1ec8e0"
+            oninput="document.getElementById('pmMultVal').textContent=parseFloat(this.value).toFixed(1)+'×'; if(window.PM) PM.setMult(this.value)">
+          <span id="pmMultVal" style="color:#1ec8e0;font-weight:bold;min-width:32px">1.0×</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="if(window.PM) PM.pollAll();"
+            style="font-size:9px;padding:3px 10px;background:var(--bg3);border:1px solid #1ec8e0;color:#1ec8e0;cursor:pointer;letter-spacing:0.5px">
+            ▶ POLL NOW</button>
+          <button onclick="if(window.PM) PM.demo();"
+            style="font-size:9px;padding:3px 10px;background:var(--bg3);border:1px solid var(--amber);color:var(--amber);cursor:pointer;letter-spacing:0.5px">
+            ◉ RUN DEMO</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════════
        SECTION 4 — GEOPOLITICAL RISK INDICATORS
        ══════════════════════════════════════════════════════════════════════════════ -->
   <div class="section">
@@ -9611,7 +9691,19 @@ document.addEventListener('DOMContentLoaded', function() {
     var assets = [];
     Object.keys(MKTMAP).forEach(function(k){ if(text.includes(k)) MKTMAP[k].forEach(function(a){ if(!assets.includes(a)) assets.push(a); }); });
     var s6 = Math.min(10, assets.length * 2);
-    evt.signal   = Math.min(100, s1+s2+s3+s4+s5+s6);
+    // pmBoost: +0 to +18 pts when Polymarket confirms this geo event
+    // Sources: probability strength (0-12) + OB imbalance (0-3) + whale direction (0-3)
+    var pmBoost = 0;
+    if (evt.pmFeed && typeof evt.pmYesProb === 'number' && evt.pmYesProb >= 0.45) {
+      var probBoost  = Math.round((evt.pmYesProb - 0.45) / 0.55 * 12);                       // 0-12 pts
+      var obBonus    = (typeof evt.pmImbalance === 'number' && evt.pmImbalance > 0.15)
+        ? Math.min(3, Math.round(evt.pmImbalance * 6)) : 0;                                   // 0-3 pts
+      var whaleBonus = (typeof evt.pmWhaleNet === 'number' && evt.pmWhaleNet > 0)
+        ? Math.min(3, evt.pmWhaleNet) : 0;                                                     // 0-3 pts
+      pmBoost = Math.min(18, probBoost + obBonus + whaleBonus);
+    }
+    evt.signal   = Math.min(100, s1+s2+s3+s4+s5+s6+pmBoost);
+    evt.pmBoost  = pmBoost;
     evt.assets   = assets;
     evt.keywords = kwHits;
     evt.geoScore = geo;
@@ -9731,7 +9823,7 @@ document.addEventListener('DOMContentLoaded', function() {
   /* ── RENDER: SIGNAL FEED ───────────────────────────────────────────────── */
   function renderSignals() {
     var el = gel('intelSignalFeed'); if (!el) return;
-    var top = IC.events.slice(0,30);
+    var top = IC.events.slice().sort(function(a,b){ return (b.signal||0)-(a.signal||0); }).slice(0,30);
     if (!top.length) { el.innerHTML = '<div class="intel-placeholder">No events yet&hellip;</div>'; return; }
     el.innerHTML = top.map(function(e){
       var s = e.signal||0;
@@ -9740,11 +9832,17 @@ document.addEventListener('DOMContentLoaded', function() {
         ? '<span class="signal-tag shadowbroker" style="font-size:8px;padding:1px 5px;margin-right:4px;vertical-align:middle">'
           + e.sbFeed.toUpperCase() + '</span>'
         : '';
+      var pmBadge = e.pmFeed
+        ? '<span class="signal-tag polymarket" style="font-size:8px;padding:1px 5px;margin-right:4px;vertical-align:middle">'
+          + 'PM·' + (e.pmYesProb ? Math.round(e.pmYesProb*100)+'%' : 'SIG')
+          + (e.pmWhaleNet && e.pmWhaleNet !== 0 ? (e.pmWhaleNet>0?' ⬆':' ⬇') : '')
+          + '</span>'
+        : '';
       return '<div class="intel-sig-item">' +
         '<div class="intel-sig-bar-wrap"><div class="intel-sig-fill f-'+cls+'" style="width:'+s+'%"></div></div>' +
         '<span class="intel-sig-score s-'+cls+'">'+s+'</span>' +
         '<span class="intel-sig-src">'+e.source.slice(0,7).toUpperCase()+'</span>' +
-        sbBadge +
+        sbBadge + pmBadge +
         '<span class="intel-sig-text" title="'+e.title+'">'+e.title+'</span>' +
         '<span class="intel-sig-time">'+e.time+'</span>' +
       '</div>';
@@ -9848,7 +9946,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 conf:       baseConf,
                 reason:     (st.scenario || r).slice(0, 36),
                 region:     r,
-                matchedKws: []           /* track which keywords contributed */
+                matchedKws: [],          /* track which keywords contributed */
+                pmFeed:     evt.pmFeed   || null,   /* Polymarket provenance */
+                pmMarket:   evt.pmMarket || null,
               };
             }
             candidates[k].score    += rawScore;
@@ -10026,6 +10126,17 @@ document.addEventListener('DOMContentLoaded', function() {
     _learnStats.lastTs = new Date().toISOString();
 
     saveLearnedWeights();
+
+    /* PM-specific learning: track Polymarket market accuracy separately (pm_ prefix) */
+    if (trade.pmFeed) {
+      var pmKey = 'pm_' + (trade.pmMarket||'').replace(/[^a-z0-9]/gi,'_').slice(0,30).toLowerCase();
+      if (!_learnCounts[pmKey]) _learnCounts[pmKey] = { total:0, tp:0, sl:0 };
+      _learnCounts[pmKey].total++;
+      if (trade.close_reason === 'TAKE_PROFIT') _learnCounts[pmKey].tp++;
+      else _learnCounts[pmKey].sl++;
+      saveLearnedWeights();
+    }
+
     renderLearning();
   };
 
@@ -12396,6 +12507,8 @@ function _modalKeyHandler(e) {
 
 <!-- ShadowBroker Integration — injects OSINT feeds into the AI pipeline -->
 <script src="shadowbroker.js?v=21"></script>
+<!-- Polymarket Integration — prediction market consensus → IC pipeline (paper trading only) -->
+<script src="polymarket.js?v=1"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
 <script src="executionEngine.js"></script>
