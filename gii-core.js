@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v7
+/* GII Core — gii-core.js v8
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -96,7 +96,9 @@
     { name: 'narrative',  global: 'GII_AGENT_NARRATIVE'  },
     { name: 'escalation', global: 'GII_AGENT_ESCALATION' },
     { name: 'scenario',   global: 'GII_AGENT_SCENARIO'   },
-    { name: 'technicals', global: 'GII_AGENT_TECHNICALS' }
+    { name: 'technicals', global: 'GII_AGENT_TECHNICALS' },
+    { name: 'scalper',    global: 'GII_AGENT_SCALPER'    },
+    { name: 'optimizer',  global: 'GII_AGENT_OPTIMIZER'  }
   ];
 
   function _getAgent(def) { return window[def.global] || null; }
@@ -150,7 +152,7 @@
     'macro': 0.88, 'regime': 0.85, 'escalation': 0.83, 'conflict': 0.82,
     'sanctions': 0.80, 'polymarket': 0.82, 'maritime': 0.78, 'chokepoint': 0.78,
     'satellite': 0.78, 'energy': 0.75, 'liquidity': 0.75, 'historical': 0.72,
-    'technicals': 0.80,
+    'technicals': 0.80, 'optimizer': 0.83, 'scalper': 0.70,
     'calendar': 0.70, 'narrative': 0.65, 'social': 0.60
   };
 

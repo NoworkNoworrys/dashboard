@@ -10178,6 +10178,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     renderLearning();
     if (window.GII && typeof GII.onTradeResult === 'function') GII.onTradeResult(trade);
+    if (window.GII_AGENT_SCALPER && typeof GII_AGENT_SCALPER.onTradeResult === 'function') GII_AGENT_SCALPER.onTradeResult(trade);
   };
 
   /* Renders the learning panel showing all adjusted weights */
@@ -12530,7 +12531,9 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-escalation.js?v=1"></script>
 <script src="agents/gii-scenario.js?v=1"></script>
 <script src="agents/gii-technicals.js?v=1"></script>
-<script src="gii-core.js?v=7"></script>
+<script src="agents/gii-scalper.js?v=1"></script>
+<script src="agents/gii-optimizer.js?v=1"></script>
+<script src="gii-core.js?v=8"></script>
 <script src="gii-meta.js?v=1"></script>
 <script src="gii-ui.js?v=1"></script>
 </body>
