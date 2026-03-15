@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v9
+/* GII Core — gii-core.js v12
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -99,6 +99,7 @@
     { name: 'scenario',   global: 'GII_AGENT_SCENARIO'   },
     { name: 'technicals', global: 'GII_AGENT_TECHNICALS' },
     { name: 'scalper',         global: 'GII_AGENT_SCALPER'         },
+    { name: 'scalper-session', global: 'GII_AGENT_SCALPER_SESSION' },
     { name: 'optimizer',       global: 'GII_AGENT_OPTIMIZER'       },
     { name: 'smartmoney',      global: 'GII_AGENT_SMARTMONEY'      },
     { name: 'marketstructure', global: 'GII_AGENT_MARKETSTRUCTURE' }
@@ -155,7 +156,7 @@
     'macro': 0.88, 'regime': 0.85, 'escalation': 0.83, 'conflict': 0.82,
     'sanctions': 0.80, 'polymarket': 0.82, 'maritime': 0.78, 'chokepoint': 0.78,
     'satellite': 0.78, 'energy': 0.75, 'liquidity': 0.75, 'historical': 0.72,
-    'technicals': 0.80, 'optimizer': 0.83, 'scalper': 0.70,
+    'technicals': 0.80, 'optimizer': 0.83, 'scalper': 0.70, 'scalper-session': 0.70,
     'smartmoney': 0.75, 'marketstructure': 0.72,
     'calendar': 0.70, 'narrative': 0.65, 'social': 0.60
   };
@@ -562,7 +563,7 @@
 
       toEmit.push({
         asset:           s.asset,
-        dir:             s.bias === 'short' ? -1 : 1,
+        dir:             s.bias === 'short' ? 'SHORT' : 'LONG',
         conf:            rawConf,
         reason:          reasonParts.join(' | '),
         region:          region,

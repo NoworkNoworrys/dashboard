@@ -4889,6 +4889,13 @@
        ══════════════════════════════════════════════════════════════════════════════ -->
   <div class="ee-wrap" id="eeWrap">
 
+    <!-- Backend offline warning banner -->
+    <div id="eeBackendBanner" style="display:none;background:linear-gradient(90deg,rgba(255,71,71,0.18),rgba(255,71,71,0.10));border:1px solid rgba(255,71,71,0.5);border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:11px;color:#ff7070;align-items:center;gap:10px">
+      <span style="font-size:15px">⚠</span>
+      <span><b>Backend offline</b> — trades and analytics are saved to browser storage only. Restart <code style="font-size:10px;background:rgba(255,255,255,0.1);padding:1px 5px;border-radius:3px">python backend/server.py</code> to restore full persistence.</span>
+      <span id="eeBackendRetryTimer" style="margin-left:auto;opacity:0.7;font-size:10px"></span>
+    </div>
+
     <!-- Header -->
     <div class="ee-header">
       <div class="ee-title-block">
@@ -4931,13 +4938,40 @@
         <div class="ee-cfg-field"><label>Max / Sector</label>    <input type="number" id="eeCfg_max_per_sector"     value="2"     min="1"   max="5"         step="1"></div>
         <div class="ee-cfg-field"><label>Virtual Balance $</label><input type="number" id="eeCfg_virtual_balance"   value="10000" min="100" max="10000000"   step="100"></div>
       </div>
+
+      <!-- ── Advanced risk controls ─────────────────────────────────── -->
+      <div class="ee-config-grid" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <div class="ee-cfg-field"><label>Trailing Stop %</label>    <input type="number" id="eeCfg_trailing_stop_pct"    value="1.5" min="0.1" max="10"  step="0.1"></div>
+        <div class="ee-cfg-field"><label>Daily Loss Limit %</label> <input type="number" id="eeCfg_daily_loss_limit_pct" value="5"   min="1"   max="20"  step="0.5"></div>
+        <div class="ee-cfg-field"><label>Event Gate (hrs)</label>   <input type="number" id="eeCfg_event_gate_hours"     value="0.5" min="0"   max="4"   step="0.25"></div>
+      </div>
+
+      <!-- Toggle switches + status badges -->
+      <div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap;align-items:center">
+        <label style="display:flex;align-items:center;gap:5px;font-size:9px;color:var(--dim);letter-spacing:0.6px;cursor:pointer">
+          <input type="checkbox" id="eeCfg_trailing_stop_enabled" checked style="accent-color:#ff9500"> Trailing Stop
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:9px;color:var(--dim);letter-spacing:0.6px;cursor:pointer">
+          <input type="checkbox" id="eeCfg_break_even_enabled"    checked style="accent-color:#ff9500"> Break-Even Stop
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:9px;color:var(--dim);letter-spacing:0.6px;cursor:pointer">
+          <input type="checkbox" id="eeCfg_partial_tp_enabled"    checked style="accent-color:#ff9500"> Partial TP (50% at TP1)
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:9px;color:var(--dim);letter-spacing:0.6px;cursor:pointer">
+          <input type="checkbox" id="eeCfg_event_gate_enabled"    checked style="accent-color:#ff9500"> Pre-Event Gate
+        </label>
+        <span id="eeStreakBadge" style="display:none;padding:2px 9px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:0.5px;background:rgba(255,160,0,0.15);color:var(--amber);border:1px solid rgba(255,160,0,0.35)"></span>
+        <span id="eeWsBadge"    style="display:none;padding:2px 9px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:0.5px;background:rgba(0,200,160,0.12);color:#00c8a0;border:1px solid rgba(0,200,160,0.35)"></span>
+      </div>
+
       <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
         <button class="ee-cfg-save"  onclick="EE.updateConfig()">&#9654; SAVE PARAMETERS</button>
         <button class="ee-cfg-ghost" onclick="EE.resetBalance()">Reset Balance</button>
         <button class="ee-cfg-ghost" onclick="EE.clearHistory()">Clear History</button>
         <button class="ee-cfg-ghost" style="color:#00c8a0;border-color:rgba(0,200,160,0.4)" onclick="EE.analyticsReset()">&#9654; New Session</button>
         <button class="ee-cfg-ghost" style="color:#ff4444;border-color:rgba(255,68,68,0.4)" onclick="EE.fullReset()">&#9888; Full Reset</button>
-        <button class="ee-cfg-ghost" onclick="EE.exportJSON()">&#8595; Export JSON</button>
+        <button class="ee-cfg-ghost" onclick="EE.exportJSON()">&#8595; JSON</button>
+        <button class="ee-cfg-ghost" onclick="EE.exportCSV()">&#8595; CSV</button>
       </div>
     </div>
 
@@ -4952,8 +4986,11 @@
     <!-- Portfolio Summary Bar -->
     <div id="eePortfolioSummary" style="display:flex;flex-wrap:wrap;gap:0;margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden"></div>
 
-    <!-- Price Feed Health -->
-    <div id="eePriceFeedHealth" style="margin-bottom:10px;padding:5px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;flex-wrap:wrap"></div>
+    <!-- Price Feed Health + Notifications -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <div id="eePriceFeedHealth" style="flex:1;padding:5px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;flex-wrap:wrap"></div>
+      <button id="eeNotifBtn" onclick="EE.requestNotifications()" style="background:none;border:1px solid var(--dim);color:var(--dim);font-family:inherit;font-size:9px;padding:4px 10px;cursor:pointer;letter-spacing:1px;border-radius:3px;white-space:nowrap" title="Get browser alerts when a trade hits TP or SL">🔔 Alerts</button>
+    </div>
 
     <!-- Open trades + Closed trades -->
     <div class="ee-body">
@@ -4967,7 +5004,10 @@
         </div>
       </div>
       <div class="ee-panel">
-        <div class="ee-panel-title">Recent Closed Trades</div>
+        <div class="ee-panel-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Recent Closed Trades</span>
+          <button id="eeClosedSessionBtn" onclick="EE.toggleClosedSession()" style="background:none;border:1px solid var(--dim);color:var(--dim);font-family:inherit;font-size:9px;padding:2px 8px;cursor:pointer;letter-spacing:1px;border-radius:3px">This Session</button>
+        </div>
         <div id="eeClosedTrades">
           <div class="ee-placeholder">No closed trades yet.</div>
         </div>
@@ -5102,6 +5142,30 @@
         <div class="ee-an-chart-panel">
           <div class="ee-an-chart-title">Performance by Region</div>
           <canvas class="ee-an-canvas" id="eeChartRegion" height="160"></canvas>
+        </div>
+      </div>
+
+      <!-- Per-asset win rate table -->
+      <div class="ee-an-charts-full" style="margin-top:8px">
+        <div class="ee-an-chart-title">Per-Asset Win Rate</div>
+        <div id="eeAssetWinRate" style="padding:8px 0">
+          <span style="font-size:10px;color:var(--dim)">No closed trades yet.</span>
+        </div>
+      </div>
+
+      <!-- Sector correlation heat map -->
+      <div class="ee-an-charts-full" style="margin-top:8px">
+        <div class="ee-an-chart-title">Sector Correlation &amp; Concentration</div>
+        <div id="eeCorrHeat" style="padding:8px 0">
+          <span style="font-size:10px;color:var(--dim)">No open trades.</span>
+        </div>
+      </div>
+
+      <!-- BTC Scalper agent performance -->
+      <div class="ee-an-charts-full" style="margin-top:8px">
+        <div class="ee-an-chart-title">&#9889; BTC Scalper Agent Performance</div>
+        <div id="eeScalperStats" style="padding:8px 0">
+          <span style="font-size:10px;color:var(--dim)">Loading scalper agents…</span>
         </div>
       </div>
 
@@ -12707,7 +12771,7 @@ function _modalKeyHandler(e) {
 <script src="polymarket.js?v=15"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=26"></script>
+<script src="executionEngine.js?v=29"></script>
 
 <!-- GII Multi-Agent Intelligence System — agents first, then core, then UI -->
 <script src="agents/gii-energy.js?v=2"></script>
@@ -12740,13 +12804,14 @@ function _modalKeyHandler(e) {
   };
 </script>
 <script src="agents/gii-technicals.js?v=2"></script>
-<script src="agents/gii-scalper.js?v=2"></script>
+<script src="agents/gii-scalper.js?v=5"></script>
+<script src="agents/gii-scalper-session.js?v=1"></script>
 <script src="agents/gii-optimizer.js?v=1"></script>
 <script src="agents/gii-smartmoney.js?v=1"></script>
 <script src="agents/gii-marketstructure.js?v=1"></script>
-<script src="gii-core.js?v=11"></script>
+<script src="gii-core.js?v=12"></script>
 <script src="gii-meta.js?v=1"></script>
-<script src="gii-ui.js?v=3"></script>
+<script src="gii-ui.js?v=4"></script>
 <script src="gii-debug.js?v=1"></script>
 </body>
 </html>

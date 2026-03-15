@@ -1,4 +1,4 @@
-/* GII UI — gii-ui.js v1
+/* GII UI — gii-ui.js v4
  * GII panel renderer — injects #giiWrap after #eeWrap
  * Depends on: window.GII, window.GII_AGENT_*
  * Exposes: window.GII_UI
@@ -374,6 +374,120 @@
       });
       html += '</tbody></table>';
     }
+    html += '</div>';
+
+    // ── Row 7: Agent status panel ──
+    var AGENT_DEFS = [
+      { name: 'energy',        global: 'GII_AGENT_ENERGY'         },
+      { name: 'conflict',      global: 'GII_AGENT_CONFLICT'       },
+      { name: 'macro',         global: 'GII_AGENT_MACRO'          },
+      { name: 'sanctions',     global: 'GII_AGENT_SANCTIONS'      },
+      { name: 'maritime',      global: 'GII_AGENT_MARITIME'       },
+      { name: 'social',        global: 'GII_AGENT_SOCIAL'         },
+      { name: 'polymarket',    global: 'GII_AGENT_POLYMARKET'     },
+      { name: 'regime',        global: 'GII_AGENT_REGIME'         },
+      { name: 'satellite',     global: 'GII_AGENT_SATELLITE'      },
+      { name: 'historical',    global: 'GII_AGENT_HISTORICAL'     },
+      { name: 'liquidity',     global: 'GII_AGENT_LIQUIDITY'      },
+      { name: 'calendar',      global: 'GII_AGENT_CALENDAR'       },
+      { name: 'chokepoint',    global: 'GII_AGENT_CHOKEPOINT'     },
+      { name: 'narrative',     global: 'GII_AGENT_NARRATIVE'      },
+      { name: 'escalation',    global: 'GII_AGENT_ESCALATION'     },
+      { name: 'scenario',      global: 'GII_AGENT_SCENARIO'       },
+      { name: 'technicals',    global: 'GII_AGENT_TECHNICALS'     },
+      { name: 'scalper',         global: 'GII_AGENT_SCALPER'         },
+      { name: 'scalper-session', global: 'GII_AGENT_SCALPER_SESSION' },
+      { name: 'optimizer',       global: 'GII_AGENT_OPTIMIZER'       },
+      { name: 'smartmoney',    global: 'GII_AGENT_SMARTMONEY'     },
+      { name: 'marketstructure', global: 'GII_AGENT_MARKETSTRUCTURE' }
+    ];
+
+    function _relTime(ts) {
+      if (!ts) return '—';
+      var sec = Math.round((Date.now() - ts) / 1000);
+      if (sec < 5)    return 'now';
+      if (sec < 60)   return sec + 's ago';
+      if (sec < 3600) return Math.round(sec / 60) + 'm ago';
+      return Math.round(sec / 3600) + 'h ago';
+    }
+
+    html += '<p class="gii-section-title">Agent Status</p>';
+    html += '<div class="gii-card">';
+    html += '<table class="gii-table" style="font-size:10px"><thead><tr>' +
+      '<th>Agent</th><th>Status</th><th>Last Poll</th>' +
+      '<th>Signals</th><th>Note</th>' +
+      '</tr></thead><tbody>';
+
+    var now = Date.now();
+    var staleMs = 10 * 60 * 1000; // 10 min = stale
+    AGENT_DEFS.forEach(function (def) {
+      var agent = window[def.global];
+      if (!agent) {
+        html += '<tr>' +
+          '<td style="color:rgba(255,255,255,0.4)">' + def.name + '</td>' +
+          '<td><span style="color:rgba(255,255,255,0.3)">● MISSING</span></td>' +
+          '<td colspan="3" style="color:rgba(255,255,255,0.25)">not loaded</td>' +
+          '</tr>';
+        return;
+      }
+
+      var st = {};
+      try { st = agent.status() || {}; } catch (e) { st = { error: String(e) }; }
+
+      var sigs = 0;
+      try { sigs = (agent.signals() || []).length; } catch (e) {}
+
+      var lastPoll = st.lastPoll || 0;
+      var age = lastPoll ? (now - lastPoll) : Infinity;
+      var statusDot, statusLabel;
+      if (!lastPoll) {
+        statusDot  = '○';
+        statusLabel = '<span style="color:rgba(255,255,255,0.35)">○ PENDING</span>';
+      } else if (st.error) {
+        statusDot  = '●';
+        statusLabel = '<span style="color:var(--red,#ff1744)">● ERROR</span>';
+      } else if (age > staleMs) {
+        statusDot  = '●';
+        statusLabel = '<span style="color:var(--amber,#ffc107)">● STALE</span>';
+      } else {
+        statusDot  = '●';
+        statusLabel = '<span style="color:var(--green,#00e676)">● OK</span>';
+      }
+
+      var noteText = st.error || st.note || '';
+      if (noteText.length > 60) noteText = noteText.substring(0, 57) + '…';
+
+      // Special case: scalper slot busy indicator
+      if ((def.name === 'scalper' || def.name === 'scalper-session') && st.activeScalp) {
+        noteText = '⚡ Active: ' + (st.activeScalp.asset || 'BTC') + ' ' + (st.activeScalp.bias || '').toUpperCase();
+      }
+
+      html += '<tr>' +
+        '<td style="color:var(--gii)">' + def.name + '</td>' +
+        '<td>' + statusLabel + '</td>' +
+        '<td style="color:rgba(255,255,255,0.6)">' + _relTime(lastPoll) + '</td>' +
+        '<td style="text-align:center">' + (sigs > 0 ? '<b style="color:var(--green,#00e676)">' + sigs + '</b>' : '<span style="color:rgba(255,255,255,0.3)">0</span>') + '</td>' +
+        '<td style="color:rgba(255,255,255,0.5);max-width:200px;overflow:hidden">' + _esc(noteText) + '</td>' +
+        '</tr>';
+    });
+
+    // Summary row
+    var loaded  = AGENT_DEFS.filter(function (d) { return !!window[d.global]; }).length;
+    var healthy = AGENT_DEFS.filter(function (d) {
+      var a = window[d.global];
+      if (!a) return false;
+      try {
+        var s = a.status() || {};
+        return !s.error && s.lastPoll && (now - s.lastPoll) < staleMs;
+      } catch (e) { return false; }
+    }).length;
+    html += '<tr style="border-top:1px solid rgba(224,64,251,0.3)">' +
+      '<td colspan="2" style="color:var(--gii);font-weight:700;padding-top:6px">' +
+        loaded + '/' + AGENT_DEFS.length + ' loaded</td>' +
+      '<td colspan="3" style="color:rgba(255,255,255,0.5);padding-top:6px">' +
+        healthy + ' healthy · ' + (loaded - healthy) + ' pending/stale</td>' +
+      '</tr>';
+    html += '</tbody></table>';
     html += '</div>';
 
     // Inject

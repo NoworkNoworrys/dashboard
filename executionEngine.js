@@ -32,7 +32,8 @@
   // API base: override by setting window.GEO_API_BASE before this script loads.
   // e.g. <script>window.GEO_API_BASE = 'https://your-vps.example.com';</script>
   var _API_BASE   = (typeof window !== 'undefined' && window.GEO_API_BASE) || 'http://localhost:8765';
-  var _apiOnline  = false;   // set true after first successful /api/status ping
+  var _apiOnline    = false;   // set true after first successful /api/status ping
+  var _backendChecked = false; // set true after first ping attempt resolves (ok or fail)
 
   /* ── Default risk configuration ────────────────────────────────────────────── */
   var DEFAULTS = {
@@ -50,7 +51,15 @@
     cooldown_ms:           120000,       // 2 min cooldown between same-asset signals
     broker:                'SIMULATION', // future: 'BINANCE' | 'ALPACA' | 'POLYMARKET'
     auto_start:            true,         // if false, auto-execution stays OFF on page load
-    max_siglog:            200           // max entries kept in signal log
+    max_siglog:            200,          // max entries kept in signal log
+    // ── Risk management additions ──────────────────────────────────────────────
+    trailing_stop_enabled: true,         // move stop up as price moves in favour
+    trailing_stop_pct:     1.5,          // trail distance as % of entry price
+    break_even_enabled:    true,         // move stop to entry once 50% to TP
+    partial_tp_enabled:    true,         // take 50% profit at TP1 (midpoint to TP)
+    daily_loss_limit_pct:  5,            // pause if session P&L drops below -5%
+    event_gate_enabled:    true,         // block new trades near major calendar events
+    event_gate_hours:      0.5           // hours before event to block (0.5 = 30min)
   };
 
   /* ── Sector map — used for max_per_sector concentration cap ──────────────── */
@@ -133,7 +142,12 @@
   var _signalLog   = [];   // full history of every IC signal seen (capped at 200)
   var _pendingOpen = {};   // asset → true while a fetchPrice is in-flight (prevents duplicate opens)
   var _initialised = false; // reentrancy guard — prevents duplicate intervals if init() called twice
-  var _showAllClosed = false; // UI toggle: show all closed trades vs capped at 25
+  var _showAllClosed        = false; // UI toggle: show all closed trades vs capped at 25
+  var _closedSessionOnly    = false; // UI toggle: show only this-session closed trades
+  var _sessionStartBalance  = null;  // balance at session start — for daily loss limit
+  var _lossStreak           = 0;     // consecutive losses counter — for streak sizing
+  var _wsConnected          = false; // Binance WebSocket status
+  var _wsBtcWs              = null;  // WebSocket instance (BTC real-time)
   var _backendPrices = {};  // symbol → price, populated by _pollBackendPrices() every 25 s (H4)
   var _sessionStart  = null; // ISO timestamp — set on init, reset on analyticsReset/fullReset
   var _priceFeedHealth = {}; // source → { ok: bool, lastOk: ms, lastFail: ms }
@@ -352,6 +366,7 @@
       .then(function (r) {
         if (!r.ok) throw new Error('status ' + r.status);
         _apiOnline = true;
+        _backendChecked = true;
         _pollBackendPrices();                    // H4: prime the price cache immediately
         setInterval(_pollBackendPrices, 25000);  // H4: refresh every 25 s
         return _apiFetch('/api/trades');
@@ -398,7 +413,9 @@
           log('SYSTEM', 'Backend unreachable — retrying in ' + (delay / 1000) + 's (attempt ' + (retryCount + 1) + '/' + RETRY_DELAYS.length + ')', 'dim');
           setTimeout(function () { _apiInit(retryCount + 1); }, delay);
         } else {
+          _backendChecked = true;
           log('SYSTEM', 'SQLite backend offline — using localStorage only', 'dim');
+          renderUI(); // refresh banner
         }
       });
   }
@@ -728,16 +745,33 @@
     if (exposure >= maxExp)
       return { ok: false, reason: 'Max exposure ' + _cfg.max_exposure_pct + '% reached' };
 
-    // Daily loss limit: pause auto-trading if we've lost >10% of balance today
-    var todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    var todayPnL = _trades
-      .filter(function (t) {
-        return t.status === 'CLOSED' && t.timestamp_close &&
-               new Date(t.timestamp_close) >= todayStart;
-      })
-      .reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
-    if (todayPnL / _cfg.virtual_balance < -0.10)
-      return { ok: false, reason: 'Daily loss limit reached (' + todayPnL.toFixed(0) + ' USD) — auto-trading paused until tomorrow' };
+    // Session daily loss limit (configurable, replaces hard-coded 10% check)
+    if (_sessionStartBalance && _cfg.daily_loss_limit_pct > 0) {
+      var sessionLossPct = (_cfg.virtual_balance - _sessionStartBalance) / _sessionStartBalance * 100;
+      if (sessionLossPct < -_cfg.daily_loss_limit_pct) {
+        return { ok: false, reason: 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached — execution paused' };
+      }
+    }
+
+    // Pre-event gate: block new trades within event_gate_hours of major calendar events
+    if (_cfg.event_gate_enabled) {
+      var calAgent = window.GII_AGENT_CALENDAR;
+      if (calAgent && typeof calAgent.upcoming === 'function') {
+        try {
+          var upcoming = calAgent.upcoming();
+          var gateHours = _cfg.event_gate_hours || 0.5;
+          var blocked = upcoming.filter(function (ev) {
+            // ev.days is days until event; 0 = today, negative = past
+            return ev.importance >= 3 && ev.days >= 0 && ev.days <= (gateHours / 24);
+          });
+          if (blocked.length) {
+            var ev0 = blocked[0];
+            var minsAway = Math.round(ev0.days * 24 * 60);
+            return { ok: false, reason: 'Event gate: "' + ev0.label.substring(0, 45) + '" in ' + minsAway + 'min' };
+          }
+        } catch (e) { /* calendar agent unavailable — skip gate */ }
+      }
+    }
 
     return { ok: true, reason: 'All risk checks passed' };
   }
@@ -750,6 +784,14 @@
     // timestamp(base36) + sequence(base36) + 4-char random hex → collision-safe unique IDs
     var r = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4).toUpperCase();
     return prefix + '-' + Date.now().toString(36).toUpperCase() + '-' + (++_seq).toString(36).toUpperCase() + '-' + r;
+  }
+
+  /* Infer signal source from reason string — fallback for pre-tagging legacy trades */
+  function _inferSource(reason) {
+    if (reason.indexOf('SCALPER-SESSION:') === 0) return 'scalper-session';
+    if (reason.indexOf('SCALPER:')         === 0) return 'scalper';
+    if (reason.indexOf('GII:')             === 0) return 'gii';
+    return 'ic';  // default: IC-sourced trade
   }
 
   /* Build a complete trade object from a signal + entry price */
@@ -806,7 +848,13 @@
       }
     }
 
-    var riskAmt  = _cfg.virtual_balance * _cfg.risk_per_trade_pct / 100 * impactMult * kellyMult;
+    // Loss streak sizing: halve risk after 3+ consecutive losses, 75% after 2
+    var streakMult = _lossStreak >= 3 ? 0.50 : _lossStreak >= 2 ? 0.75 : 1.0;
+    if (streakMult < 1.0) {
+      // Logged on open so the user can see why size is reduced
+    }
+
+    var riskAmt  = _cfg.virtual_balance * _cfg.risk_per_trade_pct / 100 * impactMult * kellyMult * streakMult;
     var slDist   = Math.abs(entryPrice - stopLoss);
 
     // Risk-of-ruin guard: scale down so total max drawdown stays ≤ 20% of balance
@@ -845,7 +893,18 @@
       region:           sig.region           || 'GLOBAL',
       reason:           sig.reason           || '',
       matched_keywords: sig.matchedKeywords  || [],  // learning loop: keywords that triggered this trade
+      source:           sig.source           || _inferSource(sig.reason || ''),
       kelly_mult:       +kellyMult.toFixed(2),       // EV sizing multiplier applied (for display/audit)
+      streak_mult:      +streakMult.toFixed(2),      // loss-streak sizing reduction
+      // ── Trailing / break-even / partial TP state ────────────────────────────
+      trailing_stop_active: false,   // activated once break-even is hit
+      highest_price:        null,    // LONG: tracks peak price for trail
+      lowest_price:         null,    // SHORT: tracks trough price for trail
+      break_even_done:      false,   // true once stop moved to entry
+      partial_tp_taken:     false,   // true once TP1 partial close fired
+      partial_tp_price:     null,    // price at which partial was taken
+      partial_pnl_usd:      null,    // P&L banked from partial close
+      // ────────────────────────────────────────────────────────────────────────
       broker:           _cfg.mode === 'LIVE' ? _cfg.broker : 'SIMULATION',
       // Broker integration stubs — set by adapter on live execution
       broker_order_id:  null,
@@ -882,7 +941,8 @@
       ' @ ' + _num(trade.entry_price) +
       '  SL:' + _num(trade.stop_loss) +
       '  TP:' + _num(trade.take_profit) +
-      '  Conf:' + trade.confidence + '%',
+      '  Conf:' + trade.confidence + '%' +
+      (trade.streak_mult < 1 ? '  ⚠ streak×' + trade.streak_mult : ''),
       'green');
 
     renderUI();
@@ -948,6 +1008,37 @@
       '  P&L: ' + (trade.pnl_pct >= 0 ? '+' : '') + trade.pnl_pct + '%' +
       '  (' + (trade.pnl_usd >= 0 ? '+$' : '-$') + _num(Math.abs(trade.pnl_usd)) + ')',
       trade.pnl_pct >= 0 ? 'green' : 'red');
+
+    // Browser notification for TP/SL hits (only when tab is not visible)
+    if ((reason === 'TAKE_PROFIT' || reason === 'STOP_LOSS') &&
+        typeof Notification !== 'undefined' &&
+        Notification.permission === 'granted') {
+      var isTP   = reason === 'TAKE_PROFIT';
+      var sign   = trade.pnl_usd >= 0 ? '+' : '-';
+      var pnlStr = sign + '$' + _num(Math.abs(trade.pnl_usd)) +
+                   ' (' + (trade.pnl_pct >= 0 ? '+' : '') + trade.pnl_pct + '%)';
+      try {
+        new Notification(
+          (isTP ? '✅ Take Profit' : '❌ Stop Loss') + ' — ' + trade.asset,
+          {
+            body: trade.direction + ' closed @ ' + _num(closePrice) + '\nP&L: ' + pnlStr,
+            icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="' + (isTP ? '%2300e676' : '%23ff1744') + '"/></svg>',
+            tag: 'ee-trade-' + trade.trade_id,
+            requireInteraction: false
+          }
+        );
+      } catch (e) { /* notification may fail silently */ }
+    }
+
+    // Update loss streak counter (used for position sizing on future trades)
+    if (trade.pnl_usd > 0) {
+      if (_lossStreak > 0) log('RISK', 'Loss streak ended at ' + _lossStreak + ' — full size restored', 'green');
+      _lossStreak = 0;
+    } else {
+      _lossStreak++;
+      if (_lossStreak >= 3)      log('RISK', 'Streak ' + _lossStreak + ' losses — position size halved until next win', 'red');
+      else if (_lossStreak >= 2) log('RISK', 'Streak ' + _lossStreak + ' losses — position size at 75%', 'amber');
+    }
 
     renderUI();
 
@@ -1029,6 +1120,21 @@
      ══════════════════════════════════════════════════════════════════════════════ */
 
   function monitorTrades() {
+    // Daily loss limit check: if session P&L hits the limit, disable auto-execution
+    if (_sessionStartBalance && _cfg.daily_loss_limit_pct > 0 && _cfg.enabled) {
+      var sessionLossPct = (_cfg.virtual_balance - _sessionStartBalance) / _sessionStartBalance * 100;
+      if (sessionLossPct < -_cfg.daily_loss_limit_pct) {
+        _cfg.enabled = false;
+        saveCfg();
+        log('RISK', 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached (' +
+          sessionLossPct.toFixed(1) + '%) — auto-execution paused', 'red');
+        _notify('⛔ Daily Loss Limit Hit',
+          'Session P&L: ' + sessionLossPct.toFixed(1) + '% — auto-execution paused',
+          'ee-daily-limit');
+        renderUI();
+      }
+    }
+
     openTrades().forEach(function (trade) {
       fetchPrice(trade.asset, function (price) {
         // Use cached price as display fallback so unrealised P&L always renders
@@ -1036,11 +1142,101 @@
         if (displayPrice) _livePrice[trade.trade_id] = displayPrice;
         if (!price) { renderUI(); return; }  // no live price — skip TP/SL checks
 
-        // Store live price so renderOpenTrades() can show unrealised P&L
         _livePrice[trade.trade_id] = price;
+        var saved = false;  // track if we need to saveTrades() this cycle
 
+        var isLong  = trade.direction === 'LONG';
+        var isShort = trade.direction === 'SHORT';
+
+        // ── Partial TP1: take 50% at halfway to full TP ─────────────────────
+        if (_cfg.partial_tp_enabled && !trade.partial_tp_taken) {
+          var tp1 = isLong
+            ? trade.entry_price + 0.5 * (trade.take_profit - trade.entry_price)
+            : trade.entry_price - 0.5 * (trade.entry_price - trade.take_profit);
+          var hitTP1 = isLong ? (price >= tp1) : (price <= tp1);
+          if (hitTP1) {
+            var closedUnits  = trade.units * 0.5;
+            var pnlPerUnit   = isLong ? (price - trade.entry_price) : (trade.entry_price - price);
+            var partialPnl   = +(closedUnits * pnlPerUnit).toFixed(2);
+            trade.partial_tp_taken  = true;
+            trade.partial_tp_price  = +price.toFixed(6);
+            trade.partial_pnl_usd   = partialPnl;
+            trade.units             = +(trade.units * 0.5).toFixed(6);
+            trade.size_usd          = +(trade.units * price).toFixed(2);
+            // Move stop to entry ± tiny buffer (break-even)
+            var beStop = isLong
+              ? +(trade.entry_price * 1.001).toFixed(6)
+              : +(trade.entry_price * 0.999).toFixed(6);
+            trade.stop_loss        = beStop;
+            trade.break_even_done  = true;
+            trade.trailing_stop_active = true;
+            // Bank partial P&L into balance
+            _cfg.virtual_balance  += partialPnl;
+            saveCfg();
+            saved = true;
+            log('PARTIAL',
+              trade.asset + ' 50% TP @ ' + _num(price) +
+              '  Banked: +$' + _num(partialPnl) + '  SL→breakeven', 'green');
+            _notify('🎯 Partial TP — ' + trade.asset,
+              '50% closed @ ' + _num(price) + ' (+$' + _num(partialPnl) + ')\nStop moved to break-even.',
+              'ee-partial-' + trade.trade_id);
+          }
+        }
+
+        // ── Break-even stop: move stop to entry once 50% to TP ──────────────
+        if (_cfg.break_even_enabled && !trade.break_even_done && !trade.partial_tp_taken) {
+          var halfDist = isLong
+            ? 0.5 * (trade.take_profit - trade.entry_price)
+            : 0.5 * (trade.entry_price - trade.take_profit);
+          var beTrigger = isLong
+            ? trade.entry_price + halfDist
+            : trade.entry_price - halfDist;
+          var hitBE = isLong ? (price >= beTrigger) : (price <= beTrigger);
+          if (hitBE) {
+            var newBEStop = isLong
+              ? +(trade.entry_price * 1.001).toFixed(6)
+              : +(trade.entry_price * 0.999).toFixed(6);
+            if ((isLong && newBEStop > trade.stop_loss) ||
+                (isShort && newBEStop < trade.stop_loss)) {
+              trade.stop_loss           = newBEStop;
+              trade.break_even_done     = true;
+              trade.trailing_stop_active = true;
+              saved = true;
+              log('TRAIL', trade.asset + ' break-even stop @ ' + _num(newBEStop), 'amber');
+              _notify('🔒 Break-Even — ' + trade.asset,
+                'Stop moved to entry price. Trade is now risk-free.',
+                'ee-be-' + trade.trade_id);
+            }
+          }
+        }
+
+        // ── Trailing stop: once active, trail price by trailing_stop_pct ────
+        if (_cfg.trailing_stop_enabled && trade.trailing_stop_active) {
+          var trailDist = trade.entry_price * (_cfg.trailing_stop_pct / 100);
+          if (isLong) {
+            var newHigh = Math.max(price, trade.highest_price || price);
+            trade.highest_price = newHigh;
+            var trailedStop = +(newHigh - trailDist).toFixed(6);
+            if (trailedStop > trade.stop_loss) {
+              trade.stop_loss = trailedStop;
+              saved = true;
+            }
+          } else {
+            var newLow = Math.min(price, trade.lowest_price || price);
+            trade.lowest_price = newLow;
+            var trailedStopS = +(newLow + trailDist).toFixed(6);
+            if (trailedStopS < trade.stop_loss) {
+              trade.stop_loss = trailedStopS;
+              saved = true;
+            }
+          }
+        }
+
+        if (saved) saveTrades();
+
+        // ── TP / SL checks (with updated stop) ──────────────────────────────
         var hitTP, hitSL;
-        if (trade.direction === 'LONG') {
+        if (isLong) {
           hitTP = price >= trade.take_profit;
           hitSL = price <= trade.stop_loss;
         } else {
@@ -1050,7 +1246,7 @@
 
         if (hitTP)      closeTrade(trade.trade_id, trade.take_profit, 'TAKE_PROFIT');
         else if (hitSL) closeTrade(trade.trade_id, trade.stop_loss,   'STOP_LOSS');
-        else            renderUI(); // refresh unrealised P&L display
+        else            renderUI();
       });
     });
   }
@@ -1092,6 +1288,43 @@
     log('BROKER', 'connectBroker(' + brokerName + ') — not yet implemented', 'amber');
   }
 
+  /* ── Binance WebSocket — real-time BTC price (no API key needed) ────────────── */
+  function _startBinanceWS() {
+    if (_wsConnected || typeof WebSocket === 'undefined') return;
+    try {
+      var ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@miniTicker');
+      ws.onmessage = function (evt) {
+        try {
+          var data = JSON.parse(evt.data);
+          var price = parseFloat(data.c);   // close price of miniTicker
+          if (price > 0) {
+            _cacheSet('BTC', price);
+            _cacheSet('BITCOIN', price);
+            _priceFeedHealth['ws_binance'] = { ok: true, lastOk: Date.now(), lastFail: null };
+            // Push real-time price to all open BTC trades so P&L updates without polling
+            _trades.forEach(function (t) {
+              if (t.status === 'OPEN' && normaliseAsset(t.asset) === 'BTC') {
+                _livePrice[t.trade_id] = price;
+              }
+            });
+          }
+        } catch (e) {}
+      };
+      ws.onopen  = function () {
+        _wsConnected = true;
+        log('SYSTEM', 'Binance WebSocket connected — real-time BTC price active', 'green');
+      };
+      ws.onclose = function () {
+        _wsConnected = false;
+        setTimeout(_startBinanceWS, 10000);  // reconnect after 10 s
+      };
+      ws.onerror = function () { _wsConnected = false; };
+      _wsBtcWs = ws;
+    } catch (e) {
+      log('SYSTEM', 'BTC WebSocket unavailable: ' + (e.message || String(e)), 'dim');
+    }
+  }
+
   /* ══════════════════════════════════════════════════════════════════════════════
      ACTIVITY LOG
      ══════════════════════════════════════════════════════════════════════════════ */
@@ -1101,6 +1334,13 @@
     if (_log.length > 60) _log.pop();
     var el = document.getElementById('eeActivityLog');
     if (el) renderLog(el);
+  }
+
+  /* ── Browser notification helper (respects existing permission) ─────────────── */
+  function _notify(title, body, tag) {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    try { new Notification(title, { body: body, tag: tag || ('ee-' + Date.now()), requireInteraction: false }); }
+    catch (e) { /* silent */ }
   }
 
   /* ══════════════════════════════════════════════════════════════════════════════
@@ -1241,6 +1481,24 @@
     var banner = document.getElementById('eeDataSafetyBanner');
     if (banner) banner.style.display = closed.length === 0 ? 'block' : 'none';
 
+    // Backend offline warning banner
+    var backendBanner = document.getElementById('eeBackendBanner');
+    if (backendBanner) {
+      if (!_apiOnline && _backendChecked) {
+        backendBanner.style.display = 'flex';
+        // Show how long backend has been offline (last check time)
+        var bfh = _priceFeedHealth['backend'];
+        if (bfh && bfh.lastFail) {
+          var offSec = Math.round((Date.now() - bfh.lastFail) / 1000);
+          var offStr = offSec < 60 ? offSec + 's' : Math.round(offSec / 60) + 'm';
+          var timerEl = document.getElementById('eeBackendRetryTimer');
+          if (timerEl) timerEl.textContent = 'Offline ' + offStr;
+        }
+      } else {
+        backendBanner.style.display = 'none';
+      }
+    }
+
     var pnlEl = document.getElementById('eeBadgePnl');
     if (pnlEl) {
       pnlEl.className = 'ee-badge ' + (totPnl > 0 ? 'pos' : totPnl < 0 ? 'neg' : '');
@@ -1260,11 +1518,37 @@
 
   function renderConfigFields() {
     var fields = ['min_confidence','risk_per_trade_pct','stop_loss_pct',
-                  'take_profit_ratio','max_open_trades','max_per_region','max_per_sector','virtual_balance'];
+                  'take_profit_ratio','max_open_trades','max_per_region','max_per_sector',
+                  'virtual_balance','trailing_stop_pct','daily_loss_limit_pct','event_gate_hours'];
     fields.forEach(function (f) {
       var el = document.getElementById('eeCfg_' + f);
       if (el && document.activeElement !== el) el.value = _cfg[f];
     });
+    // Sync checkbox toggles
+    var toggles = ['trailing_stop_enabled','break_even_enabled','partial_tp_enabled','event_gate_enabled'];
+    toggles.forEach(function (f) {
+      var el = document.getElementById('eeCfg_' + f);
+      if (el) el.checked = !!_cfg[f];
+    });
+    // Streak indicator
+    var streakEl = document.getElementById('eeStreakBadge');
+    if (streakEl) {
+      if (_lossStreak === 0) {
+        streakEl.textContent = '';
+        streakEl.style.display = 'none';
+      } else {
+        streakEl.style.display = 'inline';
+        var mult = _lossStreak >= 3 ? '½ size' : '¾ size';
+        streakEl.textContent = '⚠ ' + _lossStreak + ' loss streak — ' + mult;
+        streakEl.style.color = _lossStreak >= 3 ? 'var(--red)' : 'var(--amber)';
+      }
+    }
+    // WebSocket status
+    var wsEl = document.getElementById('eeWsBadge');
+    if (wsEl) {
+      wsEl.textContent = _wsConnected ? '⚡ WS BTC' : '· WS off';
+      wsEl.style.color = _wsConnected ? 'var(--green)' : 'var(--dim)';
+    }
   }
 
   function renderOpenTrades() {
@@ -1337,7 +1621,26 @@
   function renderClosedTrades() {
     var el = document.getElementById('eeClosedTrades');
     if (!el) return;
-    var allClosed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
+
+    // Session filter: only show trades closed after session start
+    var sessionTs = _sessionStart ? new Date(_sessionStart).getTime() : 0;
+    var allClosed = _trades.filter(function (t) {
+      if (t.status !== 'CLOSED') return false;
+      if (_closedSessionOnly && sessionTs) {
+        var closeTs = t.timestamp_close ? new Date(t.timestamp_close).getTime() : 0;
+        return closeTs >= sessionTs;
+      }
+      return true;
+    });
+
+    // Update toggle button label
+    var btn = document.getElementById('eeClosedSessionBtn');
+    if (btn) {
+      btn.textContent = _closedSessionOnly ? 'All Time' : 'This Session';
+      btn.style.color = _closedSessionOnly ? 'var(--green, #00e676)' : 'var(--dim)';
+      btn.style.borderColor = _closedSessionOnly ? 'var(--green, #00e676)' : 'var(--dim)';
+    }
+
     var closed    = _showAllClosed ? allClosed : allClosed.slice(0, 25);
 
     if (!allClosed.length) {
@@ -1714,6 +2017,30 @@
       else             buckets['>5%']++;
     });
 
+    /* Per-scalper-agent breakdown */
+    var scalperStats = {};
+    closed.forEach(function (t) {
+      // Use stored source; fall back to inferring from reason for legacy trades
+      var src = t.source || _inferSource(t.reason || '');
+      if (!src || src.indexOf('scalper') === -1) return;
+      if (!scalperStats[src]) scalperStats[src] = { trades: 0, wins: 0, losses: 0, pnl: 0, partial: 0, durs: [] };
+      var s = scalperStats[src];
+      s.trades++;
+      if ((t.pnl_usd || 0) > 0) s.wins++; else s.losses++;
+      s.pnl += (t.pnl_usd || 0) + (t.partial_pnl_usd || 0);
+      if (t.partial_tp_taken) s.partial++;
+      if (t.timestamp_open && t.timestamp_close) {
+        var dur = (new Date(t.timestamp_close).getTime() - new Date(t.timestamp_open).getTime()) / 60000;
+        if (dur > 0) s.durs.push(dur);
+      }
+    });
+    // Also include all-time open scalp count
+    var openScalpers = _trades.filter(function (t) {
+      if (t.status !== 'OPEN') return false;
+      var src = t.source || _inferSource(t.reason || '');
+      return src && src.indexOf('scalper') !== -1;
+    });
+
     return {
       closed: closed.length, equity: equity,
       maxDDPct: maxDDPct, maxDDUsd: maxDDUsd,
@@ -1722,7 +2049,8 @@
       profitFactor: profitFactor, expectancy: expectancy,
       wrDay: wrDay, wrWeek: wrWeek, wrAll: wrAll,
       avgDur: avgDur, minDur: minDur, maxDur: maxDur,
-      assetMap: assetMap, regionMap: regionMap, buckets: buckets
+      assetMap: assetMap, regionMap: regionMap, buckets: buckets,
+      scalperStats: scalperStats, openScalpers: openScalpers
     };
   }
 
@@ -2060,6 +2388,183 @@
     }).sort(function (x, y) { return Math.abs(y.pnl_usd) - Math.abs(x.pnl_usd); });
     drawHBar('eeChartRegion', regionItems, 'pnl_usd', 'label',
       function (v) { return v >= 0 ? '#00c8a0' : '#ff4444'; });
+
+    // ── Per-asset win rate breakdown ─────────────────────────────────────────
+    var assetEl = document.getElementById('eeAssetWinRate');
+    if (assetEl) {
+      var closed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
+      if (!closed.length) {
+        assetEl.innerHTML = '<span style="color:var(--dim);font-size:10px">No closed trades yet.</span>';
+      } else {
+        // Build per-asset stats
+        var assetStats = {};
+        closed.forEach(function (t) {
+          var k = t.asset || '?';
+          if (!assetStats[k]) assetStats[k] = { wins: 0, losses: 0, pnl: 0, partial: 0 };
+          if (t.close_reason === 'TAKE_PROFIT') assetStats[k].wins++;
+          else assetStats[k].losses++;
+          assetStats[k].pnl += (t.pnl_usd || 0) + (t.partial_pnl_usd || 0);
+          if (t.partial_tp_taken) assetStats[k].partial++;
+        });
+        var assetKeys = Object.keys(assetStats).sort(function (a, b) {
+          return Math.abs(assetStats[b].pnl) - Math.abs(assetStats[a].pnl);
+        });
+        var rows = assetKeys.map(function (k) {
+          var s = assetStats[k];
+          var tot = s.wins + s.losses;
+          var wr = tot ? Math.round(s.wins / tot * 100) : 0;
+          var wrCls = wr >= 60 ? 'color:var(--green)' : wr < 40 ? 'color:var(--red)' : 'color:var(--amber)';
+          var pnlCls = s.pnl >= 0 ? 'color:var(--green)' : 'color:var(--red)';
+          var pnlStr = (s.pnl >= 0 ? '+$' : '-$') + _num(Math.abs(s.pnl));
+          return '<tr style="border-bottom:1px solid rgba(255,255,255,0.05)">' +
+            '<td style="padding:3px 8px;font-weight:700">' + _esc(k) + '</td>' +
+            '<td style="padding:3px 8px">' + tot + '</td>' +
+            '<td style="padding:3px 8px;' + wrCls + '">' + wr + '%</td>' +
+            '<td style="padding:3px 8px">' + s.wins + '/' + s.losses + '</td>' +
+            '<td style="padding:3px 8px;' + pnlCls + '">' + pnlStr + '</td>' +
+            '<td style="padding:3px 8px;color:var(--dim)">' + (s.partial ? '½×' + s.partial : '—') + '</td>' +
+            '</tr>';
+        }).join('');
+        assetEl.innerHTML =
+          '<table style="width:100%;border-collapse:collapse;font-size:10px">' +
+          '<thead><tr style="color:rgba(255,255,255,0.45);font-size:9px">' +
+          '<th style="padding:3px 8px;text-align:left">Asset</th>' +
+          '<th style="padding:3px 8px;text-align:left">Trades</th>' +
+          '<th style="padding:3px 8px;text-align:left">Win%</th>' +
+          '<th style="padding:3px 8px;text-align:left">W/L</th>' +
+          '<th style="padding:3px 8px;text-align:left">P&L</th>' +
+          '<th style="padding:3px 8px;text-align:left">Partial</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      }
+    }
+
+    // ── Correlation heat map ──────────────────────────────────────────────────
+    var heatEl = document.getElementById('eeCorrHeat');
+    if (heatEl) {
+      var open = openTrades();
+      if (!open.length) {
+        heatEl.innerHTML = '<span style="color:var(--dim);font-size:10px">No open positions.</span>';
+      } else {
+        // Count by sector and direction
+        var sectorCounts = {};
+        open.forEach(function (t) {
+          var sector = EE_SECTOR_MAP[normaliseAsset(t.asset)] || 'other';
+          if (!sectorCounts[sector]) sectorCounts[sector] = { long: 0, short: 0, assets: [] };
+          sectorCounts[sector][t.direction === 'LONG' ? 'long' : 'short']++;
+          sectorCounts[sector].assets.push(t.asset);
+        });
+        var sectorKeys = Object.keys(sectorCounts).sort(function (a, b) {
+          var ta = sectorCounts[a].long + sectorCounts[a].short;
+          var tb = sectorCounts[b].long + sectorCounts[b].short;
+          return tb - ta;
+        });
+        heatEl.innerHTML = sectorKeys.map(function (s) {
+          var c = sectorCounts[s];
+          var tot = c.long + c.short;
+          var maxPerSector = _cfg.max_per_sector || 2;
+          var heat = tot >= maxPerSector ? '#ff4444' : tot >= maxPerSector - 1 ? '#ffc107' : '#00e676';
+          return '<div style="display:inline-flex;align-items:center;gap:4px;' +
+            'margin:2px 6px 2px 0;padding:3px 8px;background:rgba(255,255,255,0.05);' +
+            'border:1px solid ' + heat + ';border-radius:4px;font-size:10px">' +
+            '<span style="color:' + heat + '">●</span>' +
+            '<span style="color:var(--text)">' + s + '</span>' +
+            '<span style="color:var(--dim)">' + c.assets.join('/') + '</span>' +
+            (c.long  ? '<span style="color:var(--green)">↑' + c.long  + '</span>' : '') +
+            (c.short ? '<span style="color:var(--red)">↓'   + c.short + '</span>' : '') +
+            '</div>';
+        }).join('');
+      }
+    }
+
+    // ── Scalper agent performance panel ──────────────────────────────────────
+    var scalperEl = document.getElementById('eeScalperStats');
+    if (scalperEl) {
+      var stats   = a.scalperStats || {};
+      var sources = Object.keys(stats);
+
+      // Live status badges from agent globals
+      var agentStatus = [
+        { key: 'scalper',         global: 'GII_AGENT_SCALPER',         label: '24/7 Scalper',    icon: '⚡' },
+        { key: 'scalper-session', global: 'GII_AGENT_SCALPER_SESSION', label: 'Session Scalper', icon: '🕐' }
+      ];
+
+      var liveHtml = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">';
+      agentStatus.forEach(function (ag) {
+        var agObj = window[ag.global];
+        var st    = agObj ? (function () { try { return agObj.status(); } catch(e) { return {}; } })() : null;
+        var isActive   = st && st.activeScalp;
+        var isSessionOff = st && st.note && st.note.indexOf('Outside session') !== -1;
+        var isGated    = st && st.gtiGated;
+        var badgeColor = isActive ? '#00e676' : (isSessionOff || isGated) ? 'rgba(255,255,255,0.3)' : 'var(--amber)';
+        var stateLabel = isActive ? '⚡ Active: BTC ' + (st.activeScalp.bias || '').toUpperCase()
+                       : isSessionOff ? 'Outside session'
+                       : isGated      ? 'GTI gated'
+                       : st           ? 'Scanning'
+                       :                'Not loaded';
+        liveHtml += '<div style="padding:5px 10px;background:var(--bg3);border:1px solid ' + badgeColor +
+          ';border-radius:4px;font-size:10px">' +
+          '<span style="color:' + badgeColor + ';font-weight:700">' + ag.icon + ' ' + ag.label + '</span>' +
+          '<span style="color:rgba(255,255,255,0.5);margin-left:8px">' + stateLabel + '</span>' +
+          (st && typeof st.rsi5m === 'number'
+            ? '<span style="color:rgba(255,255,255,0.4);margin-left:8px;font-size:9px">RSI ' + st.rsi5m +
+              ' | Vol×' + (st.volRatio || '—') + '</span>'
+            : '') +
+          '</div>';
+      });
+      liveHtml += '</div>';
+
+      if (!sources.length) {
+        scalperEl.innerHTML = liveHtml +
+          '<span style="color:var(--dim);font-size:10px">No closed scalper trades yet — stats will appear here once a BTC scalp closes.</span>';
+      } else {
+        var combined = { trades: 0, wins: 0, losses: 0, pnl: 0, partial: 0, durs: [] };
+        sources.forEach(function (k) {
+          var s = stats[k];
+          combined.trades += s.trades; combined.wins += s.wins; combined.losses += s.losses;
+          combined.pnl += s.pnl; combined.partial += s.partial;
+          combined.durs = combined.durs.concat(s.durs);
+        });
+
+        var LABELS = { 'scalper': '24/7 Scalper', 'scalper-session': 'Session Scalper' };
+
+        var rows = sources.concat(['combined']).map(function (k) {
+          var s = (k === 'combined') ? combined : stats[k];
+          if (!s || !s.trades) return '';
+          var tot  = s.wins + s.losses;
+          var wr   = tot ? Math.round(s.wins / tot * 100) : 0;
+          var wrCl = wr >= 60 ? 'var(--green)' : wr < 40 ? 'var(--red)' : 'var(--amber)';
+          var pnlCl = s.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+          var avgDur = s.durs.length
+            ? (s.durs.reduce(function (a, b) { return a + b; }, 0) / s.durs.length).toFixed(0) + 'm'
+            : '—';
+          var label = k === 'combined' ? '<b>COMBINED</b>' : (LABELS[k] || k);
+          var rowStyle = k === 'combined'
+            ? 'border-top:1px solid rgba(255,255,255,0.15);font-weight:700'
+            : 'border-bottom:1px solid rgba(255,255,255,0.05)';
+          return '<tr style="' + rowStyle + '">' +
+            '<td style="padding:4px 8px">' + label + '</td>' +
+            '<td style="padding:4px 8px">' + s.trades + '</td>' +
+            '<td style="padding:4px 8px;color:' + wrCl + '">' + wr + '%</td>' +
+            '<td style="padding:4px 8px">' + s.wins + ' / ' + s.losses + '</td>' +
+            '<td style="padding:4px 8px;color:' + pnlCl + '">' + (s.pnl >= 0 ? '+$' : '-$') + _num(Math.abs(s.pnl)) + '</td>' +
+            '<td style="padding:4px 8px;color:var(--dim)">' + avgDur + '</td>' +
+            '<td style="padding:4px 8px;color:var(--dim)">' + (s.partial ? '½×' + s.partial : '—') + '</td>' +
+            '</tr>';
+        }).join('');
+
+        scalperEl.innerHTML = liveHtml +
+          '<table style="width:100%;border-collapse:collapse;font-size:10px">' +
+          '<thead><tr style="color:rgba(255,255,255,0.4);font-size:9px;border-bottom:1px solid rgba(255,255,255,0.12)">' +
+          '<th style="padding:4px 8px;text-align:left">Agent</th>' +
+          '<th style="padding:4px 8px;text-align:left">Trades</th>' +
+          '<th style="padding:4px 8px;text-align:left">Win%</th>' +
+          '<th style="padding:4px 8px;text-align:left">W / L</th>' +
+          '<th style="padding:4px 8px;text-align:left">P&amp;L</th>' +
+          '<th style="padding:4px 8px;text-align:left">Avg Hold</th>' +
+          '<th style="padding:4px 8px;text-align:left">Partial TPs</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      }
+    }
   }
 
   /* ══════════════════════════════════════════════════════════════════════════════
@@ -2120,14 +2625,17 @@
     /* ── Save updated risk parameters from form ── */
     updateConfig: function () {
       var rules = {
-        min_confidence:     { min: 10,  max: 95,      int: true  },
-        risk_per_trade_pct: { min: 0.1, max: 10,      int: false },
-        stop_loss_pct:      { min: 0.1, max: 20,      int: false },
-        take_profit_ratio:  { min: 0.5, max: 10,      int: false },
-        max_open_trades:    { min: 1,   max: 20,      int: true  },
-        max_per_region:     { min: 1,   max: 5,       int: true  },
-        max_per_sector:     { min: 1,   max: 5,       int: true  },
-        virtual_balance:    { min: 100, max: 10000000, int: false }
+        min_confidence:       { min: 10,  max: 95,       int: true  },
+        risk_per_trade_pct:   { min: 0.1, max: 10,       int: false },
+        stop_loss_pct:        { min: 0.1, max: 20,       int: false },
+        take_profit_ratio:    { min: 0.5, max: 10,       int: false },
+        max_open_trades:      { min: 1,   max: 20,       int: true  },
+        max_per_region:       { min: 1,   max: 5,        int: true  },
+        max_per_sector:       { min: 1,   max: 5,        int: true  },
+        virtual_balance:      { min: 100, max: 10000000, int: false },
+        trailing_stop_pct:    { min: 0.1, max: 10,       int: false },
+        daily_loss_limit_pct: { min: 1,   max: 20,       int: false },
+        event_gate_hours:     { min: 0,   max: 4,        int: false }
       };
       Object.keys(rules).forEach(function (f) {
         var el = document.getElementById('eeCfg_' + f);
@@ -2135,6 +2643,11 @@
         var v = parseFloat(el.value), r = rules[f];
         if (isNaN(v) || v < r.min || v > r.max) return;
         _cfg[f] = r.int ? Math.round(v) : v;
+      });
+      // Sync checkbox toggles
+      ['trailing_stop_enabled','break_even_enabled','partial_tp_enabled','event_gate_enabled'].forEach(function (f) {
+        var el = document.getElementById('eeCfg_' + f);
+        if (el) _cfg[f] = el.checked;
       });
       saveCfg();
       log('CONFIG', 'Risk parameters updated', 'amber');
@@ -2269,6 +2782,36 @@
       document.body.removeChild(a); URL.revokeObjectURL(a.href);
     },
 
+    exportCSV:      function () {
+      // Build CSV: closed trades ordered newest-first
+      var cols = [
+        'trade_id','asset','direction','status','confidence',
+        'entry_price','stop_loss','take_profit','close_price',
+        'pnl_pct','pnl_usd','close_reason',
+        'timestamp_open','timestamp_close',
+        'units','size_usd','region','reason','kelly_mult'
+      ];
+      var rows = [cols.join(',')];
+      _trades.forEach(function (t) {
+        rows.push(cols.map(function (c) {
+          var v = t[c];
+          if (v === null || v === undefined) return '';
+          // Wrap strings with commas or quotes in double-quotes
+          var s = String(v);
+          if (s.indexOf(',') !== -1 || s.indexOf('"') !== -1 || s.indexOf('\n') !== -1) {
+            s = '"' + s.replace(/"/g, '""') + '"';
+          }
+          return s;
+        }).join(','));
+      });
+      var blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ee_trades_' + new Date().toISOString().slice(0, 10) + '.csv';
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(a.href);
+    },
+
     render: renderUI,
 
     /* ── Toggle full closed-trade history in the UI ── */
@@ -2279,6 +2822,34 @@
     toggleSigLogSession: function () {
       _sigLogSessionOnly = !_sigLogSessionOnly;
       renderSigLog();
+    },
+    toggleClosedSession: function () {
+      _closedSessionOnly = !_closedSessionOnly;
+      renderClosedTrades();
+    },
+
+    /* ── Browser notification permission ── */
+    requestNotifications: function () {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission === 'granted') {
+        // Already granted — show a test notification
+        try {
+          new Notification('✅ EE Alerts active', {
+            body: 'You will be notified when a trade hits TP or SL.',
+            tag: 'ee-test-notif'
+          });
+        } catch (e) {}
+        return;
+      }
+      Notification.requestPermission().then(function (perm) {
+        var btn = document.getElementById('eeNotifBtn');
+        if (perm === 'granted') {
+          if (btn) { btn.style.color = 'var(--green, #00e676)'; btn.style.borderColor = 'var(--green, #00e676)'; btn.textContent = '🔔 Alerts ON'; }
+          try { new Notification('✅ EE Alerts active', { body: 'You will be notified on TP/SL hits.', tag: 'ee-test-notif' }); } catch (e) {}
+        } else {
+          if (btn) { btn.textContent = '🔕 Blocked'; }
+        }
+      });
     }
   };
 
@@ -2301,6 +2872,9 @@
     _sessionStart = storedSession || new Date().toISOString();
     try { localStorage.setItem('geodash_session_start_v1', _sessionStart); } catch(e) {}
 
+    // Record balance at session start for daily loss limit tracking
+    _sessionStartBalance = _cfg.virtual_balance;
+
     /* Auto-start: honour the auto_start config flag (M6).
        Defaults to true (original behaviour) — set auto_start: false to keep
        auto-execution OFF on page load (e.g. review mode).                    */
@@ -2311,6 +2885,7 @@
 
     setTimeout(monitorTrades, 2000);    // first price-check 2 s after load
     setInterval(monitorTrades, 30000);  // then every 30 s
+    _startBinanceWS();                  // real-time BTC price feed (WebSocket)
 
     /* Re-scan loop: every 5 minutes re-process the last IC signal batch.
        Only re-evaluates signals for assets that have no open trade AND whose
@@ -2332,6 +2907,20 @@
         onSignals(freshSigs);
       }
     }, 300000);  // 5 minutes
+
+    // Update notification button state based on existing permission
+    (function () {
+      var btn = document.getElementById('eeNotifBtn');
+      if (!btn || typeof Notification === 'undefined') return;
+      if (Notification.permission === 'granted') {
+        btn.style.color = 'var(--green, #00e676)';
+        btn.style.borderColor = 'var(--green, #00e676)';
+        btn.textContent = '🔔 Alerts ON';
+      } else if (Notification.permission === 'denied') {
+        btn.textContent = '🔕 Blocked';
+        btn.disabled = true;
+      }
+    })();
 
     renderUI();
     log('SYSTEM', 'Execution Engine v1.0 ready — ' + _cfg.mode + ' mode  |  ' +
