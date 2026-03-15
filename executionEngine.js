@@ -2040,27 +2040,19 @@
       _pendingOpen  = {};
       _lastSignals  = [];
       _cfg.virtual_balance = DEFAULTS.virtual_balance;
-      // 3. Wipe all analytics localStorage keys (same set as analyticsReset)
-      var ALL_ANALYTICS_KEYS = [
-        'geodash_ee_trades_v1', 'geodash_ee_siglog_v1',
-        'geodash_ee_trades', 'geodash_ee_trades_v0', 'geodash_learned_weights_v1',
-        'geodash_hitrate_v1', 'geodash_hitrate_v0',
-        'gii_agent_feedback_v1',
-        'gii_ta_feedback_v1', 'gii_scalper_feedback_v1',
-        'gii_smartmoney_feedback_v1', 'gii_optimizer_feedback_v1',
-        'gii_scenario_feedback_v1', 'gii_marketstructure_feedback_v1',
-        'gii_macro_feedback_v1', 'gii_polymarket_feedback_v1', 'gii_meta_feedback_v1'
-      ];
+      // 3. Reset HRS in memory immediately (don't wait for reload)
+      if (window.HRS && typeof HRS.reset === 'function') HRS.reset();
+      // 4. Sweep ALL geodash_* and gii_* keys so nothing is missed
       try {
-        ALL_ANALYTICS_KEYS.forEach(function (k) { localStorage.removeItem(k); });
-        // Also sweep for any ee_cfg keys
         Object.keys(localStorage).forEach(function (k) {
-          if (k.indexOf('ee_cfg') !== -1) localStorage.removeItem(k);
+          if (k.indexOf('geodash_') === 0 || k.indexOf('gii_') === 0) {
+            localStorage.removeItem(k);
+          }
         });
       } catch (e) {}
       saveTrades();
       saveCfg();
-      // Reload so all in-memory state (HRS, agents, etc.) reinitialises cleanly
+      // Reload so all other in-memory state reinitialises cleanly
       window.location.reload();
     },
 
@@ -2083,36 +2075,19 @@
         : Promise.resolve();
 
       apiWipe.then(function () {
-        // 2. Clear Execution Engine analytics keys (keep config key)
-        var ANALYTICS_KEYS = [
-          // EE — trades & signal log
-          'geodash_ee_trades_v1',
-          'geodash_ee_siglog_v1',
-          // Legacy EE keys
-          'geodash_ee_trades',
-          'geodash_ee_trades_v0',
-          'geodash_learned_weights_v1',
-          // GII Core — agent feedback / reputation
-          'gii_agent_feedback_v1',
-          // Individual agent feedback loops
-          'gii_ta_feedback_v1',
-          'gii_scalper_feedback_v1',
-          'gii_smartmoney_feedback_v1',
-          'gii_optimizer_feedback_v1',
-          'gii_scenario_feedback_v1',
-          'gii_marketstructure_feedback_v1',
-          'gii_macro_feedback_v1',
-          'gii_polymarket_feedback_v1',
-          'gii_meta_feedback_v1',
-          // HRS — hit rate tracker (was the missing one)
-          'geodash_hitrate_v1',
-          'geodash_hitrate_v0'
-        ];
-        ANALYTICS_KEYS.forEach(function (k) {
-          try { localStorage.removeItem(k); } catch (e) {}
-        });
-
-        // 3. Reload page — agents reinitialise fresh, scanning resumes immediately
+        // 2. Reset HRS in memory immediately
+        if (window.HRS && typeof HRS.reset === 'function') HRS.reset();
+        // 3. Sweep ALL geodash_* and gii_* keys (catches anything we might have missed)
+        //    Keep geodash_ee_config_v2 so settings/balance are preserved
+        try {
+          Object.keys(localStorage).forEach(function (k) {
+            if (k === 'geodash_ee_config_v2') return; // keep settings
+            if (k.indexOf('geodash_') === 0 || k.indexOf('gii_') === 0) {
+              localStorage.removeItem(k);
+            }
+          });
+        } catch (e) {}
+        // 4. Reload page — agents reinitialise fresh, scanning resumes immediately
         window.location.reload();
       });
     },

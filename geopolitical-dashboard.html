@@ -12277,6 +12277,15 @@ function _modalKeyHandler(e) {
 
     signals: [],
 
+    /* ── Hard reset — wipe signals in memory and localStorage ────────────── */
+    reset: function() {
+      this.signals = [];
+      try { localStorage.removeItem(STORE_KEY); } catch(e) {}
+      try { localStorage.removeItem('geodash_hitrate_v0'); } catch(e) {}
+      this.save();
+      this.render();
+    },
+
     /* ── Load from localStorage (seed on first run) ──────────────────────── */
     load: function() {
       try {
@@ -12683,7 +12692,7 @@ function _modalKeyHandler(e) {
 <script src="polymarket.js?v=15"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=24"></script>
+<script src="executionEngine.js?v=25"></script>
 
 <!-- GII Multi-Agent Intelligence System — agents first, then core, then UI -->
 <script src="agents/gii-energy.js?v=2"></script>
