@@ -135,6 +135,8 @@
   var _initialised = false; // reentrancy guard — prevents duplicate intervals if init() called twice
   var _showAllClosed = false; // UI toggle: show all closed trades vs capped at 25
   var _backendPrices = {};  // symbol → price, populated by _pollBackendPrices() every 25 s (H4)
+  var _sessionStart  = null; // ISO timestamp — set on init, reset on analyticsReset/fullReset
+  var _priceFeedHealth = {}; // source → { ok: bool, lastOk: ms, lastFail: ms }
 
   /* ── Price source maps ──────────────────────────────────────────────────────── */
 
@@ -596,10 +598,14 @@
   function fetchPrice(asset, cb) {
     var token = normaliseAsset(asset);
 
+    function _feedOk(src)   { _priceFeedHealth[src] = { ok: true,  lastOk:   Date.now(), lastFail: (_priceFeedHealth[src]||{}).lastFail||null }; }
+    function _feedFail(src) { _priceFeedHealth[src] = { ok: false, lastOk:   (_priceFeedHealth[src]||{}).lastOk||null, lastFail: Date.now() }; }
+
     // 0. Backend market cache — privacy-safe, no corsproxy needed (H4)
     //    Covers WTI, BRENT, GLD, LMT, TSM, SPY, BTC, ETH, etc.
     if (_apiOnline && _backendPrices[token] !== undefined) {
       _cacheSet(token, _backendPrices[token]);
+      _feedOk('backend');
       cb(_backendPrices[token]);
       return;
     }
@@ -610,21 +616,40 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           var price = parseFloat(d.price);
-          if (!isNaN(price)) _cacheSet(token, price);
+          if (!isNaN(price)) { _cacheSet(token, price); _feedOk('binance'); }
+          else { _feedFail('binance'); }
           cb(!isNaN(price) ? price : (_priceCache[token] || null));
         })
-        .catch(function () { cb(_priceCache[token] || null); });
+        .catch(function () { _feedFail('binance'); cb(_priceCache[token] || null); });
       return;
     }
 
     // 2. CoinGecko — gold (XAU via PAX Gold; 1 PAXG ≈ 1 troy oz)
-    if (COINGECKO_SOURCES[token]) { _fetchCoinGecko(token, COINGECKO_SOURCES[token], cb); return; }
+    if (COINGECKO_SOURCES[token]) {
+      _fetchCoinGecko(token, COINGECKO_SOURCES[token], function(p) {
+        if (p) _feedOk('coingecko'); else _feedFail('coingecko');
+        cb(p);
+      });
+      return;
+    }
 
     // 3. corsproxy + Yahoo Finance — oil, silver, nat-gas, stocks, ETFs
-    if (YAHOO_SOURCES[token]) { _fetchYahoo(token, YAHOO_SOURCES[token], cb); return; }
+    if (YAHOO_SOURCES[token]) {
+      _fetchYahoo(token, YAHOO_SOURCES[token], function(p) {
+        if (p) _feedOk('yahoo'); else _feedFail('yahoo');
+        cb(p);
+      });
+      return;
+    }
 
     // 4. Frankfurter — major forex spot rates (ECB data)
-    if (FRANKFURTER_SOURCES[token]) { _fetchFrankfurter(token, FRANKFURTER_SOURCES[token], cb); return; }
+    if (FRANKFURTER_SOURCES[token]) {
+      _fetchFrankfurter(token, FRANKFURTER_SOURCES[token], function(p) {
+        if (p) _feedOk('frankfurter'); else _feedFail('frankfurter');
+        cb(p);
+      });
+      return;
+    }
 
     // 5. Dashboard live ticker (prices already shown on-page, handles aliases GLD→GOLD etc.)
     var found = _tickerPrice(token);
@@ -983,10 +1008,18 @@
       // All checks passed — acquire pending lock, then fetch price and open
       var _lockKey = normaliseAsset(sig.asset);
       _pendingOpen[_lockKey] = true;
-      _logSignal(sig, 'TRADED', null);
       fetchPrice(sig.asset, function (price) {
         delete _pendingOpen[_lockKey];   // release lock regardless of outcome
-        openTrade(sig, price || 100);
+        if (!price) {
+          // No price available — skip this trade entirely rather than open at
+          // a meaningless $100 fallback which would corrupt P&L. The 5-min
+          // re-scan loop will retry this signal when a price becomes available.
+          _logSignal(sig, 'SKIPPED', 'Price unavailable — will retry');
+          log('TRADE', sig.asset + ' skipped: no price feed. Re-scan will retry.', 'amber');
+          return;
+        }
+        _logSignal(sig, 'TRADED', null);
+        openTrade(sig, price);
       });
     });
   }
@@ -1076,6 +1109,7 @@
 
   function renderUI() {
     renderStatusBar();
+    renderPortfolioSummary();
     renderConfigFields();
     renderOpenTrades();
     renderClosedTrades();
@@ -1089,6 +1123,102 @@
     // Refresh signal history + risk simulator
     renderSigLog();
     renderSim();
+    renderPriceFeedHealth();
+  }
+
+  function renderPortfolioSummary() {
+    var el = document.getElementById('eePortfolioSummary');
+    if (!el) return;
+
+    // Realised P&L from all closed trades this session
+    var sessionTs = _sessionStart ? new Date(_sessionStart).getTime() : 0;
+    var closed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
+    var sessionClosed = closed.filter(function (t) {
+      return t.timestamp_close && new Date(t.timestamp_close).getTime() >= sessionTs;
+    });
+    var realisedPnl = sessionClosed.reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
+
+    // Unrealised P&L from open trades using live prices
+    var unrealisedPnl = 0;
+    openTrades().forEach(function (t) {
+      var px = _livePrice[t.trade_id] || _priceCache[normaliseAsset(t.asset)] || null;
+      if (!px) return;
+      var diff = t.direction === 'LONG' ? (px - t.entry_price) : (t.entry_price - px);
+      unrealisedPnl += t.units * diff;
+    });
+
+    var startBalance = DEFAULTS.virtual_balance;
+    var totalPnl     = realisedPnl + unrealisedPnl;
+    var returnPct    = startBalance > 0 ? (totalPnl / startBalance * 100) : 0;
+    var retCol       = returnPct >= 0 ? '#00c8a0' : '#ff4444';
+    var uCol         = unrealisedPnl >= 0 ? '#00c8a0' : '#ff4444';
+    var rCol         = realisedPnl   >= 0 ? '#00c8a0' : '#ff4444';
+
+    // Session duration
+    var sessionAge = '';
+    if (_sessionStart) {
+      var mins = Math.floor((Date.now() - new Date(_sessionStart).getTime()) / 60000);
+      sessionAge = mins < 60
+        ? mins + 'm'
+        : Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm';
+    }
+
+    el.innerHTML =
+      '<div class="ee-psb-item">' +
+        '<span class="ee-psb-label">Balance</span>' +
+        '<span class="ee-psb-val">' +
+          '<b style="color:var(--bright)">$' + _num(_cfg.virtual_balance) + '</b>' +
+        '</span>' +
+      '</div>' +
+      '<div class="ee-psb-item">' +
+        '<span class="ee-psb-label">Unrealised</span>' +
+        '<span class="ee-psb-val" style="color:' + uCol + '">' +
+          (unrealisedPnl >= 0 ? '+' : '') + '$' + _num(Math.abs(unrealisedPnl)) +
+        '</span>' +
+      '</div>' +
+      '<div class="ee-psb-item">' +
+        '<span class="ee-psb-label">Realised</span>' +
+        '<span class="ee-psb-val" style="color:' + rCol + '">' +
+          (realisedPnl >= 0 ? '+' : '-') + '$' + _num(Math.abs(realisedPnl)) +
+        '</span>' +
+      '</div>' +
+      '<div class="ee-psb-item">' +
+        '<span class="ee-psb-label">Session Return</span>' +
+        '<span class="ee-psb-val" style="color:' + retCol + ';font-weight:700">' +
+          (returnPct >= 0 ? '+' : '') + returnPct.toFixed(2) + '%' +
+        '</span>' +
+      '</div>' +
+      '<div class="ee-psb-item ee-psb-session">' +
+        '<span class="ee-psb-label">Session started</span>' +
+        '<span class="ee-psb-val" style="color:var(--dim)">' +
+          (_sessionStart ? new Date(_sessionStart).toUTCString().replace(' GMT','') : '—') +
+          (sessionAge ? ' (' + sessionAge + ' ago)' : '') +
+        '</span>' +
+      '</div>';
+  }
+
+  function renderPriceFeedHealth() {
+    var el = document.getElementById('eePriceFeedHealth');
+    if (!el) return;
+    var sources = [
+      { name: 'Backend',    key: 'backend'    },
+      { name: 'Binance',    key: 'binance'    },
+      { name: 'Yahoo',      key: 'yahoo'      },
+      { name: 'CoinGecko',  key: 'coingecko'  },
+      { name: 'Frankfurter',key: 'frankfurter'}
+    ];
+    el.innerHTML = '<span style="color:var(--dim);font-size:9px;margin-right:6px">Price feeds:</span>' +
+      sources.map(function (s) {
+        var h   = _priceFeedHealth[s.key];
+        var ok  = h && h.ok;
+        var age = h && h.lastOk ? Math.floor((Date.now() - h.lastOk) / 60000) : null;
+        var dot = ok ? '#00c8a0' : (h ? '#ff4444' : '#555');
+        var tip = ok ? (age !== null ? s.name + ' OK (' + age + 'm ago)' : s.name + ' OK')
+                     : (h ? s.name + ' failing' : s.name + ' untested');
+        return '<span title="' + tip + '" style="font-size:9px;margin-right:8px">' +
+               '<span style="color:' + dot + '">●</span> ' +
+               '<span style="color:var(--dim)">' + s.name + '</span></span>';
+      }).join('');
   }
 
   function renderStatusBar() {
@@ -1278,14 +1408,29 @@
 
   /* ── Signal History Log ─────────────────────────────────────────────────────── */
 
+  var _sigLogSessionOnly = false; // toggle: show this session's signals only
+
   function renderSigLog() {
     var el = document.getElementById('eeSigLog');
     if (!el) return;
-    if (!_signalLog.length) {
-      el.innerHTML = '<div class="ee-placeholder">No signals seen yet — waiting for IC cycle.</div>';
+
+    // Session filter
+    var sessionTs  = _sessionStart ? new Date(_sessionStart).getTime() : 0;
+    var logs = _sigLogSessionOnly
+      ? _signalLog.filter(function (e) { return new Date(e.ts).getTime() >= sessionTs; })
+      : _signalLog;
+
+    // Update toggle button label
+    var btn = document.getElementById('eeSigLogSessionBtn');
+    if (btn) btn.textContent = _sigLogSessionOnly ? 'All Signals' : 'This Session';
+
+    if (!logs.length) {
+      el.innerHTML = '<div class="ee-placeholder">' +
+        (_sigLogSessionOnly ? 'No signals this session yet.' : 'No signals seen yet — waiting for IC cycle.') +
+        '</div>';
       return;
     }
-    el.innerHTML = _signalLog.slice(0, 50).map(function (e) {
+    el.innerHTML = logs.slice(0, 50).map(function (e) {
       var d   = new Date(e.ts);
       var ts  = String(d.getMonth()+1).padStart(2,'0') + '/' +
                 String(d.getDate()).padStart(2,'0') + ' ' +
@@ -2130,6 +2275,10 @@
     toggleAllClosed: function () {
       _showAllClosed = !_showAllClosed;
       renderClosedTrades();
+    },
+    toggleSigLogSession: function () {
+      _sigLogSessionOnly = !_sigLogSessionOnly;
+      renderSigLog();
     }
   };
 
@@ -2144,6 +2293,13 @@
     loadCfg();
     loadTrades();
     loadSigLog();
+
+    // Session start — restore from localStorage so it survives page reloads
+    // but gets wiped by analyticsReset/fullReset (they clear geodash_* keys)
+    var storedSession = null;
+    try { storedSession = localStorage.getItem('geodash_session_start_v1'); } catch(e) {}
+    _sessionStart = storedSession || new Date().toISOString();
+    try { localStorage.setItem('geodash_session_start_v1', _sessionStart); } catch(e) {}
 
     /* Auto-start: honour the auto_start config flag (M6).
        Defaults to true (original behaviour) — set auto_start: false to keep

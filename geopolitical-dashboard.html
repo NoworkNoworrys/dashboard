@@ -1974,6 +1974,11 @@
     .ee-panel      { background:var(--bg2); border:1px solid var(--border); padding:14px 16px; }
     .ee-placeholder { padding:20px; text-align:center; font-size:10px; color:var(--dim); }
 
+    .ee-psb-item     { flex:1; min-width:140px; padding:8px 14px; border-right:1px solid var(--border); }
+    .ee-psb-item:last-child { border-right:none; }
+    .ee-psb-session  { flex:2; min-width:260px; }
+    .ee-psb-label    { display:block; font-size:8px; text-transform:uppercase; letter-spacing:0.8px; color:var(--dim); margin-bottom:3px; }
+    .ee-psb-val      { display:block; font-size:13px; font-weight:600; }
     .ee-trade-card   { background:var(--bg3); border:1px solid var(--border); border-left:3px solid #ff9500; padding:10px 12px; margin-bottom:8px; }
     .ee-tc-hdr       { display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap; }
     .ee-tc-asset     { font-size:12px; font-weight:700; color:var(--bright); flex:1; }
@@ -4944,6 +4949,12 @@
       <button onclick="EE.exportJSON()" style="margin-left:10px;padding:2px 10px;background:var(--amber);color:var(--bg);border:none;font-family:inherit;font-size:10px;font-weight:bold;cursor:pointer;letter-spacing:1px">&#8595; EXPORT TRADES</button>
     </div>
 
+    <!-- Portfolio Summary Bar -->
+    <div id="eePortfolioSummary" style="display:flex;flex-wrap:wrap;gap:0;margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden"></div>
+
+    <!-- Price Feed Health -->
+    <div id="eePriceFeedHealth" style="margin-bottom:10px;padding:5px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;flex-wrap:wrap"></div>
+
     <!-- Open trades + Closed trades -->
     <div class="ee-body">
       <div class="ee-panel">
@@ -5102,6 +5113,10 @@
       <div class="ee-an-header">
         &#9776; Signal History
         <span>Every IC signal seen &mdash; traded, skipped, or watch &middot; Last 50 shown</span>
+        <button id="eeSigLogSessionBtn" onclick="EE.toggleSigLogSession()"
+          style="margin-left:auto;padding:2px 10px;background:none;border:1px solid var(--dim);
+                 color:var(--dim);font-family:inherit;font-size:9px;cursor:pointer;letter-spacing:1px;
+                 border-radius:2px">This Session</button>
       </div>
 
       <!-- Column headers -->
@@ -12692,7 +12707,7 @@ function _modalKeyHandler(e) {
 <script src="polymarket.js?v=15"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=25"></script>
+<script src="executionEngine.js?v=26"></script>
 
 <!-- GII Multi-Agent Intelligence System — agents first, then core, then UI -->
 <script src="agents/gii-energy.js?v=2"></script>
