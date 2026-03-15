@@ -29,9 +29,16 @@
   /* ── SQLite API ─────────────────────────────────────────────────────────────
      Primary persistence: GeoIntel backend on port 8765.
      Falls back to localStorage silently if the backend isn't running.         */
-  // API base: override by setting window.GEO_API_BASE before this script loads.
-  // e.g. <script>window.GEO_API_BASE = 'https://your-vps.example.com';</script>
-  var _API_BASE   = (typeof window !== 'undefined' && window.GEO_API_BASE) || 'http://localhost:8765';
+  // API base: reads from localStorage first (set via the Backend URL field in config),
+  // then falls back to window.GEO_API_BASE (set via script tag), then localhost.
+  var _BACKEND_URL_KEY = 'geodash_backend_url_v1';
+  var _API_BASE = (function () {
+    try {
+      var saved = localStorage.getItem(_BACKEND_URL_KEY);
+      if (saved && saved.length > 4) return saved.replace(/\/$/, '');
+    } catch (e) {}
+    return (typeof window !== 'undefined' && window.GEO_API_BASE) || 'http://localhost:8765';
+  })();
   var _apiOnline    = false;   // set true after first successful /api/status ping
   var _backendChecked = false; // set true after first ping attempt resolves (ok or fail)
 
@@ -2850,6 +2857,49 @@
           if (btn) { btn.textContent = '🔕 Blocked'; }
         }
       });
+    },
+
+    saveBackendUrl: function () {
+      var input  = document.getElementById('eeBackendUrl');
+      var status = document.getElementById('eeBackendUrlStatus');
+      if (!input) return;
+      var url = input.value.trim().replace(/\/$/, '');
+      if (!url) {
+        // Clear saved URL — revert to localhost
+        try { localStorage.removeItem(_BACKEND_URL_KEY); } catch (e) {}
+        _API_BASE = 'http://localhost:8765';
+        _apiOnline = false;
+        _backendChecked = false;
+        input.style.borderColor = 'var(--border)';
+        if (status) { status.textContent = 'Cleared — using localhost'; status.style.color = 'var(--dim)'; }
+        return;
+      }
+      if (!/^https?:\/\//.test(url)) url = 'https://' + url;
+      _API_BASE = url;
+      try { localStorage.setItem(_BACKEND_URL_KEY, url); } catch (e) {}
+      _apiOnline = false;
+      _backendChecked = false;
+      input.style.borderColor = 'var(--amber)';
+      if (status) { status.textContent = 'Connecting…'; status.style.color = 'var(--amber)'; }
+      // Ping the new URL
+      fetch(url + '/api/status', { headers: { 'Content-Type': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function () {
+          _apiOnline = true;
+          _backendChecked = true;
+          input.style.borderColor = 'var(--green, #00e676)';
+          if (status) { status.textContent = '● Connected'; status.style.color = 'var(--green, #00e676)'; }
+          log('SYSTEM', 'Backend connected: ' + url, 'green');
+          // Re-run startup sync now that backend is online
+          _pingBackend();
+        })
+        .catch(function () {
+          _apiOnline = false;
+          _backendChecked = true;
+          input.style.borderColor = 'var(--red)';
+          if (status) { status.textContent = '✗ Unreachable — check URL'; status.style.color = 'var(--red)'; }
+          log('SYSTEM', 'Backend unreachable: ' + url, 'red');
+        });
     }
   };
 
@@ -2864,6 +2914,13 @@
     loadCfg();
     loadTrades();
     loadSigLog();
+
+    // Populate backend URL input with saved value (if any)
+    try {
+      var savedUrl = localStorage.getItem(_BACKEND_URL_KEY);
+      var urlInput = document.getElementById('eeBackendUrl');
+      if (urlInput) urlInput.value = savedUrl || '';
+    } catch (e) {}
 
     // Session start — restore from localStorage so it survives page reloads
     // but gets wiped by analyticsReset/fullReset (they clear geodash_* keys)

@@ -4973,6 +4973,24 @@
         <button class="ee-cfg-ghost" onclick="EE.exportJSON()">&#8595; JSON</button>
         <button class="ee-cfg-ghost" onclick="EE.exportCSV()">&#8595; CSV</button>
       </div>
+
+      <!-- Backend URL — set this to your deployed Render/Railway URL -->
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <label style="font-size:8px;color:var(--dim);letter-spacing:0.8px;text-transform:uppercase;white-space:nowrap">Backend URL</label>
+          <input type="text" id="eeBackendUrl" placeholder="http://localhost:8765 or https://your-app.onrender.com"
+            style="flex:1;min-width:260px;background:var(--bg3);border:1px solid var(--border);color:var(--text);
+                   font-family:inherit;font-size:10px;padding:5px 8px;border-radius:2px"
+            oninput="this.style.borderColor='var(--amber)'"
+            value="">
+          <button class="ee-cfg-ghost" onclick="EE.saveBackendUrl()"
+            style="white-space:nowrap">&#9654; Connect</button>
+          <span id="eeBackendUrlStatus" style="font-size:9px;color:var(--dim)"></span>
+        </div>
+        <div style="font-size:9px;color:var(--dim);margin-top:4px">
+          Deploy the backend free at <a href="https://render.com" target="_blank" style="color:var(--amber)">render.com</a> — connect your GitHub repo, set root dir to <code style="font-size:9px;background:rgba(255,255,255,0.08);padding:1px 4px;border-radius:2px">backend/</code>, done.
+        </div>
+      </div>
     </div>
 
     <!-- Data safety banner — shown until user has closed trades on record -->
@@ -12771,7 +12789,7 @@ function _modalKeyHandler(e) {
 <script src="polymarket.js?v=15"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=29"></script>
+<script src="executionEngine.js?v=30"></script>
 
 <!-- GII Multi-Agent Intelligence System — agents first, then core, then UI -->
 <script src="agents/gii-energy.js?v=2"></script>

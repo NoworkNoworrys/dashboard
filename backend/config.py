@@ -6,7 +6,7 @@ import os
 
 # ── Server ──────────────────────────────────────────────────────────────────
 HOST            = '0.0.0.0'
-PORT            = 8765
+PORT            = int(os.getenv('PORT', 8765))   # Render/cloud sets $PORT; local default 8765
 CYCLE_SECONDS   = 60          # pipeline polling interval
 MAX_EVENTS_DB   = 5000        # SQLite rows to keep
 SSE_KEEPALIVE   = 25          # seconds between SSE heartbeats

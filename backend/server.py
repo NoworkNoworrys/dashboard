@@ -40,20 +40,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title='GeoIntel Backend', version='1.0', lifespan=lifespan)
 
-# CORS — restrict to local origins only.
-# Browsers send Origin: null for file:// pages; localhost variants cover
-# any dev server that might serve the dashboard over HTTP.
+# CORS — allow local dev origins and the live GitHub Pages deployment.
+# Extra origins can be added via the EXTRA_CORS_ORIGINS env var (comma-separated).
+_extra = [o.strip() for o in os.getenv('EXTRA_CORS_ORIGINS', '').split(',') if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        'null',                    # file:// pages (Chrome/Firefox)
+        'null',                                         # file:// pages (Chrome/Firefox)
         'http://localhost',
-        'http://localhost:3008',   # geo-dashboard Python HTTP server
+        'http://localhost:3008',                        # geo-dashboard Python HTTP server
         'http://localhost:8765',
         'http://127.0.0.1',
         'http://127.0.0.1:3008',
         'http://127.0.0.1:8765',
-    ],
+        'https://megamorgs807-dev.github.io',          # GitHub Pages live dashboard
+    ] + _extra,
     allow_methods=['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allow_headers=['*'],
 )
