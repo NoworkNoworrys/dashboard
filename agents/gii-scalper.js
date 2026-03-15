@@ -272,7 +272,9 @@
   function _gtiOk() {
     try {
       if (!window.GII || typeof GII.gti !== 'function') return true;
-      return GII.gti() < GTI_GATE;
+      var g = GII.gti();
+      var gtiVal = (g && typeof g.value === 'number') ? g.value : (typeof g === 'number' ? g : 0);
+      return gtiVal < GTI_GATE;
     } catch (e) { return true; }
   }
 
@@ -488,7 +490,8 @@
 
     _status.gtiGated  = gtiGated;
     _status.slotBusy  = slotBusy;
-    _status.gtiLevel  = (window.GII && typeof GII.gti === 'function') ? GII.gti() : 0;
+    var _gtiRaw = (window.GII && typeof GII.gti === 'function') ? GII.gti() : null;
+    _status.gtiLevel  = (_gtiRaw && typeof _gtiRaw.value === 'number') ? +_gtiRaw.value.toFixed(1) : 0;
 
     if (gtiGated) {
       _signals  = [];
