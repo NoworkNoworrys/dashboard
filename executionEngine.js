@@ -714,8 +714,10 @@
     if (window.HRS && typeof HRS.signals !== 'undefined') {
       var hrsSig = HRS.signals.find(function (s) { return s.signal_id === trade.signal_id; });
       if (hrsSig) {
+        // TP/SL are unambiguous; manual closes resolve by actual P&L so win rates match SA
         var outcome = reason === 'TAKE_PROFIT' ? 'hit'
-                    : reason === 'STOP_LOSS'   ? 'miss' : 'neutral';
+                    : reason === 'STOP_LOSS'   ? 'miss'
+                    : trade.pnl_usd >= 0       ? 'hit' : 'miss';
         HRS.evaluate(hrsSig.signal_id, outcome, closePrice);
       }
     }

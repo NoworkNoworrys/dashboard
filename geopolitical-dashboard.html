@@ -12264,8 +12264,11 @@ function _modalKeyHandler(e) {
       }
 
       return {
-        day:  _periodStats(_byClose(dayTs), _byClose(dayTs)),  // use close time for both count and P&L
-        week: _periodStats(_byClose(wkTs),  _byClose(wkTs)),  // prevents "P&L but 0 trades" mismatch
+        // Today: count/rate uses open time (show all signals from today, incl. still-open ones)
+        //        P&L uses open time too — pnl_pct is null on open trades so only realized P&L sums
+        day:  _periodStats(_byOpen(dayTs),  _byOpen(dayTs)),
+        // 7-day: both use close time so count and P&L always refer to the same completed trades
+        week: _periodStats(_byClose(wkTs),  _byClose(wkTs)),
         all:  this._stats(all),
         open: all.filter(function(s) { return s.outcome === 'open'; }).length
       };
