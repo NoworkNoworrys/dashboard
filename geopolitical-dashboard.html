@@ -12530,6 +12530,19 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-narrative.js?v=1"></script>
 <script src="agents/gii-escalation.js?v=1"></script>
 <script src="agents/gii-scenario.js?v=1"></script>
+<script>
+  /* ── GII Technical Analysis API Keys ────────────────────────────────────
+   * Free keys — no real money involved, just price data feeds.
+   * Twelve Data:   https://twelvedata.com          (free: 800 credits/day)
+   * Alpha Vantage: https://alphavantage.co/support  (free: 25 req/day)
+   * CryptoCompare: optional — free tier works without a key
+   * ─────────────────────────────────────────────────────────────────────── */
+  window.GII_TA_KEYS = {
+    twelvedata:    'YOUR_TWELVEDATA_KEY_HERE',
+    alphavantage:  'YOUR_ALPHAVANTAGE_KEY_HERE',
+    cryptocompare: ''   // optional — leave blank for free anonymous access
+  };
+</script>
 <script src="agents/gii-technicals.js?v=1"></script>
 <script src="agents/gii-scalper.js?v=1"></script>
 <script src="agents/gii-optimizer.js?v=1"></script>
