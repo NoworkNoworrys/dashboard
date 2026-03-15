@@ -2060,8 +2060,8 @@
       } catch (e) {}
       saveTrades();
       saveCfg();
-      log('CONFIG', 'Full reset complete — balance $' + DEFAULTS.virtual_balance + ', all trades cleared', 'amber');
-      renderUI();
+      // Reload so all in-memory state (HRS, agents, etc.) reinitialises cleanly
+      window.location.reload();
     },
 
     /* ── Analytics Reset — clears all performance data, keeps settings & agents ── */
