@@ -2054,6 +2054,56 @@
       renderUI();
     },
 
+    /* ── Analytics Reset — clears all performance data, keeps settings & agents ── */
+    analyticsReset: function () {
+      if (!confirm(
+        'Start a new tracking session?\n\n' +
+        'This will:\n' +
+        '✓ Clear all trade history and P&L stats\n' +
+        '✓ Clear signal log\n' +
+        '✓ Reset all agent win-rate / hit-rate feedback\n\n' +
+        '✗ Will NOT change your settings, balance, or agent configs\n' +
+        '✗ Will NOT stop agents or signal scanning\n\n' +
+        'The page will reload to start cleanly. Continue?'
+      )) return;
+
+      // 1. Wipe backend trade DB (analytics only — no config tables)
+      var apiWipe = _apiOnline
+        ? _apiFetch('/api/trades', { method: 'DELETE' }).catch(function () {})
+        : Promise.resolve();
+
+      apiWipe.then(function () {
+        // 2. Clear Execution Engine analytics keys (keep config key)
+        var ANALYTICS_KEYS = [
+          // EE — trades & signal log
+          'geodash_ee_trades_v1',
+          'geodash_ee_siglog_v1',
+          // Legacy EE keys
+          'geodash_ee_trades',
+          'geodash_ee_trades_v0',
+          'geodash_learned_weights_v1',
+          // GII Core — agent feedback / reputation
+          'gii_agent_feedback_v1',
+          // Individual agent feedback loops
+          'gii_ta_feedback_v1',
+          'gii_scalper_feedback_v1',
+          'gii_smartmoney_feedback_v1',
+          'gii_optimizer_feedback_v1',
+          'gii_scenario_feedback_v1',
+          'gii_marketstructure_feedback_v1',
+          'gii_macro_feedback_v1',
+          'gii_polymarket_feedback_v1',
+          'gii_meta_feedback_v1'
+        ];
+        ANALYTICS_KEYS.forEach(function (k) {
+          try { localStorage.removeItem(k); } catch (e) {}
+        });
+
+        // 3. Reload page — agents reinitialise fresh, scanning resumes immediately
+        window.location.reload();
+      });
+    },
+
     /* ── Future broker integration (stubs) ── */
     connectBroker: connectBroker,
 
