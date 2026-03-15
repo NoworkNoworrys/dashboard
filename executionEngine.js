@@ -791,7 +791,10 @@
   function monitorTrades() {
     openTrades().forEach(function (trade) {
       fetchPrice(trade.asset, function (price) {
-        if (!price) return;
+        // Use cached price as display fallback so unrealised P&L always renders
+        var displayPrice = price || _priceCache[normaliseAsset(trade.asset)] || null;
+        if (displayPrice) _livePrice[trade.trade_id] = displayPrice;
+        if (!price) { renderUI(); return; }  // no live price — skip TP/SL checks
 
         // Store live price so renderOpenTrades() can show unrealised P&L
         _livePrice[trade.trade_id] = price;

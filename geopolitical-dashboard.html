@@ -12230,7 +12230,7 @@ function _modalKeyHandler(e) {
     /* ── Compute Day / Week / All Time stats ─────────────────────────────── */
     calcStats: function() {
       var now   = Date.now();
-      var dayTs = (function() { var d = new Date(); d.setUTCHours(0,0,0,0); return d.getTime(); })();
+      var dayTs = (function() { var d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })(); // local midnight, not UTC
       var wkTs  = now - 7 * 86400000;
       var all   = this.signals;
 
@@ -12264,8 +12264,8 @@ function _modalKeyHandler(e) {
       }
 
       return {
-        day:  _periodStats(_byOpen(dayTs), _byClose(dayTs)),
-        week: _periodStats(_byOpen(wkTs),  _byClose(wkTs)),
+        day:  _periodStats(_byClose(dayTs), _byClose(dayTs)),  // use close time for both count and P&L
+        week: _periodStats(_byClose(wkTs),  _byClose(wkTs)),  // prevents "P&L but 0 trades" mismatch
         all:  this._stats(all),
         open: all.filter(function(s) { return s.outcome === 'open'; }).length
       };
