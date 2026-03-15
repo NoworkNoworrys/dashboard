@@ -199,7 +199,23 @@
     'HYG':     'HYG',    // iShares High Yield Corporate Bond
     'DXY':     'DX-Y.NYB', // US Dollar Index
     'WEAT':    'WEAT',   // Teucrium Wheat Fund
+    'WHT':     'WEAT',   // "Wheat" shorthand → Teucrium Wheat Fund
+    'WHEAT':   'WEAT',
     'CORN':    'CORN',   // Teucrium Corn Fund
+    'TSLA':    'TSLA',
+    'MSFT':    'MSFT',
+    'AAPL':    'AAPL',
+    'AMZN':    'AMZN',
+    'GOOGL':   'GOOGL',
+    'META':    'META',
+    'INDA':    'INDA',   // iShares MSCI India ETF
+    'EEM':     'EEM',    // iShares MSCI Emerging Markets
+    'EWZ':     'EWZ',    // iShares MSCI Brazil
+    'EWJ':     'EWJ',    // iShares MSCI Japan
+    'LIT':     'LIT',    // Global X Lithium & Battery Tech ETF
+    'COPX':    'COPX',   // Global X Copper Miners ETF
+    'URA':     'URA',    // Global X Uranium ETF
+    'URBN':    'URBN',
     'VIX':     '^VIX'
   };
 
@@ -1173,6 +1189,7 @@
           '<span class="ee-tc-mode ' + (t.mode === 'LIVE' ? 'live' : 'sim') + '">' + t.mode + '</span>' +
         '</div>' +
         '<div class="ee-tc-prices">' +
+          (t.entry_price === 100 ? '<div style="font-size:9px;color:#ff9500;margin-bottom:4px">⚠️ Entry price unavailable at open — P&amp;L unreliable. Consider closing &amp; re-entering.</div>' : '') +
           'Entry: <b>' + _num(t.entry_price) + '</b>' +
           ' &nbsp; <span class="ee-tc-sl">SL: ' + _num(t.stop_loss) + '</span>' +
           ' &nbsp; <span class="ee-tc-tp">TP: ' + _num(t.take_profit) + '</span>' +
@@ -2067,7 +2084,8 @@
     }
     saveCfg();
 
-    setInterval(monitorTrades, 30000);  // price-check open trades every 30 s
+    setTimeout(monitorTrades, 2000);    // first price-check 2 s after load
+    setInterval(monitorTrades, 30000);  // then every 30 s
 
     /* Re-scan loop: every 5 minutes re-process the last IC signal batch.
        Only re-evaluates signals for assets that have no open trade AND whose
