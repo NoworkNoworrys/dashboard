@@ -153,6 +153,15 @@ def delete(trade_id: str) -> bool:
             return cur.rowcount > 0
 
 
+def delete_all() -> int:
+    """Delete every trade record. Returns number of rows deleted."""
+    with _lock:
+        with _get_conn() as conn:
+            cur = conn.execute("DELETE FROM trades")
+            conn.commit()
+            return cur.rowcount
+
+
 def count() -> int:
     with _lock:
         with _get_conn() as conn:

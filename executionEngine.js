@@ -2025,15 +2025,29 @@
 
     /* ── Full reset — wipes everything and starts fresh ── */
     fullReset: function () {
-      if (!confirm('Full reset: close ALL open trades, clear all history and reset balance to $10,000?\n\nThis cannot be undone.')) return;
+      if (!confirm('Full reset: close ALL open trades, clear all history and reset balance to $' + DEFAULTS.virtual_balance + '?\n\nThis cannot be undone.')) return;
+      // 1. Wipe backend DB first (fire-and-forget with log)
+      if (_apiOnline) {
+        _apiFetch('/api/trades', { method: 'DELETE' })
+          .then(function (r) { return r.json(); })
+          .then(function (d) { log('CONFIG', 'Backend wiped — ' + (d.deleted || 0) + ' trades deleted', 'amber'); })
+          .catch(function () { log('CONFIG', 'Backend wipe failed — restart backend to clear DB', 'red'); });
+      }
+      // 2. Wipe in-memory state
       _trades       = [];
       _livePrice    = {};
       _cooldown     = {};
       _pendingOpen  = {};
       _lastSignals  = [];
       _cfg.virtual_balance = DEFAULTS.virtual_balance;
-      try { localStorage.removeItem('ee_trades_v2'); } catch (e) {}
-      try { localStorage.removeItem('ee_trades_v1'); } catch (e) {}
+      // 3. Wipe all localStorage trade keys
+      try {
+        Object.keys(localStorage).forEach(function (k) {
+          if (k.indexOf('ee_trades') !== -1 || k.indexOf('ee_cfg') !== -1) {
+            localStorage.removeItem(k);
+          }
+        });
+      } catch (e) {}
       saveTrades();
       saveCfg();
       log('CONFIG', 'Full reset complete — balance $' + DEFAULTS.virtual_balance + ', all trades cleared', 'amber');

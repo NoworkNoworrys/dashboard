@@ -516,6 +516,13 @@ async def trades_delete(trade_id: str):
     return JSONResponse(content={'ok': True, 'trade_id': trade_id})
 
 
+@app.delete('/api/trades')
+async def trades_delete_all():
+    """Wipe all trade records — used by Full Reset in the dashboard."""
+    n = await asyncio.get_event_loop().run_in_executor(None, trades_store.delete_all)
+    return JSONResponse(content={'ok': True, 'deleted': n})
+
+
 @app.get('/api/trades/export')
 async def trades_export():
     """Download all trades as a JSON file (also triggers a backup snapshot)."""
