@@ -2891,7 +2891,7 @@
           if (status) { status.textContent = '● Connected'; status.style.color = 'var(--green, #00e676)'; }
           log('SYSTEM', 'Backend connected: ' + url, 'green');
           // Re-run startup sync now that backend is online
-          _pingBackend();
+          _apiInit();
         })
         .catch(function () {
           _apiOnline = false;
