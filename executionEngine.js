@@ -1154,14 +1154,48 @@
     trade.pnl_usd  = +(trade.pnl_usd - closeComm).toFixed(2);
     trade.costs_usd = +((trade.costs_usd || 0) + closeComm).toFixed(4);
 
-    // Reality check 8 — plausibility: flag if net P&L exceeds 2× theoretical max
-    // (units × full TP distance). Can indicate a price source bug.
-    var theoreticalMax = Math.abs(trade.units * (trade.take_profit - trade.entry_price));
-    if (theoreticalMax > 0 && Math.abs(trade.pnl_usd) > theoreticalMax * 2) {
+    // Reality check 8 — plausibility: detect wrong-side close prices (price corruption)
+    // and cap P&L at theoretical max. Two-tier check:
+    //   Tier A (hard): close price moved in wrong direction vs. entry for the given reason.
+    //       e.g. LONG+STOP_LOSS close_price > entry_price is impossible — price must fall to hit SL.
+    //       Fix: recalculate P&L using the correct SL/TP level.
+    //   Tier B (warn): |P&L| > 10× theoretical max even after correct-side check — extreme outlier.
+    var isLongClose  = trade.direction === 'LONG';
+    var wrongSide    = isLongClose
+      ? (reason === 'STOP_LOSS'   && adjClosePrice > trade.entry_price)   // LONG SL: price must be below entry
+      || (reason === 'TAKE_PROFIT' && adjClosePrice < trade.entry_price)   // LONG TP: price must be above entry
+      : (reason === 'STOP_LOSS'   && adjClosePrice < trade.entry_price)   // SHORT SL: price must be above entry
+      || (reason === 'TAKE_PROFIT' && adjClosePrice > trade.entry_price);  // SHORT TP: price must be below entry
+
+    if (wrongSide) {
+      // Corrupt price — recalculate using the correct reference level
+      var correctRef  = (reason === 'TAKE_PROFIT') ? trade.take_profit : trade.stop_loss;
+      var adjCorrect  = _adjustedExitPrice(trade.asset, correctRef, trade.direction, reason);
+      var rawPnlCorrect = isLongClose
+        ? (adjCorrect - trade.entry_price) / trade.entry_price * 100
+        : (trade.entry_price - adjCorrect) / trade.entry_price * 100;
+      var correctedPnl = +(trade.units * Math.abs(adjCorrect - trade.entry_price) * (rawPnlCorrect >= 0 ? 1 : -1)).toFixed(2);
+      var corrCloseComm = (trade.units * Math.abs(adjCorrect)) * _getCosts(trade.asset).commission;
+      correctedPnl = +(correctedPnl - corrCloseComm).toFixed(2);
       log('AUDIT',
-        '⚠ PLAUSIBILITY: ' + trade.asset + ' P&L $' + trade.pnl_usd +
-        ' exceeds 2× theoretical max $' + theoreticalMax.toFixed(2) +
-        ' — check price sources', 'amber');
+        '⚠ PRICE CORRUPTION: ' + trade.asset + ' ' + reason + ' close @ ' + adjClosePrice.toFixed(4) +
+        ' is on wrong side of entry ' + trade.entry_price.toFixed(4) +
+        ' — P&L corrected from $' + trade.pnl_usd + ' → $' + correctedPnl +
+        ' using ' + reason + ' level ' + correctRef.toFixed(4), 'amber');
+      trade.close_price    = +adjCorrect.toFixed(6);
+      trade.pnl_usd        = correctedPnl;
+      trade.pnl_pct        = +rawPnlCorrect.toFixed(2);
+      trade.costs_usd      = +((trade.costs_usd || 0) - closeComm + corrCloseComm).toFixed(4);
+    } else {
+      // Tier B: warn (but don't correct) if P&L still > 10× theoretical max after passing side check
+      // (trailing stop can legitimately exceed 2× by riding past original TP, so threshold is 10×)
+      var theoreticalMax = Math.abs(trade.units * (trade.take_profit - trade.entry_price));
+      if (theoreticalMax > 0 && Math.abs(trade.pnl_usd) > theoreticalMax * 10) {
+        log('AUDIT',
+          '⚠ PLAUSIBILITY: ' + trade.asset + ' P&L $' + trade.pnl_usd +
+          ' is ' + (Math.abs(trade.pnl_usd) / theoreticalMax).toFixed(1) + '× theoretical max $' +
+          theoreticalMax.toFixed(2) + ' — check price sources', 'amber');
+      }
     }
 
     // Update virtual balance (pnl_usd is net of close commission; open commission already deducted at open)
@@ -1450,6 +1484,11 @@
             var newLow = Math.min(price, trade.lowest_price || price);
             trade.lowest_price = newLow;
             var trailedStopS = +(newLow + trailDist).toFixed(6);
+            // Clamp: trailing SL for SHORT must not go below the TP level.
+            // If SL went below TP, price could skip past TP in one monitoring cycle
+            // and close as STOP_LOSS instead of TAKE_PROFIT, garbling the close reason
+            // and bypassing the correct TP-level P&L calculation.
+            if (trailedStopS < trade.take_profit) trailedStopS = +trade.take_profit.toFixed(6);
             if (trailedStopS < trade.stop_loss) {
               trade.stop_loss = trailedStopS;
               saved = true;
