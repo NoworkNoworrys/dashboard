@@ -9986,6 +9986,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     scoreEvent(evt);
 
+    // Trigger fast GII Bayesian cycle when a very high-severity event arrives
+    // Reduces signal latency from ~62s to <1s for critical events
+    if (evt.signal >= 80 && window.GII && typeof GII.pollNow === 'function') {
+      clearTimeout(window._giiRapidTrigger);
+      window._giiRapidTrigger = setTimeout(GII.pollNow, 800);
+    }
+
     // Push to front
     IC.events.unshift(evt);
     if (IC.events.length > IC.maxEvents) IC.events.pop();
@@ -10055,7 +10062,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var sigNorm = evt.signal / 100;
     var kwBoost = kwHits * 0.04;
     state.prob = Math.min(97, Math.round(state.prob * 0.82 + (sigNorm * 0.28 + kwBoost) * 100));
-    state.confidence = Math.min(92, Math.round(30 + state.signalCount * 4 + kwHits * 3));
+    state.confidence = Math.min(92, Math.round(30 + Math.min(10, state.signalCount) * 3 + kwHits * 3)); /* cap: 10+ events no longer inflate conf */
     state.signalCount++;
     state.lastEvt = Date.now();
   }
@@ -10188,7 +10195,7 @@ document.addEventListener('DOMContentLoaded', function() {
       var decayedProb = getDecayedProb(st);            /* V19: time-decay applied */
       if (decayedProb < 30) return;
 
-      var baseConf = Math.min(95, Math.round(decayedProb * 0.88 + st.signalCount * 1.5));
+      var baseConf = Math.min(95, Math.round(decayedProb * 0.88 + Math.min(10, st.signalCount) * 1.0)); /* cap: prevents busy regions inflating conf from volume alone */
       var probW    = decayedProb / 100;
 
       /* Scan recent events for this region */
@@ -12877,9 +12884,9 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-smartmoney.js?v=1"></script>
 <script src="agents/gii-marketstructure.js?v=1"></script>
 <script src="agents/gii-manager.js?v=2"></script>
-<script src="agents/gii-entry.js?v=1"></script>
-<script src="agents/gii-exit.js?v=1"></script>
-<script src="gii-core.js?v=12"></script>
+<script src="agents/gii-entry.js?v=2"></script>
+<script src="agents/gii-exit.js?v=2"></script>
+<script src="gii-core.js?v=13"></script>
 <script src="gii-meta.js?v=2"></script>
 <script src="gii-ui.js?v=7"></script>
 <script src="gii-debug.js?v=2"></script>

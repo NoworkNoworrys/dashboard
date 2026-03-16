@@ -414,6 +414,44 @@
         return;
       }
 
+      /* Pre-check EE region/sector caps — avoid silent rejections downstream */
+      if (window.EE && typeof EE.getOpenTrades === 'function' && typeof EE.getConfig === 'function') {
+        try {
+          var eeOpen = EE.getOpenTrades();
+          var eeCfg  = EE.getConfig();
+          /* Region cap check */
+          var regionOpen = eeOpen.filter(function (t) { return t.region === sig.region; }).length;
+          if (eeCfg.max_per_region && regionOpen >= eeCfg.max_per_region) {
+            _stats.rejected++;
+            _rejected.unshift({ asset: sig.asset, dir: sig.dir,
+              reason: 'EE region cap: ' + sig.region + ' (' + regionOpen + '/' + eeCfg.max_per_region + ')', ts: now });
+            if (_rejected.length > 50) _rejected.pop();
+            return;
+          }
+          /* Sector cap check */
+          var ENTRY_SECTOR_MAP = {
+            'WTI':'energy','BRENT':'energy','XLE':'energy','GAS':'energy',
+            'XAU':'precious','GLD':'precious','SLV':'precious',
+            'BTC':'crypto','ETH':'crypto',
+            'SPY':'equity','QQQ':'equity','NVDA':'equity',
+            'TSLA':'equity','SMH':'equity','TSM':'equity','FXI':'equity'
+          };
+          var assetSector = ENTRY_SECTOR_MAP[sig.asset];
+          if (assetSector && eeCfg.max_per_sector) {
+            var sectorOpen = eeOpen.filter(function (t) {
+              return ENTRY_SECTOR_MAP[t.asset] === assetSector;
+            }).length;
+            if (sectorOpen >= eeCfg.max_per_sector) {
+              _stats.rejected++;
+              _rejected.unshift({ asset: sig.asset, dir: sig.dir,
+                reason: 'EE sector cap: ' + assetSector + ' (' + sectorOpen + '/' + eeCfg.max_per_sector + ')', ts: now });
+              if (_rejected.length > 50) _rejected.pop();
+              return;
+            }
+          }
+        } catch (e) {}
+      }
+
       /* Approved — enrich signal with thesis fingerprint + volatility stops */
       var volStop  = VOL_STOPS[sig.asset] || VOL_STOP_DEFAULT;
       var enriched = Object.assign({}, sig, {

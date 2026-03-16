@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v12
+/* GII Core — gii-core.js v13
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -552,10 +552,14 @@
       var rawConf = (post * 100 + conv.confBonus * 100) * conv.boost;
       rawConf = _clamp(rawConf, 0, 95);
 
-      var impactMult = _clamp(_volatilityBoost * conv.boost, 1.0, 3.0);
-
       // Module 4: apply market lag boost if detected
       if (_lagBoost > 1.0) rawConf = _clamp(rawConf * _lagBoost, 0, 95);
+
+      // Skip signals whose rawConf is too low to survive EE's 65% threshold
+      // after the entry agent's max +8 boost (57 + 8 = 65). Avoids dead-end signals.
+      if (rawConf < 57) return;
+
+      var impactMult = _clamp(_volatilityBoost * conv.boost, 1.0, 3.0);
 
       var reasonParts = ['GII'];
       if (conv.level) reasonParts.push(conv.agentCount + '-agent ' + conv.level + ' convergence');

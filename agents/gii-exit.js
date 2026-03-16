@@ -28,8 +28,23 @@
   var IC_PROB_DROP_THRESHOLD  = 25;   // IC region prob below this → close IC/GII trades
   var POSTERIOR_REVERSAL_DELTA = 0.30; // Bayesian posterior dropped this much from entry → close
   var PM_EDGE_DEAD_THRESHOLD  = 0.03; // Polymarket edge < 3% → thesis gone
-  var OPPOSITION_AGENTS_CLOSE = 4;    // This many agents opposing → force close
-  var OPPOSITION_AGENTS_TRAIL = 2;    // This many agents opposing → tighten stop
+  var OPPOSITION_AGENTS_CLOSE      = 4;  // This many agents opposing → force close
+  var OPPOSITION_AGENTS_TRAIL      = 2;  // This many agents opposing → tighten stop
+  var OPPOSITION_CATEGORIES_CLOSE  = 3;  // Must span 3+ distinct categories for force close
+  var OPPOSITION_CATEGORIES_TRAIL  = 2;  // Must span 2+ distinct categories for trail
+
+  /* Agent → category map: prevents 4 correlated agents (e.g. all social/sentiment)
+     from triggering a close — opposition must span multiple independent viewpoints */
+  var AGENT_CATEGORIES = {
+    'GII_AGENT_ENERGY':    'commodity',
+    'GII_AGENT_CONFLICT':  'conflict',
+    'GII_AGENT_MACRO':     'macro',
+    'GII_AGENT_SANCTIONS': 'geopolitical',
+    'GII_AGENT_MARITIME':  'logistics',
+    'GII_AGENT_SOCIAL':    'sentiment',
+    'GII_AGENT_POLYMARKET':'probabilistic',
+    'GII_AGENT_REGIME':    'regime'
+  };
 
   /* Emergency thresholds */
   var VIX_EMERGENCY    = 42;   // Force close risk-asset longs above this
@@ -51,6 +66,7 @@
   var _exitLog     = [];   // last 60 exit decisions
   var _trailLog    = [];   // last 30 stop-tighten actions
   var _stats       = { checked: 0, closed: 0, tightened: 0, extended: 0, skipped: 0 };
+  var _beApplied   = {};   // { tradeId: 'be'|'half' } — tracks progressive trail milestones
 
   /* ── HELPERS ────────────────────────────────────────────────────────────── */
   function _log(type, tradeId, asset, reason, details) {
@@ -66,11 +82,14 @@
     console.log('[GII-EXIT] ' + type + ' · ' + asset + ' · ' + reason);
   }
 
-  /* Count agents currently opposing this trade's direction */
+  /* Count agents opposing this trade's direction.
+     Returns { count, categories } — categories is the number of distinct AGENT_CATEGORIES
+     represented, preventing correlated agents (e.g. 4 social agents) from falsely triggering. */
   function _countOpposition(asset, dir, region) {
-    var opposing = 0;
-    var biasDir  = dir === 'LONG' ? 'long' : 'short';
-    var oppDir   = dir === 'LONG' ? 'short' : 'long';
+    var opposing     = 0;
+    var oppCats      = {};   // { category: true }
+    var biasDir      = dir === 'LONG' ? 'long' : 'short';
+    var oppDir       = dir === 'LONG' ? 'short' : 'long';
 
     var agentNames = [
       'GII_AGENT_ENERGY', 'GII_AGENT_CONFLICT', 'GII_AGENT_SANCTIONS',
@@ -81,18 +100,25 @@
     agentNames.forEach(function (name) {
       var agent = window[name];
       if (!agent) return;
+      var cat = AGENT_CATEGORIES[name] || 'other';
       try {
         /* For macro: check riskMode directly */
         if (name === 'GII_AGENT_MACRO') {
           var mSt = agent.status();
-          if (mSt.riskMode === 'RISK_OFF' && dir === 'LONG' && DEFENSIVE.indexOf(asset) === -1) opposing++;
-          if (mSt.riskMode === 'RISK_ON'  && dir === 'SHORT') opposing++;
+          if (mSt.riskMode === 'RISK_OFF' && dir === 'LONG' && DEFENSIVE.indexOf(asset) === -1) {
+            opposing++; oppCats[cat] = true;
+          }
+          if (mSt.riskMode === 'RISK_ON'  && dir === 'SHORT') {
+            opposing++; oppCats[cat] = true;
+          }
           return;
         }
         /* For regime: active shift counts as opposition to longs */
         if (name === 'GII_AGENT_REGIME') {
           var rSt = agent.status();
-          if (rSt.regimeShiftActive && dir === 'LONG' && DEFENSIVE.indexOf(asset) === -1) opposing++;
+          if (rSt.regimeShiftActive && dir === 'LONG' && DEFENSIVE.indexOf(asset) === -1) {
+            opposing++; oppCats[cat] = true;
+          }
           return;
         }
         var sigs = agent.signals ? agent.signals() : [];
@@ -102,11 +128,11 @@
         if (!relevant.length) relevant = sigs;
         var hasOpp = relevant.some(function (s) { return s.bias === oppDir; });
         var hasAgr = relevant.some(function (s) { return s.bias === biasDir; });
-        if (hasOpp && !hasAgr) opposing++;
+        if (hasOpp && !hasAgr) { opposing++; oppCats[cat] = true; }
       } catch (e) {}
     });
 
-    return opposing;
+    return { count: opposing, categories: Object.keys(oppCats).length };
   }
 
   /* Get current market price for an asset (from EE's lastPrice cache if available) */
@@ -286,16 +312,21 @@
   /* ── MOMENTUM OPPOSITION CHECK ───────────────────────────────────────────── */
   function _oppositionCheck(trade) {
     var region = trade.region || (trade.thesis && trade.thesis.region) || null;
-    var oppCount = _countOpposition(trade.asset, trade.direction, region);
+    var opp    = _countOpposition(trade.asset, trade.direction, region);
+    var n      = opp.count;
+    var cats   = opp.categories;
 
-    if (oppCount >= OPPOSITION_AGENTS_CLOSE) {
+    /* Force close: requires N agents AND they must span M distinct categories.
+       Prevents 4 correlated agents (e.g. all social/sentiment) from closing a good trade. */
+    if (n >= OPPOSITION_AGENTS_CLOSE && cats >= OPPOSITION_CATEGORIES_CLOSE) {
       return { action: 'FORCE_CLOSE', reason: 'multi-agent-opposition', detail:
-        oppCount + ' agents opposing — thesis consensus has reversed' };
+        n + ' agents (' + cats + ' categories) opposing — thesis consensus has reversed' };
     }
 
-    if (oppCount >= OPPOSITION_AGENTS_TRAIL) {
-      return { action: 'TIGHTEN_STOP', reason: 'agents-opposing-' + oppCount, detail:
-        oppCount + ' agents opposing — trailing stop tightened' };
+    /* Trail: requires N agents spanning M distinct categories */
+    if (n >= OPPOSITION_AGENTS_TRAIL && cats >= OPPOSITION_CATEGORIES_TRAIL) {
+      return { action: 'TIGHTEN_STOP', reason: 'agents-opposing-' + n, detail:
+        n + ' agents (' + cats + ' categories) opposing — trailing stop tightened' };
     }
 
     return null;
@@ -336,6 +367,62 @@
             'GTI ' + gtiData.value.toFixed(0) + '% + ' + trade.asset + ' aligned — TP extended' };
         }
       } catch (e) {}
+    }
+
+    return null;
+  }
+
+  /* ── PROGRESSIVE PROFIT TRAIL ────────────────────────────────────────────
+     Simulates partial profit taking by locking in profits at each R milestone:
+       1:1 R:R reached → move stop to breakeven  (trade becomes risk-free)
+       1.5:1 R:R reached → trail stop to +0.5R   (half the move locked in)
+     Uses actual stop distance (entry vs stop_loss) — not estimated percentages.
+     State tracked in _beApplied to avoid re-applying same level. */
+  function _progressiveTrailCheck(trade) {
+    var price = _getPrice(trade.asset);
+    if (!price) return null;
+    var entry = trade.entry_price;
+    var stop  = trade.stop_loss;
+    var dir   = trade.direction;
+    var id    = trade.trade_id;
+    if (!entry || !stop) return null;
+
+    var stopDist = Math.abs(entry - stop);
+    if (stopDist <= 0) return null;
+
+    var moveDist = dir === 'LONG' ? (price - entry) : (entry - price);
+    if (moveDist <= 0) return null;   // not in profit
+
+    var rr    = moveDist / stopDist;  // current R:R multiple
+    var level = _beApplied[id] || 'none';
+
+    /* 1.5:1 → lock in +0.5R profit (only after BE has been applied) */
+    if (rr >= 1.5 && level === 'be') {
+      var halfR     = stopDist * 0.5;
+      var newStop15 = dir === 'LONG'
+        ? +(entry + halfR).toFixed(4)
+        : +(entry - halfR).toFixed(4);
+      /* Only tighten — don't loosen if current stop is already better */
+      if (dir === 'LONG'  && trade.stop_loss && newStop15 <= trade.stop_loss) return null;
+      if (dir === 'SHORT' && trade.stop_loss && newStop15 >= trade.stop_loss) return null;
+      _beApplied[id] = 'half';
+      return { action: 'TIGHTEN_STOP', newStop: newStop15,
+               reason: 'progressive-trail-half-r',
+               detail: 'At 1.5:1 R:R — stop locked at +0.5R (partial profit secured)' };
+    }
+
+    /* 1:1 → move stop to breakeven */
+    if (rr >= 1.0 && level === 'none') {
+      var beBuf  = stopDist * 0.02;  // 2% of stop distance as buffer
+      var newBE  = dir === 'LONG'
+        ? +(entry + beBuf).toFixed(4)
+        : +(entry - beBuf).toFixed(4);
+      if (dir === 'LONG'  && trade.stop_loss && newBE <= trade.stop_loss) return null;
+      if (dir === 'SHORT' && trade.stop_loss && newBE >= trade.stop_loss) return null;
+      _beApplied[id] = 'be';
+      return { action: 'TIGHTEN_STOP', newStop: newBE,
+               reason: 'progressive-trail-be',
+               detail: 'At 1:1 R:R — stop moved to breakeven (trade now risk-free)' };
     }
 
     return null;
@@ -460,7 +547,17 @@
       }
     }
 
-    /* 4. Positive momentum: try to extend TP */
+    /* 4. Progressive profit trail — locks in profits at 1:1 and 1.5:1 R:R milestones */
+    var trailResult = _progressiveTrailCheck(trade);
+    if (trailResult) {
+      var trailChanges = { stop_loss: trailResult.newStop };
+      _log('TIGHTEN_STOP', tradeId, asset, trailResult.reason, { detail: trailResult.detail, changes: trailChanges });
+      try { EE.updateOpenTrade(tradeId, trailChanges); } catch (e) {}
+      _stats.tightened++;
+      /* Don't return — still allow TP extension below if momentum is strong */
+    }
+
+    /* 5. Positive momentum: try to extend TP */
     var extResult = _momentumExtend(trade);
     if (extResult && extResult.action === 'RAISE_TP') {
       var tpChanges = _computeRaisedTP(trade);
