@@ -10198,6 +10198,13 @@ document.addEventListener('DOMContentLoaded', function() {
         var text = (evt.title + ' ' + (evt.desc || '')).toLowerCase();
         var sigW = (evt.signal || 50) / 100;
 
+        /* Per-event score cap: track the MAX rawScore for each candidate from
+           this single event. Without this, one event matching "iran oil sanction
+           embargo pipeline" would contribute 5× rawScore to WTI_LONG — inflating
+           confidence on mediocre events. Each event can only contribute its
+           highest-impact keyword score to any given candidate. */
+        var evtMaxScore = {};
+
         Object.keys(IMPACT_MAP).forEach(function(kw) {
           if (!text.includes(kw)) return;
 
@@ -10220,12 +10227,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 pmMarket:   evt.pmMarket || null,
               };
             }
-            candidates[k].score    += rawScore;
+            /* Track highest per-event score (applied after keyword scan) */
+            evtMaxScore[k] = Math.max(evtMaxScore[k] || 0, rawScore);
             candidates[k].conf      = Math.max(candidates[k].conf, baseConf);
             candidates[k].priority  = Math.min(candidates[k].priority, entry.p);
             /* record keyword if not already listed */
             if (candidates[k].matchedKws.indexOf(kw) === -1) candidates[k].matchedKws.push(kw);
           });
+        });
+
+        /* Apply only the max score per candidate from this event — not the sum */
+        Object.keys(evtMaxScore).forEach(function(k) {
+          candidates[k].score += evtMaxScore[k];
         });
       });
 
