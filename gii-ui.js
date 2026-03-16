@@ -490,6 +490,9 @@
     html += '</tbody></table>';
     html += '</div>';
 
+    // ── System Health panel (from GII_AGENT_MANAGER) ──
+    html += _renderHealthPanel();
+
     // Inject
     content.innerHTML = html;
 
@@ -568,6 +571,94 @@
   };
 
   // ── init ───────────────────────────────────────────────────────────────────
+
+  // ── Health panel renderer ───────────────────────────────────────────────
+
+  function _renderHealthPanel() {
+    var mgr = window.GII_AGENT_MANAGER;
+    var html = '<p class="gii-section-title">System Health</p>';
+    html += '<div class="gii-card">';
+
+    if (!mgr) {
+      html += '<span style="color:rgba(255,255,255,0.3)">Manager agent not loaded yet…</span>';
+      html += '</div>';
+      return html;
+    }
+
+    var st      = mgr.status();
+    var alerts  = mgr.alerts();
+    var report  = mgr.healthReport();
+
+    /* Overall status badge */
+    var ovColour = st.overallHealth === 'ok'    ? 'var(--green)'
+                 : st.overallHealth === 'warn'   ? 'var(--amber)'
+                 : st.overallHealth === 'error'  ? 'var(--red)'
+                 : 'rgba(255,255,255,0.3)';
+    var ovLabel  = st.overallHealth === 'ok'    ? '● ALL SYSTEMS OK'
+                 : st.overallHealth === 'warn'   ? '▲ ' + st.warnings + ' WARNING' + (st.warnings !== 1 ? 'S' : '')
+                 : st.overallHealth === 'error'  ? '✖ ' + st.errors + ' ERROR' + (st.errors !== 1 ? 'S' : '')
+                 : '○ PENDING FIRST CHECK';
+
+    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">';
+    html += '<span style="color:' + ovColour + ';font-weight:700;letter-spacing:1px">' + ovLabel + '</span>';
+    if (st.lastCheck) {
+      var ageMin = Math.round((Date.now() - st.lastCheck) / 60000);
+      html += '<span style="color:rgba(255,255,255,0.3);font-size:10px">last check ' +
+              (ageMin < 1 ? 'just now' : ageMin + 'min ago') + ' · ' + st.checkCount + ' runs</span>';
+    }
+    html += '</div>';
+
+    /* Per-agent dot grid */
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">';
+    var agentNames = Object.keys(report.agents);
+    if (agentNames.length === 0) {
+      html += '<span style="color:rgba(255,255,255,0.3);font-size:10px">Waiting for first health check…</span>';
+    } else {
+      agentNames.forEach(function (name) {
+        var h   = report.agents[name];
+        var col = h.status === 'ok'    ? 'var(--green)'
+                : h.status === 'warn'  ? 'var(--amber)'
+                : h.status === 'error' ? 'var(--red)'
+                : 'rgba(255,255,255,0.3)';
+        var shortName = name.replace('GII_AGENT_', '').replace('_SESSION', '-SES').toLowerCase();
+        html += '<span title="' + _esc(h.message) + '" style="' +
+                'display:inline-flex;align-items:center;gap:4px;' +
+                'background:rgba(255,255,255,0.05);border-radius:3px;padding:2px 6px;' +
+                'font-size:10px;cursor:default">' +
+                '<span style="color:' + col + '">●</span>' +
+                '<span style="color:rgba(255,255,255,0.7)">' + shortName + '</span>' +
+                '</span>';
+      });
+    }
+    html += '</div>';
+
+    /* Active alerts list */
+    if (alerts.length) {
+      html += '<div style="border-top:1px solid rgba(255,255,255,0.07);padding-top:8px">';
+      alerts.slice(0, 8).forEach(function (a) {
+        var col = a.severity === 'error' ? 'var(--red)' : 'var(--amber)';
+        var icon = a.severity === 'error' ? '✖' : '▲';
+        html += '<div style="display:flex;gap:8px;margin-bottom:4px;font-size:10px">' +
+                '<span style="color:' + col + ';flex-shrink:0">' + icon + '</span>' +
+                '<span style="color:rgba(255,255,255,0.5);flex-shrink:0">' + a.time + '</span>' +
+                '<span style="color:rgba(255,255,255,0.4);flex-shrink:0">' +
+                  a.agent.replace('GII_AGENT_', '').toLowerCase() + '</span>' +
+                '<span style="color:rgba(255,255,255,0.8)">' + _esc(a.message) + '</span>' +
+                '</div>';
+      });
+      if (alerts.length > 8) {
+        html += '<div style="color:rgba(255,255,255,0.3);font-size:10px">+ ' +
+                (alerts.length - 8) + ' more alerts</div>';
+      }
+      html += '</div>';
+    } else if (st.checkCount > 0) {
+      html += '<div style="color:rgba(255,255,255,0.3);font-size:10px;border-top:1px solid rgba(255,255,255,0.07);padding-top:6px">' +
+              'No active alerts</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
 
   window.addEventListener('load', function () {
     setTimeout(function () {
