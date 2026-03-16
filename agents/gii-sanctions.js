@@ -1,4 +1,4 @@
-/* GII Sanctions Agent — gii-sanctions.js v3
+/* GII Sanctions Agent — gii-sanctions.js v4
  * Monitors sanctions, embargoes, financial restrictions AND pre-sanctions pipeline signals
  * (legislative activity, treasury warnings, regulatory filings, diplomatic meetings)
  * Reads: window.__IC.events, window.__IC.regionStates
@@ -88,9 +88,9 @@
     var now = Date.now();
     var cutoff = now - 24 * 60 * 60 * 1000;
 
-    // Filter to sanction events
+    // Filter to sanction events — include e.desc as IC events often put detail there
     var sanctionEvents = IC.events.filter(function (e) {
-      var text = e.headline || e.text || e.title || '';
+      var text = (e.headline || e.text || e.title || '') + ' ' + (e.desc || '');
       return e.ts > cutoff && _matchesSanction(text);
     });
 
@@ -104,7 +104,7 @@
     var regions = {};
 
     sanctionEvents.forEach(function (e) {
-      var text = e.headline || e.text || e.title || '';
+      var text = (e.headline || e.text || e.title || '') + ' ' + (e.desc || '');
       var region = (e.region || 'GLOBAL').toUpperCase();
       regions[region] = true;
 
@@ -202,7 +202,7 @@
     // Fires BEFORE formal sanctions — early warning signals from the policy process
 
     var legEvts = IC.events.filter(function (e) {
-      var text = e.headline || e.text || e.title || '';
+      var text = (e.headline || e.text || e.title || '') + ' ' + (e.desc || '');
       return e.ts > cutoff && _matchesLegislative(text);
     });
 

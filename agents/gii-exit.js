@@ -579,13 +579,31 @@
 
     if (!window.EE) return;   // EE not loaded yet
 
-    var trades = [];
+    /* Use EE.openTrades() directly — more authoritative than localStorage which
+       can lag behind EE's in-memory state (especially after forceCloseTrade). */
+    var openTrades = [];
     try {
-      trades = JSON.parse(localStorage.getItem('geodash_ee_trades_v1') || '[]');
+      if (typeof EE.openTrades === 'function') {
+        openTrades = EE.openTrades();
+      } else {
+        var raw = JSON.parse(localStorage.getItem('geodash_ee_trades_v1') || '[]');
+        openTrades = raw.filter(function (t) { return t.status === 'OPEN'; });
+      }
     } catch (e) { return; }
 
-    var openTrades = trades.filter(function (t) { return t.status === 'OPEN'; });
-    if (!openTrades.length) return;
+    if (!openTrades.length) {
+      // All trades closed — prune any stale _beApplied entries to prevent memory leak
+      _beApplied = {};
+      return;
+    }
+
+    /* Prune _beApplied entries for trades that are no longer open.
+       Without this, entries accumulate indefinitely as trades close. */
+    var openIds = {};
+    openTrades.forEach(function (t) { openIds[t.trade_id] = true; });
+    Object.keys(_beApplied).forEach(function (id) {
+      if (!openIds[id]) delete _beApplied[id];
+    });
 
     openTrades.forEach(function (trade) {
       try { _evaluateTrade(trade); } catch (e) {}

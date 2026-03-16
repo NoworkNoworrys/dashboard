@@ -48,12 +48,12 @@
     enabled:               true,         // auto-execution always on by default
     min_confidence:        65,           // minimum IC confidence % to auto-execute
     virtual_balance:       1000,         // starting virtual balance (USD)
-    risk_per_trade_pct:    3,            // % of balance risked per trade
-    stop_loss_pct:         3,            // % distance from entry for stop-loss
-    take_profit_ratio:     2,            // R:R multiplier (TP = SL distance × ratio)
-    max_open_trades:       8,            // max concurrent open trades
+    risk_per_trade_pct:    3,            // % of balance risked per trade — aggressive
+    stop_loss_pct:         1.5,          // % distance from entry — tighter than original 3%, better capital preservation
+    take_profit_ratio:     2.5,          // R:R multiplier — improved from 2:1, more profit per win
+    max_open_trades:       8,            // max concurrent open trades — aggressive
     max_per_region:        3,            // max open trades per geopolitical region
-    max_per_sector:        2,            // max open trades per asset sector (energy, crypto, etc.)
+    max_per_sector:        2,            // max open trades per asset sector
     max_exposure_pct:      30,           // max % of balance in open positions
     cooldown_ms:           120000,       // 2 min cooldown between same-asset signals
     broker:                'SIMULATION', // future: 'BINANCE' | 'ALPACA' | 'POLYMARKET'
@@ -61,12 +61,13 @@
     max_siglog:            200,          // max entries kept in signal log
     // ── Risk management additions ──────────────────────────────────────────────
     trailing_stop_enabled: true,         // move stop up as price moves in favour
-    trailing_stop_pct:     1.5,          // trail distance as % of entry price
+    trailing_stop_pct:     1.0,          // trail distance as % of entry
     break_even_enabled:    true,         // move stop to entry once 50% to TP
     partial_tp_enabled:    true,         // take 50% profit at TP1 (midpoint to TP)
     daily_loss_limit_pct:  5,            // pause if session P&L drops below -5%
     event_gate_enabled:    true,         // block new trades near major calendar events
-    event_gate_hours:      0.5           // hours before event to block (0.5 = 30min)
+    event_gate_hours:      0.5,          // hours before event to block (0.5 = 30min)
+    max_risk_usd:          75            // hard cap per trade — keeps compounding from going exponential above ~$2.5k balance
   };
 
   /* ── Sector map — used for max_per_sector concentration cap ──────────────── */
@@ -866,6 +867,9 @@
     }
 
     var riskAmt  = _cfg.virtual_balance * _cfg.risk_per_trade_pct / 100 * impactMult * kellyMult * streakMult;
+    // Hard cap: prevents compounding from creating unrealistically large positions
+    // e.g. at $147k balance, 3% = $4,410 per trade — way more than intended
+    if (_cfg.max_risk_usd > 0) riskAmt = Math.min(riskAmt, _cfg.max_risk_usd);
     var slDist   = Math.abs(entryPrice - stopLoss);
 
     // Risk-of-ruin guard: scale down so total max drawdown stays ≤ 20% of balance
@@ -927,6 +931,12 @@
 
   /* Open a trade: build object, persist, sync HRS, log */
   function openTrade(sig, entryPrice) {
+    // Belt-and-suspenders: final same-asset guard before writing to _trades.
+    // Catches any path that bypassed canExecute (rotation timing, re-scan race, etc.).
+    if (openTrades().some(function (t) { return t.asset === sig.asset; })) {
+      log('TRADE', sig.asset + ' openTrade blocked — position already open (final guard)', 'amber');
+      return;
+    }
     var trade = buildTrade(sig, entryPrice);
     _trades.unshift(trade);
     _cooldown[sig.asset] = Date.now();
@@ -972,12 +982,20 @@
     trade.timestamp_close = new Date().toISOString();
     trade.close_reason    = reason;
 
-    var rawPnlPct = trade.direction === 'LONG'
-      ? (closePrice - trade.entry_price) / trade.entry_price * 100
-      : (trade.entry_price - closePrice) / trade.entry_price * 100;
+    // Guard: invalid entry_price (0, null, NaN) would cause division-by-zero or
+    // sign-flip in P&L. Set P&L to 0 and log rather than corrupt the balance.
+    if (!trade.entry_price || !isFinite(trade.entry_price) || trade.entry_price <= 0) {
+      log('TRADE', trade.asset + ' closeTrade: invalid entry_price (' + trade.entry_price + ') — P&L set to 0', 'amber');
+      trade.pnl_pct = 0;
+      trade.pnl_usd = 0;
+    } else {
+      var rawPnlPct = trade.direction === 'LONG'
+        ? (closePrice - trade.entry_price) / trade.entry_price * 100
+        : (trade.entry_price - closePrice) / trade.entry_price * 100;
 
-    trade.pnl_pct = +rawPnlPct.toFixed(2);
-    trade.pnl_usd = +(trade.units * Math.abs(closePrice - trade.entry_price) * (rawPnlPct >= 0 ? 1 : -1)).toFixed(2);
+      trade.pnl_pct = +rawPnlPct.toFixed(2);
+      trade.pnl_usd = +(trade.units * Math.abs(closePrice - trade.entry_price) * (rawPnlPct >= 0 ? 1 : -1)).toFixed(2);
+    }
 
     // Update virtual balance
     _cfg.virtual_balance += trade.pnl_usd;
@@ -1176,10 +1194,14 @@
           var hitTP1 = isLong ? (price >= tp1) : (price <= tp1);
           if (hitTP1) {
             var closedUnits  = trade.units * 0.5;
-            var pnlPerUnit   = isLong ? (price - trade.entry_price) : (trade.entry_price - price);
+            // Use tp1 price (not current price) so partial P&L is always capped at 1×R.
+            // Bug: using `price` inflates partial P&L when price gaps straight to TP2 in one
+            // monitor cycle — would bank 1×R here and 1×R on final close = 2×R total instead of 1.5×R.
+            var partialClosePrice = isLong ? Math.min(price, tp1) : Math.max(price, tp1);
+            var pnlPerUnit   = isLong ? (partialClosePrice - trade.entry_price) : (trade.entry_price - partialClosePrice);
             var partialPnl   = +(closedUnits * pnlPerUnit).toFixed(2);
             trade.partial_tp_taken  = true;
-            trade.partial_tp_price  = +price.toFixed(6);
+            trade.partial_tp_price  = +partialClosePrice.toFixed(6);
             trade.partial_pnl_usd   = partialPnl;
             trade.units             = +(trade.units * 0.5).toFixed(6);
             trade.size_usd          = +(trade.units * price).toFixed(2);
@@ -1396,7 +1418,7 @@
     var sessionClosed = closed.filter(function (t) {
       return t.timestamp_close && new Date(t.timestamp_close).getTime() >= sessionTs;
     });
-    var realisedPnl = sessionClosed.reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
+    var realisedPnl = sessionClosed.reduce(function (s, t) { return s + (t.pnl_usd || 0) + (t.partial_pnl_usd || 0); }, 0);
 
     // Unrealised P&L from open trades using live prices
     var unrealisedPnl = 0;
@@ -1485,7 +1507,9 @@
     var open   = openTrades();
     var closed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
     var wins   = closed.filter(function (t) { return t.close_reason === 'TAKE_PROFIT'; });
-    var totPnl = closed.reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
+    // Use balance growth as P&L — this always reconciles with the displayed balance
+    // and captures partial TP credits that pnl_usd alone misses.
+    var totPnl = _cfg.virtual_balance - DEFAULTS.virtual_balance;
     var rate   = closed.length ? Math.round(wins.length / closed.length * 100) : null;
 
     var set = function (id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
@@ -1539,7 +1563,7 @@
   function renderConfigFields() {
     var fields = ['min_confidence','risk_per_trade_pct','stop_loss_pct',
                   'take_profit_ratio','max_open_trades','max_per_region','max_per_sector',
-                  'virtual_balance','trailing_stop_pct','daily_loss_limit_pct','event_gate_hours'];
+                  'virtual_balance','max_risk_usd','trailing_stop_pct','daily_loss_limit_pct','event_gate_hours'];
     fields.forEach(function (f) {
       var el = document.getElementById('eeCfg_' + f);
       if (el && document.activeElement !== el) el.value = _cfg[f];
@@ -2653,6 +2677,7 @@
         max_per_region:       { min: 1,   max: 5,        int: true  },
         max_per_sector:       { min: 1,   max: 5,        int: true  },
         virtual_balance:      { min: 100, max: 10000000, int: false },
+        max_risk_usd:         { min: 0,   max: 10000,    int: false },
         trailing_stop_pct:    { min: 0.1, max: 10,       int: false },
         daily_loss_limit_pct: { min: 1,   max: 20,       int: false },
         event_gate_hours:     { min: 0,   max: 4,        int: false }
@@ -2723,6 +2748,10 @@
       if (!confirm('Reset virtual balance to $1,000? This will not affect trade history.')) return;
       _cfg.virtual_balance = DEFAULTS.virtual_balance;
       saveCfg();
+      // Reset session start so stats only count trades from this point forward
+      _sessionStart = new Date().toISOString();
+      _sessionStartBalance = DEFAULTS.virtual_balance;
+      try { localStorage.setItem('geodash_session_start_v1', _sessionStart); } catch(e) {}
       log('CONFIG', 'Virtual balance reset to $' + DEFAULTS.virtual_balance, 'amber');
       renderUI();
     },

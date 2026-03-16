@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v14
+/* GII Core — gii-core.js v15
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -59,6 +59,7 @@
   var _lastCycleTs = 0;
   var _hormuzActive = false;
   var _lastSignals     = [];
+  var _giiTradeMap     = {};   // { "ASSET_bias": [agentName, ...] } — attribution for feedback
   var _prevGTI         = null;  // Module 4: market lag detection
   var _lagBoost        = 1.0;   // Module 4: applied in portfolioDecision
   var _marketLagActive = false; // Module 4: exposed in status()
@@ -544,6 +545,15 @@
       }
     });
 
+    // Build agent attribution map so feedback works even when _lastSignals has rotated
+    var agentContrib = {};
+    signals.forEach(function (s) {
+      if (!s.asset || !s._agentName) return;
+      var ak = s.asset + '_' + (s.bias || 'long');
+      if (!agentContrib[ak]) agentContrib[ak] = [];
+      if (agentContrib[ak].indexOf(s._agentName) === -1) agentContrib[ak].push(s._agentName);
+    });
+
     var toEmit = [];
     Object.keys(byAsset).forEach(function (key) {
       var s = byAsset[key];
@@ -581,6 +591,12 @@
     });
 
     if (toEmit.length) {
+      // Record attribution before emitting — so feedback works when trade closes later
+      toEmit.forEach(function (sig) {
+        var ak = sig.asset + '_' + (sig.dir === 'SHORT' ? 'short' : 'long');
+        if (agentContrib[ak] && agentContrib[ak].length) _giiTradeMap[ak] = agentContrib[ak].slice();
+      });
+
       try {
         /* Route through entry agent (confluence check) if available */
         if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
@@ -708,37 +724,50 @@
     if (!trade || !trade.asset) return;
 
     // Normalise dir — EE uses 'LONG'/'SHORT' strings; legacy callers may use +1/-1
-    var tradeDir = (trade.dir || '');
+    var tradeDir = (trade.dir || trade.direction || '');
     var isLong  = (tradeDir === 'LONG'  || tradeDir === 'long'  || (typeof tradeDir === 'number' && tradeDir > 0));
     var isShort = (tradeDir === 'SHORT' || tradeDir === 'short' || (typeof tradeDir === 'number' && tradeDir < 0));
+    if (!isLong && !isShort) return;
 
-    var closed = _lastSignals.filter(function (s) {
-      return s.asset === trade.asset &&
-        ((s.bias === 'long'  && isLong) ||
-         (s.bias === 'short' && isShort));
-    });
-    if (!closed.length) return;
+    var bias   = isLong ? 'long' : 'short';
+    var mapKey = trade.asset + '_' + bias;
+
+    // Primary lookup: agents stored when the trade signal was emitted (persists across cycles)
+    var agentNames = _giiTradeMap[mapKey] ? _giiTradeMap[mapKey].slice() : [];
+
+    // Fallback: scan current _lastSignals (works when trade closes in same cycle it opened)
+    if (!agentNames.length) {
+      _lastSignals.forEach(function (s) {
+        if (s.asset === trade.asset && s.bias === bias && s._agentName &&
+            agentNames.indexOf(s._agentName) === -1) {
+          agentNames.push(s._agentName);
+        }
+      });
+    }
+
+    if (!agentNames.length) return; // not a GII-originated trade
 
     // Normalise P&L — EE stores as pnl_usd; accept either field
     var pnl     = (trade.pnl_usd !== undefined) ? trade.pnl_usd : (trade.pnl || 0);
     var winner  = pnl > 0;
-    var stopped = trade.exitReason === 'stop_loss' || (!winner && pnl < 0);
+    var stopped = trade.close_reason === 'STOP_LOSS' || trade.exitReason === 'stop_loss' ||
+                  (!winner && pnl < 0);
 
     var notifiedAgents = [];
-    closed.forEach(function (s) {
-      var key = s._agentName + '_' + s.asset + '_' + (s.bias || 'long');
-      if (!_feedback[key]) _feedback[key] = { total: 0, correct: 0, fp: 0, winRate: null, fpr: null, reputation: null, lastTs: null };
-      _feedback[key].total++;
-      if (winner)  _feedback[key].correct++;
-      if (stopped) _feedback[key].fp = (_feedback[key].fp || 0) + 1;
-      _feedback[key].winRate    = _feedback[key].correct / _feedback[key].total;
-      _feedback[key].fpr        = (_feedback[key].fp || 0) / _feedback[key].total;
+    agentNames.forEach(function (agentName) {
+      var fbKey = agentName + '_' + trade.asset + '_' + bias;
+      if (!_feedback[fbKey]) _feedback[fbKey] = { total: 0, correct: 0, fp: 0, winRate: null, fpr: null, reputation: null, lastTs: null };
+      _feedback[fbKey].total++;
+      if (winner)  _feedback[fbKey].correct++;
+      if (stopped) _feedback[fbKey].fp = (_feedback[fbKey].fp || 0) + 1;
+      _feedback[fbKey].winRate    = _feedback[fbKey].correct / _feedback[fbKey].total;
+      _feedback[fbKey].fpr        = (_feedback[fbKey].fp || 0) / _feedback[fbKey].total;
       // Module 3: composite reputation = winRate penalised by false positive rate
-      _feedback[key].reputation = _clamp(_feedback[key].winRate * (1 - (_feedback[key].fpr || 0) * 0.5), 0.10, 1.0);
-      _feedback[key].lastTs     = new Date().toISOString();
+      _feedback[fbKey].reputation = _clamp(_feedback[fbKey].winRate * (1 - (_feedback[fbKey].fpr || 0) * 0.5), 0.10, 1.0);
+      _feedback[fbKey].lastTs     = new Date().toISOString();
 
       // Dispatch to individual agent so it can update its own per-asset feedback
-      var agentGlobal = 'GII_AGENT_' + (s._agentName || '').toUpperCase();
+      var agentGlobal = 'GII_AGENT_' + agentName.toUpperCase().replace(/-/g, '_');
       if (notifiedAgents.indexOf(agentGlobal) === -1) {
         try {
           var agent = window[agentGlobal];
@@ -749,6 +778,9 @@
         } catch (e) {}
       }
     });
+
+    // Clear map entry now that feedback is recorded
+    delete _giiTradeMap[mapKey];
     _saveFeedback();
   }
 

@@ -220,12 +220,14 @@
   function _checkGIICore() {
     if (!window.GII) return;
     try {
-      /* Feedback should accumulate as trades close */
+      /* Feedback accumulates only from GII-originated trades (reason contains 'GII').
+         IC-pipeline trades are not attributed to GII agents and never populate feedback. */
       var fb = GII.feedback ? GII.feedback() : {};
       var trades     = JSON.parse(localStorage.getItem('geodash_ee_trades_v1') || '[]');
       var closedTP_SL = trades.filter(function (t) {
         return t.status === 'CLOSED' &&
-               (t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'STOP_LOSS');
+               (t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'STOP_LOSS') &&
+               (t.reason || '').indexOf('GII') !== -1;
       }).length;
 
       if (closedTP_SL >= 5 && Object.keys(fb).length === 0) {
@@ -244,10 +246,11 @@
         _resolve('gii_cycle_stale');
       }
 
-      /* Too many signals in queue (>150 suggests spam getting through) */
-      if (st.signalCount && st.signalCount > 150) {
+      /* Too many signals in queue — threshold scales with agent count (15 signals/agent avg) */
+      var _sigFloodLimit = Math.max(200, (st.agentCount || AGENT_NAMES.length) * 15);
+      if (st.signalCount && st.signalCount > _sigFloodLimit) {
         _addAlert('gii_sig_flood', 'warn', 'GII_CORE',
-          'Signal queue oversized: ' + st.signalCount + ' signals — possible agent loop or data flood');
+          'Signal queue oversized: ' + st.signalCount + ' signals (limit ' + _sigFloodLimit + ') — possible agent loop or data flood');
       } else {
         _resolve('gii_sig_flood');
       }
