@@ -16,7 +16,7 @@
   var MAX_LOG_ROWS = 80;
   var PANEL_ID     = 'giiDebugWrap';
 
-  // All 25 known agents (signal agents + coordination layer)
+  // All 27 known agents (signal agents + opposition agents + coordination layer)
   var KNOWN_AGENTS = [
     { key: 'GII_AGENT_ENERGY',           label: 'energy'         },
     { key: 'GII_AGENT_CONFLICT',         label: 'conflict'       },
@@ -40,6 +40,8 @@
     { key: 'GII_AGENT_OPTIMIZER',        label: 'optimizer'      },
     { key: 'GII_AGENT_SMARTMONEY',       label: 'smartmoney'     },
     { key: 'GII_AGENT_MARKETSTRUCTURE',  label: 'mktstructure'   },
+    { key: 'GII_AGENT_DEESCALATION',     label: 'deescalation ⚑' },
+    { key: 'GII_AGENT_RISK',             label: 'risk ⚑'         },
     { key: 'GII_AGENT_ENTRY',            label: 'entry ✦'        },
     { key: 'GII_AGENT_EXIT',             label: 'exit ✦'         },
     { key: 'GII_AGENT_MANAGER',          label: 'manager ✦'      }

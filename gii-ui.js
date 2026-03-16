@@ -400,6 +400,8 @@
       { name: 'optimizer',       global: 'GII_AGENT_OPTIMIZER'       },
       { name: 'smartmoney',      global: 'GII_AGENT_SMARTMONEY'      },
       { name: 'marketstructure', global: 'GII_AGENT_MARKETSTRUCTURE' },
+      { name: 'deescalation ⚑', global: 'GII_AGENT_DEESCALATION'   },
+      { name: 'risk ⚑',         global: 'GII_AGENT_RISK'           },
       { name: 'entry ✦',         global: 'GII_AGENT_ENTRY'           },
       { name: 'exit ✦',          global: 'GII_AGENT_EXIT'            },
       { name: 'manager ✦',       global: 'GII_AGENT_MANAGER'         }

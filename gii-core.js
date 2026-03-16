@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v13
+/* GII Core — gii-core.js v14
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -102,7 +102,9 @@
     { name: 'scalper-session', global: 'GII_AGENT_SCALPER_SESSION' },
     { name: 'optimizer',       global: 'GII_AGENT_OPTIMIZER'       },
     { name: 'smartmoney',      global: 'GII_AGENT_SMARTMONEY'      },
-    { name: 'marketstructure', global: 'GII_AGENT_MARKETSTRUCTURE' }
+    { name: 'marketstructure', global: 'GII_AGENT_MARKETSTRUCTURE' },
+    { name: 'deescalation',   global: 'GII_AGENT_DEESCALATION'   },  // opposition: diplomatic resolution
+    { name: 'risk',           global: 'GII_AGENT_RISK'           }   // opposition: systemic/portfolio stress
   ];
 
   function _getAgent(def) { return window[def.global] || null; }

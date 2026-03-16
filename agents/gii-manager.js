@@ -24,7 +24,9 @@
     GII_AGENT_SCALPER:         12 * 60 * 1000,
     GII_AGENT_SCALPER_SESSION: 12 * 60 * 1000,
     GII_AGENT_ENTRY:           4  * 60 * 1000,
-    GII_AGENT_EXIT:            4  * 60 * 1000
+    GII_AGENT_EXIT:            4  * 60 * 1000,
+    GII_AGENT_DEESCALATION:    3  * 60 * 1000,
+    GII_AGENT_RISK:            3  * 60 * 1000
   };
 
   /* Agents that should always have signals when the backend is online */

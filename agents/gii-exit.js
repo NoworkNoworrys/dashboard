@@ -36,14 +36,16 @@
   /* Agent → category map: prevents 4 correlated agents (e.g. all social/sentiment)
      from triggering a close — opposition must span multiple independent viewpoints */
   var AGENT_CATEGORIES = {
-    'GII_AGENT_ENERGY':    'commodity',
-    'GII_AGENT_CONFLICT':  'conflict',
-    'GII_AGENT_MACRO':     'macro',
-    'GII_AGENT_SANCTIONS': 'geopolitical',
-    'GII_AGENT_MARITIME':  'logistics',
-    'GII_AGENT_SOCIAL':    'sentiment',
-    'GII_AGENT_POLYMARKET':'probabilistic',
-    'GII_AGENT_REGIME':    'regime'
+    'GII_AGENT_ENERGY':       'commodity',
+    'GII_AGENT_CONFLICT':     'conflict',
+    'GII_AGENT_MACRO':        'macro',
+    'GII_AGENT_SANCTIONS':    'geopolitical',
+    'GII_AGENT_MARITIME':     'logistics',
+    'GII_AGENT_SOCIAL':       'sentiment',
+    'GII_AGENT_POLYMARKET':   'probabilistic',
+    'GII_AGENT_REGIME':       'regime',
+    'GII_AGENT_DEESCALATION': 'resolution',   // dedicated: diplomatic/ceasefire signals
+    'GII_AGENT_RISK':         'systemic'       // dedicated: portfolio stress + crisis keywords
   };
 
   /* Emergency thresholds */
@@ -94,7 +96,8 @@
     var agentNames = [
       'GII_AGENT_ENERGY', 'GII_AGENT_CONFLICT', 'GII_AGENT_SANCTIONS',
       'GII_AGENT_MARITIME', 'GII_AGENT_SOCIAL', 'GII_AGENT_MACRO',
-      'GII_AGENT_REGIME', 'GII_AGENT_SCALPER', 'GII_AGENT_POLYMARKET'
+      'GII_AGENT_REGIME', 'GII_AGENT_SCALPER', 'GII_AGENT_POLYMARKET',
+      'GII_AGENT_DEESCALATION', 'GII_AGENT_RISK'   // dedicated opposition agents
     ];
 
     agentNames.forEach(function (name) {
