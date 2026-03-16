@@ -398,8 +398,11 @@
       { name: 'scalper',         global: 'GII_AGENT_SCALPER'         },
       { name: 'scalper-session', global: 'GII_AGENT_SCALPER_SESSION' },
       { name: 'optimizer',       global: 'GII_AGENT_OPTIMIZER'       },
-      { name: 'smartmoney',    global: 'GII_AGENT_SMARTMONEY'     },
-      { name: 'marketstructure', global: 'GII_AGENT_MARKETSTRUCTURE' }
+      { name: 'smartmoney',      global: 'GII_AGENT_SMARTMONEY'      },
+      { name: 'marketstructure', global: 'GII_AGENT_MARKETSTRUCTURE' },
+      { name: 'entry ✦',         global: 'GII_AGENT_ENTRY'           },
+      { name: 'exit ✦',          global: 'GII_AGENT_EXIT'            },
+      { name: 'manager ✦',       global: 'GII_AGENT_MANAGER'         }
     ];
 
     function _relTime(ts) {
@@ -460,6 +463,24 @@
       // Special case: scalper slot busy indicator
       if ((def.name === 'scalper' || def.name === 'scalper-session') && st.activeScalp) {
         noteText = '⚡ Active: ' + (st.activeScalp.asset || 'BTC') + ' ' + (st.activeScalp.bias || '').toUpperCase();
+      }
+      // Special case: entry agent — show approval stats
+      if (def.global === 'GII_AGENT_ENTRY' && st.stats) {
+        var eStats = st.stats;
+        var passRate = eStats.submitted > 0 ? Math.round(eStats.approved / eStats.submitted * 100) : 0;
+        noteText = eStats.approved + ' approved · ' + eStats.vetoed + ' vetoed · ' + passRate + '% pass · queue: ' + (st.queueDepth || 0);
+      }
+      // Special case: exit agent — show close/trail stats
+      if (def.global === 'GII_AGENT_EXIT' && st.stats) {
+        var xStats = st.stats;
+        noteText = xStats.closed + ' closed · ' + xStats.tightened + ' trailing · ' + xStats.extended + ' TP extended · checked: ' + xStats.checked;
+      }
+      // Special case: manager — show active alert count
+      if (def.global === 'GII_AGENT_MANAGER') {
+        try {
+          var mgrAlerts = GII_AGENT_MANAGER.alerts();
+          noteText = mgrAlerts.length === 0 ? 'No active alerts' : mgrAlerts.length + ' active alert' + (mgrAlerts.length !== 1 ? 's' : '');
+        } catch (e) {}
       }
 
       html += '<tr>' +
