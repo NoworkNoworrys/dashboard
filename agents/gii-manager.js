@@ -313,6 +313,7 @@
       });
       return {
         lastCheck:     _lastCheck,
+        lastPoll:      _lastCheck,   // alias — gii-ui status panel reads lastPoll
         checkCount:    _checkCount,
         activeAlerts:  active.length,
         errors:        errors,
