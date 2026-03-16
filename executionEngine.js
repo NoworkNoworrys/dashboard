@@ -1181,9 +1181,9 @@
     //   Tier B (warn): |P&L| > 10× theoretical max even after correct-side check — extreme outlier.
     var isLongClose  = trade.direction === 'LONG';
     var wrongSide    = isLongClose
-      ? (reason === 'STOP_LOSS'   && adjClosePrice > trade.entry_price)   // LONG SL: price must be below entry
+      ? (reason === 'STOP_LOSS'   && adjClosePrice > trade.entry_price && !trade.trailing_stop_active)   // LONG SL: price must be below entry (unless trailing already in profit)
       || (reason === 'TAKE_PROFIT' && adjClosePrice < trade.entry_price)   // LONG TP: price must be above entry
-      : (reason === 'STOP_LOSS'   && adjClosePrice < trade.entry_price)   // SHORT SL: price must be above entry
+      : (reason === 'STOP_LOSS'   && adjClosePrice < trade.entry_price && !trade.trailing_stop_active)   // SHORT SL: price must be above entry (unless trailing already in profit)
       || (reason === 'TAKE_PROFIT' && adjClosePrice > trade.entry_price);  // SHORT TP: price must be below entry
 
     if (wrongSide) {
@@ -1220,6 +1220,13 @@
       }
     }
 
+    // v48 fix: relabel trailing-stop closes that fired in profit.
+    // A trailing stop that banked profit should show as 'TRAILING_STOP', not 'STOP_LOSS',
+    // so win-rate stats and trade history correctly count it as a win.
+    if (reason === 'STOP_LOSS' && trade.trailing_stop_active && trade.pnl_usd > 0) {
+      trade.close_reason = 'TRAILING_STOP';
+    }
+
     // Update virtual balance (pnl_usd is net of close commission; open commission already deducted at open)
     _cfg.virtual_balance += trade.pnl_usd;
     saveCfg();
@@ -1231,9 +1238,9 @@
         // TP/SL are unambiguous; manual closes within ±$5 of breakeven are neutral
         // (avoids inflating win rate from near-zero P&L manual exits)
         var outcome;
-        if (reason === 'TAKE_PROFIT') {
+        if (trade.close_reason === 'TAKE_PROFIT' || trade.close_reason === 'TRAILING_STOP') {
           outcome = 'hit';
-        } else if (reason === 'STOP_LOSS') {
+        } else if (trade.close_reason === 'STOP_LOSS') {
           outcome = 'miss';
         } else {
           var pnlAbs = Math.abs(trade.pnl_usd || 0);
@@ -1266,16 +1273,19 @@
       trade.pnl_pct >= 0 ? 'green' : 'red');
 
     // Browser notification for TP/SL hits (only when tab is not visible)
-    if ((reason === 'TAKE_PROFIT' || reason === 'STOP_LOSS') &&
+    if ((trade.close_reason === 'TAKE_PROFIT' || trade.close_reason === 'STOP_LOSS' || trade.close_reason === 'TRAILING_STOP') &&
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted') {
-      var isTP   = reason === 'TAKE_PROFIT';
+      var isTP   = trade.close_reason === 'TAKE_PROFIT' || trade.close_reason === 'TRAILING_STOP';
       var sign   = trade.pnl_usd >= 0 ? '+' : '-';
       var pnlStr = sign + '$' + _num(Math.abs(trade.pnl_usd)) +
                    ' (' + (trade.pnl_pct >= 0 ? '+' : '') + trade.pnl_pct + '%)';
       try {
+        var _ntfLabel = trade.close_reason === 'TAKE_PROFIT' ? '✅ Take Profit'
+                      : trade.close_reason === 'TRAILING_STOP' ? '🎯 Trailing Stop'
+                      : '❌ Stop Loss';
         new Notification(
-          (isTP ? '✅ Take Profit' : '❌ Stop Loss') + ' — ' + trade.asset,
+          _ntfLabel + ' — ' + trade.asset,
           {
             body: trade.direction + ' closed @ ' + _num(closePrice) + '\nP&L: ' + pnlStr,
             icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="' + (isTP ? '%2300e676' : '%23ff1744') + '"/></svg>',
@@ -1441,7 +1451,7 @@
             trade.partial_pnl_usd   = partialPnl;
             trade.costs_usd         = +((trade.costs_usd || 0) + partialComm).toFixed(4);
             trade.units             = +(trade.units * 0.5).toFixed(6);
-            trade.size_usd          = +(trade.units * price).toFixed(2);
+            trade.size_usd          = +(trade.units * trade.entry_price).toFixed(2); // v48 fix: use entry price, not live price
             // Move stop to entry ± tiny buffer (break-even)
             var beStop = isLong
               ? +(trade.entry_price * 1.001).toFixed(6)
@@ -1780,7 +1790,7 @@
   function renderStatusBar() {
     var open   = openTrades();
     var closed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
-    var wins   = closed.filter(function (t) { return t.close_reason === 'TAKE_PROFIT'; });
+    var wins   = closed.filter(function (t) { return t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP'; });
     // Use balance growth as P&L — this always reconciles with the displayed balance
     // and captures partial TP credits that pnl_usd alone misses.
     var totPnl = _cfg.virtual_balance - DEFAULTS.virtual_balance;
@@ -1985,8 +1995,8 @@
       var pc  = t.pnl_pct || 0;
       var pu  = t.pnl_usd || 0;
       var cls = pc >= 0 ? 'pos' : 'neg';
-      var icon    = t.close_reason === 'TAKE_PROFIT' ? '\u2713' : t.close_reason === 'STOP_LOSS' ? '\u2717' : '\u2014';
-      var iconCls = t.close_reason === 'TAKE_PROFIT' ? 'tp' : 'sl';
+      var icon    = (t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP') ? '\u2713' : t.close_reason === 'STOP_LOSS' ? '\u2717' : '\u2014';
+      var iconCls = (t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP') ? 'tp' : 'sl';
       return '<div class="ee-closed-row">' +
         '<span class="ee-cr-reason ' + iconCls + '">' + icon + '</span>' +
         '<span class="ee-cr-asset">' + _esc(t.asset) + '</span>' +
@@ -2093,7 +2103,7 @@
 
     eligible.forEach(function (t) {
       var pnl;
-      if (t.close_reason === 'TAKE_PROFIT') {
+      if (t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP') {
         pnl = riskUsd * cfg.take_profit_ratio;
         wins++;
         grossWins += pnl;
@@ -2762,7 +2772,7 @@
         closed.forEach(function (t) {
           var k = t.asset || '?';
           if (!assetStats[k]) assetStats[k] = { wins: 0, losses: 0, pnl: 0, partial: 0 };
-          if (t.close_reason === 'TAKE_PROFIT') assetStats[k].wins++;
+          if (t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP') assetStats[k].wins++;
           else assetStats[k].losses++;
           assetStats[k].pnl += (t.pnl_usd || 0) + (t.partial_pnl_usd || 0);
           if (t.partial_tp_taken) assetStats[k].partial++;
@@ -3214,6 +3224,25 @@
     },
 
     render: renderUI,
+
+    /* ── External price injection — called by hl-feed.js (and any future feed) ── */
+    /* Pushes a real-time price into the cache and live-price map so monitorTrades  */
+    /* uses fresh data without waiting for the next HTTP poll cycle.                */
+    injectPrice: function (asset, price) {
+      if (!asset || !price || price <= 0 || !isFinite(price)) return;
+      var tok = normaliseAsset(asset);
+      _cacheSet(tok, price);
+      // Also set any aliases so all spelling variants get the update
+      var aliasMap = { 'OIL': 'WTI', 'CRUDE': 'WTI', 'BRENT': 'OIL', 'XAU': 'GOLD', 'XAG': 'SILVER' };
+      if (aliasMap[tok]) _cacheSet(aliasMap[tok], price);
+      if (aliasMap[tok] === 'WTI' || tok === 'WTI') { _cacheSet('WTI', price); _cacheSet('OIL', price); }
+      // Push to live-price map for all open trades on this asset
+      _trades.forEach(function (t) {
+        if (t.status === 'OPEN' && normaliseAsset(t.asset) === tok) {
+          _livePrice[t.trade_id] = price;
+        }
+      });
+    },
 
     /* ── Toggle full closed-trade history in the UI ── */
     toggleAllClosed: function () {

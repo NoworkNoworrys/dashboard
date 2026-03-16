@@ -12856,7 +12856,7 @@ function _modalKeyHandler(e) {
 <script src="polymarket.js?v=15"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=47"></script>
+<script src="executionEngine.js?v=48"></script>
 
 <!-- GII Multi-Agent Intelligence System — agents first, then core, then UI -->
 <script src="agents/gii-energy.js?v=2"></script>
@@ -12904,5 +12904,9 @@ function _modalKeyHandler(e) {
 <script src="gii-ui.js?v=7"></script>
 <script src="gii-debug.js?v=2"></script>
 <script src="gii-gatekeeper.js?v=1"></script>
+
+<!-- HL-Feed — Hyperliquid real-time price WebSocket (WTI, Brent, Gold, Silver, equities) -->
+<!-- Loaded last so EE.injectPrice() is available when the WS opens 6 s post-load.       -->
+<script src="hl-feed.js?v=1"></script>
 </body>
 </html>
