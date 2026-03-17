@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v15
+/* GII Core — gii-core.js v18
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -491,7 +491,11 @@
     if (_gtiHistory.length > GTI_HISTORY_MAX) _gtiHistory.shift();
 
     // Decay GTI floor and volatilityBoost over time
-    if (_gtiFloor > 0) _gtiFloor = Math.max(0, _gtiFloor - 2);
+    // v62: fast-track decay when real GTI is already well below the floor (false alarm / resolved event)
+    if (_gtiFloor > 0) {
+      var _floorDecay = (_gti < _gtiFloor - 15) ? 4 : 2;
+      _gtiFloor = Math.max(0, _gtiFloor - _floorDecay);
+    }
     if (_volatilityBoost > 1.0) _volatilityBoost = Math.max(1.0, _volatilityBoost - 0.05);
   }
 

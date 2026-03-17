@@ -939,10 +939,10 @@
       return { ok: false, reason: 'Price fetch already in progress for ' + sig.asset };
 
     // Correlation guard: block if a correlated asset is already open in the same direction
-    var corrGroup = _getCorrGroup(sig.asset);
+    var corrGroup = _getCorrGroup(normaliseAsset(sig.asset));
     if (corrGroup) {
       var corrConflict = open.find(function (t) {
-        return corrGroup.indexOf(t.asset) !== -1 && t.direction === sig.dir;
+        return corrGroup.indexOf(normaliseAsset(t.asset)) !== -1 && t.direction === sig.dir;
       });
       if (corrConflict)
         return { ok: false, reason: 'Correlated position open: ' + corrConflict.asset + ' ' + corrConflict.direction };
@@ -1049,10 +1049,10 @@
     }
 
     // Position sizing: base risk scaled by signal impact strength
-    // sig.impactMult (0.5–2.0) comes from the IMPACT_MAP scorer in renderTrades()
-    // Minor event → 0.5× normal size; major event → up to 2× normal size
+    // sig.impactMult: GTI size reduction (0.45–1.0) OR event impact (0.5–2.0)
+    // Floor lowered to 0.1 so GTI extreme-tension 0.45 passes through correctly
     var impactMult = (sig.impactMult && isFinite(sig.impactMult))
-      ? Math.max(0.5, Math.min(2.0, sig.impactMult))
+      ? Math.max(0.1, Math.min(2.0, sig.impactMult))
       : 1.0;
 
     // EV/Kelly adjustment: if self-learning has a win rate on this asset+direction,
