@@ -1675,9 +1675,16 @@
           var data = JSON.parse(evt.data);
           var price = parseFloat(data.c);   // close price of miniTicker
           if (price > 0) {
+            // HL-Feed is higher priority for BTC. If HL has a fresh price, record
+            // Binance as healthy (it's still streaming) but don't overwrite HL's price.
+            _priceFeedHealth['binance'] = { ok: true, lastOk: Date.now(),
+              lastFail: (_priceFeedHealth['binance'] || {}).lastFail || null };
+            if (window.HLFeed && typeof HLFeed.isAvailable === 'function' &&
+                HLFeed.isAvailable('BTC')) {
+              return;   // HL has fresh BTC — Binance is warm fallback only
+            }
             _cacheSet('BTC', price);
             _cacheSet('BITCOIN', price);
-            _priceFeedHealth['ws_binance'] = { ok: true, lastOk: Date.now(), lastFail: null };
             // Push real-time price to all open BTC trades so P&L updates without polling
             _trades.forEach(function (t) {
               if (t.status === 'OPEN' && normaliseAsset(t.asset) === 'BTC') {
@@ -1689,7 +1696,7 @@
       };
       ws.onopen  = function () {
         _wsConnected = true;
-        log('SYSTEM', 'Binance WebSocket connected — real-time BTC price active', 'green');
+        log('SYSTEM', 'Binance WebSocket connected — BTC fallback feed active (yields to HL when live)', 'dim');
       };
       ws.onclose = function () {
         _wsConnected = false;
@@ -1764,7 +1771,9 @@
       unrealisedPnl += t.units * diff;
     });
 
-    var startBalance = DEFAULTS.virtual_balance;
+    // Use actual session-start balance, not the hardcoded DEFAULTS constant.
+    // _sessionStartBalance is set at init time from the live virtual_balance config.
+    var startBalance = _sessionStartBalance || DEFAULTS.virtual_balance;
     var totalPnl     = realisedPnl + unrealisedPnl;
     var returnPct    = startBalance > 0 ? (totalPnl / startBalance * 100) : 0;
     var retCol       = returnPct >= 0 ? '#00c8a0' : '#ff4444';
@@ -3421,9 +3430,11 @@
     }
     saveCfg();
 
-    setTimeout(monitorTrades, 2000);    // first price-check 2 s after load
+    // First monitor at 9s: HL-Feed connects at 6s + ~1-2s for WS handshake and first
+    // allMids message. Waiting until 9s ensures the first stop/TP check has real prices.
+    setTimeout(monitorTrades, 9000);
     setInterval(monitorTrades, 30000);  // then every 30 s
-    _startBinanceWS();                  // real-time BTC price feed (WebSocket)
+    _startBinanceWS();                  // BTC fallback feed — yields to HL when live
 
     /* Re-scan loop: every 5 minutes re-process the last IC signal batch.
        Only re-evaluates signals for assets that have no open trade AND whose
