@@ -293,11 +293,14 @@
       } catch (e) {}
     }
 
-    /* Veto 3: manager has active errors */
+    /* Veto 3: manager has multiple active errors (not just one agent loading slowly).
+       Changed from errors > 0 to errors > 2: a single load-timing error (e.g. one
+       agent not yet registered at startup) was blocking ALL signals permanently until
+       the next 5-min manager poll cycle — far too aggressive.                       */
     if (window.GII_AGENT_MANAGER) {
       try {
         var mgr = GII_AGENT_MANAGER.status();
-        if (mgr.errors > 0) return 'system-health-error';
+        if (mgr.errors > 2) return 'system-health-error';
       } catch (e) {}
     }
 

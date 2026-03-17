@@ -107,18 +107,21 @@
 
   /* ── Fee structures ─────────────────────────────────────────────────────────
      HL: 0.05% taker. Traditional: CFD/stock estimates.                       */
+  /* slippage = price impact of market order execution (in addition to spread).
+     EE applies this as adjPrice = mid * (1 + spread/2 + slippage) per side.
+     Including it here makes the routing EV model consistent with EE's actual costs.  */
   var HL_COSTS = {
-    precious: { commission: 0.0005, spread: 0.0002, funding8h: 0.00005 },
-    energy:   { commission: 0.0005, spread: 0.0003, funding8h: 0.00005 },
-    crypto:   { commission: 0.0005, spread: 0.0002, funding8h: 0.0001  },
-    equity:   { commission: 0.0005, spread: 0.0002, funding8h: 0       }
+    precious: { commission: 0.0005, spread: 0.0002, slippage: 0.0001, funding8h: 0.00005 },
+    energy:   { commission: 0.0005, spread: 0.0003, slippage: 0.0002, funding8h: 0.00005 },
+    crypto:   { commission: 0.0005, spread: 0.0002, slippage: 0.0001, funding8h: 0.0001  },
+    equity:   { commission: 0.0005, spread: 0.0002, slippage: 0.0001, funding8h: 0       }
   };
 
   var TRAD_COSTS = {
-    precious: { commission: 0.0007, spread: 0.0003, funding8h: 0       },
-    energy:   { commission: 0.0007, spread: 0.0005, funding8h: 0       },
-    crypto:   { commission: 0.0010, spread: 0.0008, funding8h: 0.0001  },
-    equity:   { commission: 0.0005, spread: 0.0002, funding8h: 0       }
+    precious: { commission: 0.0007, spread: 0.0003, slippage: 0.0002, funding8h: 0       },
+    energy:   { commission: 0.0007, spread: 0.0005, slippage: 0.0003, funding8h: 0       },
+    crypto:   { commission: 0.0010, spread: 0.0008, slippage: 0.0004, funding8h: 0.0001  },
+    equity:   { commission: 0.0005, spread: 0.0002, slippage: 0.0001, funding8h: 0       }
   };
 
   /* ── Sector-based expected TP move ──────────────────────────────────────────
@@ -282,7 +285,9 @@
      Loss: units × price × adjSL   = riskAmt  (constant — risk-based sizing!)
      Fees: notional × feeRate       = riskAmt × lev × feeRate / baseSL        */
   function _calcEvPerRisk(W_adj, tpFixed_frac, baseSL_frac, costs, holdHours, lev) {
-    var roundTrip   = costs.commission * 2 + costs.spread * 2;
+    // Per-side cost = commission + spread/2 + slippage (matches EE's adjPrice model)
+    // Round trip = 2 × per-side = 2*commission + spread + 2*slippage
+    var roundTrip   = costs.commission * 2 + costs.spread + (costs.slippage || 0) * 2;
     var funding     = Math.ceil(holdHours / 8) * costs.funding8h;
     var feeMultiple = lev * (roundTrip + funding) / baseSL_frac;
     return W_adj * (lev * tpFixed_frac / baseSL_frac) - (1 - W_adj) - feeMultiple;

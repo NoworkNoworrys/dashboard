@@ -995,8 +995,12 @@
         var R = _cfg.take_profit_ratio;   // reward:risk ratio
         var kelly = (W * R - (1 - W)) / R;
         if (kelly > 0) {
-          // Half-Kelly, clamped between 0.5 and 1.5
-          kellyMult = Math.max(0.5, Math.min(1.5, kelly * 0.5 / 0.25));   // normalise: base kelly ~0.25 = mult 1.0
+          // Half-Kelly normalised so that the break-even Kelly for this R = mult 1.0.
+          // Previously used a fixed 0.25 baseline (calibrated for W=0.5, R=2.5 only).
+          // Now derives the baseline from R dynamically: baseKelly = (0.5*R - 0.5) / R
+          // so mult=1.0 always represents a 50% win rate at whatever R is configured.
+          var baseKelly = Math.max(0.01, (0.5 * R - 0.5) / R);
+          kellyMult = Math.max(0.5, Math.min(1.5, kelly * 0.5 / baseKelly));
         } else {
           kellyMult = 0.5;   // negative EV → halve position size
         }
@@ -1088,7 +1092,13 @@
       // prices came from backend cache / Yahoo / Binance / etc.
       price_source: (window.HLFeed && typeof HLFeed.isAvailable === 'function' &&
                      HLFeed.isAvailable(normaliseAsset(sig.asset)))
-                    ? 'HYPERLIQUID' : 'SIMULATED'
+                    ? 'HYPERLIQUID' : 'SIMULATED',
+      // Intended leverage from gii-routing (1 = no leverage). The actual
+      // notional leverage may differ if risk caps were hit — compare with
+      // size_usd / virtual_balance in the UI to see the effective leverage.
+      leverage:     sig.leverage || 1,
+      // Original (pre-routing) asset name if gii-routing remapped it (e.g. GLD→XAU).
+      original_asset: sig.original_asset || null
     };
   }
 
@@ -1207,6 +1217,13 @@
     // make sure the stored trade P&L matches what actually hit the balance.
     if (trade.funding_cost_usd && trade.funding_cost_usd > 0) {
       trade.pnl_usd = +(trade.pnl_usd - trade.funding_cost_usd).toFixed(2);
+    }
+
+    // Recalculate pnl_pct from the final net pnl_usd (after commission + funding).
+    // pnl_pct was set earlier from the raw price move — it doesn't reflect real costs.
+    // Avoids the situation where pnl_pct shows +2.5% but pnl_usd shows only +$8 (net fees).
+    if (trade.size_usd && trade.size_usd > 0) {
+      trade.pnl_pct = +(trade.pnl_usd / trade.size_usd * 100).toFixed(2);
     }
 
     // Reality check 8 — plausibility: detect wrong-side close prices (price corruption)
@@ -1553,7 +1570,13 @@
         }
 
         // ── Trailing stop: once active, trail price by trailing_stop_pct ────
-        if (_cfg.trailing_stop_enabled && trade.trailing_stop_active) {
+        // Guard: skip if the TP level has already been reached this cycle.
+        // Without this, a SHORT's trailing stop can be clamped to trade.take_profit
+        // and then immediately trigger hitSL (price >= stop_loss == take_profit),
+        // closing a profitable trade as STOP_LOSS instead of TAKE_PROFIT.
+        // Checking TP first and skipping the trail update avoids the race entirely.
+        var _tpAlreadyHit = isLong ? price >= trade.take_profit : price <= trade.take_profit;
+        if (_cfg.trailing_stop_enabled && trade.trailing_stop_active && !_tpAlreadyHit) {
           var trailDist = trade.entry_price * (_cfg.trailing_stop_pct / 100);
           if (isLong) {
             var newHigh = Math.max(price, trade.highest_price || price);
@@ -2337,6 +2360,16 @@
        Uses avg trade duration to estimate trades-per-year.
        Formula: mean(r) / stdev(r) × sqrt(tradesPerYear)
        Returns null if < 3 trades (not meaningful). */
+    /* Duration stats (hours) — computed FIRST so Sharpe can use avgDur */
+    var _dursEarly = sorted.filter(function (t) {
+      return t.timestamp_close && t.timestamp_open;
+    }).map(function (t) {
+      return (new Date(t.timestamp_close) - new Date(t.timestamp_open)) / 3600000;
+    });
+    var _avgDurEarly = _dursEarly.length
+      ? _dursEarly.reduce(function (s, v) { return s + v; }, 0) / _dursEarly.length
+      : null;
+
     var sharpeRatio = null;
     if (closed.length >= 3) {
       var returns = closed.map(function (t) {
@@ -2349,9 +2382,8 @@
       }, 0) / (returns.length - 1);          // sample variance
       var stdR = Math.sqrt(variance);
       if (stdR > 0) {
-        // Estimate annualisation factor: if avgDur is known use it, else assume 24h per trade
-        var avgDurHrs = (avgDur !== null) ? avgDur : 24;
-        var tradesPerYear = 8760 / Math.max(avgDurHrs, 0.25);  // cap at 4× per hour
+        var avgDurHrs = (_avgDurEarly !== null) ? _avgDurEarly : 24;
+        var tradesPerYear = 8760 / Math.max(avgDurHrs, 0.25);
         sharpeRatio = +(meanR / stdR * Math.sqrt(tradesPerYear)).toFixed(2);
       }
     }
@@ -3092,7 +3124,16 @@
       var trade = _trades.find(function (t) { return t.trade_id === tradeId; });
       if (!trade) return;
       fetchPrice(trade.asset, function (price) {
-        closeTrade(tradeId, price || trade.entry_price, 'MANUAL');
+        // Cascade: fresh fetch → cache → live-price map → stop level → entry price.
+        // Never fall back to entry_price alone — a real close at entry hides all losses.
+        var _tok     = normaliseAsset(trade.asset);
+        var _closeAt = price
+                    || _priceCache[_tok]
+                    || _livePrice[trade.trade_id]
+                    || trade.stop_loss
+                    || trade.entry_price;
+        if (!price) log('PRICE', 'Manual close ' + trade.asset + ' — using cached price $' + _num(_closeAt), 'amber');
+        closeTrade(tradeId, _closeAt, 'MANUAL');
       });
     },
 
@@ -3118,7 +3159,14 @@
       });
       if (!trade) return false;
       fetchPrice(trade.asset, function (price) {
-        closeTrade(tradeId, price || trade.entry_price, reason || 'GII-EXIT');
+        var _tok     = normaliseAsset(trade.asset);
+        var _closeAt = price
+                    || _priceCache[_tok]
+                    || _livePrice[trade.trade_id]
+                    || trade.stop_loss
+                    || trade.entry_price;
+        if (!price) log('PRICE', 'Force-close ' + trade.asset + ' — using cached price $' + _num(_closeAt), 'amber');
+        closeTrade(tradeId, _closeAt, reason || 'GII-EXIT');
       });
       return true;
     },
@@ -3300,7 +3348,9 @@
           lastFail: (_priceFeedHealth['hl'] || {}).lastFail || null };
       }
       // Also set any aliases so all spelling variants get the update
-      var aliasMap = { 'OIL': 'WTI', 'CRUDE': 'WTI', 'BRENT': 'OIL', 'XAU': 'GOLD', 'XAG': 'SILVER' };
+      // Note: BRENT intentionally excluded — Brent and WTI are separate instruments
+      // ($3-5 spread) and must not share a price cache entry.
+      var aliasMap = { 'OIL': 'WTI', 'CRUDE': 'WTI', 'XAU': 'GOLD', 'XAG': 'SILVER' };
       if (aliasMap[tok]) _cacheSet(aliasMap[tok], price);
       if (aliasMap[tok] === 'WTI' || tok === 'WTI') { _cacheSet('WTI', price); _cacheSet('OIL', price); }
       // Push to live-price map for all open trades on this asset
@@ -3445,10 +3495,17 @@
       var open = openTrades();
       var freshSigs = _lastSignals.filter(function (s) {
         var asset = normaliseAsset(s.asset);
-        // Skip if we already have an open trade for this asset
-        if (open.some(function (t) { return normaliseAsset(t.asset) === asset; })) return false;
+        // Skip if we already have an open trade for this asset.
+        // Also check original_asset (pre-remap): GII_ROUTING maps GLD→XAU at signal
+        // time. The open trade stores asset='XAU', but _lastSignals still has 'GLD'.
+        // Without checking original_asset, the re-scan would re-fire the GLD signal
+        // and open a second XAU position while the first is still live.
+        if (open.some(function (t) {
+          return normaliseAsset(t.asset) === asset ||
+                 (t.original_asset && normaliseAsset(t.original_asset) === asset);
+        })) return false;
         // Skip if still in cooldown (trade was recently closed or opened)
-        var cd = _cooldown[asset];
+        var cd = _cooldown[asset] || _cooldown[normaliseAsset(s.original_asset || '')];
         return !cd || (now - cd) > _cfg.cooldown_ms;
       });
       if (freshSigs.length) {
