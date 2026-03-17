@@ -187,6 +187,41 @@
   function _pct(v) { return (v * 100).toFixed(0) + '%'; }
   function _esc(s) { return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+  // ── agent registry — single source of truth for health / status panels ────
+  // Keep in sync with KNOWN_AGENTS in gii-debug.js and AGENTS in gii-core.js.
+  // ✦ = coordination layer  ⚑ = opposition agent  ⬡ = infrastructure
+  var AGENT_DEFS = [
+    { name: 'energy',           global: 'GII_AGENT_ENERGY'         },
+    { name: 'conflict',         global: 'GII_AGENT_CONFLICT'       },
+    { name: 'macro',            global: 'GII_AGENT_MACRO'          },
+    { name: 'sanctions',        global: 'GII_AGENT_SANCTIONS'      },
+    { name: 'maritime',         global: 'GII_AGENT_MARITIME'       },
+    { name: 'social',           global: 'GII_AGENT_SOCIAL'         },
+    { name: 'polymarket',       global: 'GII_AGENT_POLYMARKET'     },
+    { name: 'regime',           global: 'GII_AGENT_REGIME'         },
+    { name: 'satellite',        global: 'GII_AGENT_SATELLITE'      },
+    { name: 'historical',       global: 'GII_AGENT_HISTORICAL'     },
+    { name: 'liquidity',        global: 'GII_AGENT_LIQUIDITY'      },
+    { name: 'calendar',         global: 'GII_AGENT_CALENDAR'       },
+    { name: 'chokepoint',       global: 'GII_AGENT_CHOKEPOINT'     },
+    { name: 'narrative',        global: 'GII_AGENT_NARRATIVE'      },
+    { name: 'escalation',       global: 'GII_AGENT_ESCALATION'     },
+    { name: 'scenario',         global: 'GII_AGENT_SCENARIO'       },
+    { name: 'technicals',       global: 'GII_AGENT_TECHNICALS'     },
+    { name: 'scalper',          global: 'GII_AGENT_SCALPER'        },
+    { name: 'scalper-session',  global: 'GII_AGENT_SCALPER_SESSION'},
+    { name: 'optimizer',        global: 'GII_AGENT_OPTIMIZER'      },
+    { name: 'smartmoney',       global: 'GII_AGENT_SMARTMONEY'     },
+    { name: 'marketstructure',  global: 'GII_AGENT_MARKETSTRUCTURE'},
+    { name: 'deescalation ⚑',  global: 'GII_AGENT_DEESCALATION'  },
+    { name: 'risk ⚑',          global: 'GII_AGENT_RISK'           },
+    { name: 'entry ✦',          global: 'GII_AGENT_ENTRY'          },
+    { name: 'exit ✦',           global: 'GII_AGENT_EXIT'           },
+    { name: 'manager ✦',        global: 'GII_AGENT_MANAGER'        },
+    { name: 'routing ⬡',        global: 'GII_ROUTING'              },
+    { name: 'scraper-mgr ⬡',   global: 'GII_SCRAPER_MANAGER'      }
+  ];
+
   // ── dirty flag — set by GII core after each cycle ─────────────────────────
   var _dirty = true;          // start dirty so first render always runs
   var _lastRenderTs = 0;
@@ -219,7 +254,7 @@
       '<span class="gii-badge gii-badge-gti">GTI: ' + Math.round(gti) + '</span>' +
       '<span class="gii-badge ' + levelClass + '">' + gtiLevel + '</span>' +
       '<span style="color:rgba(255,255,255,0.5);font-size:11px">▲ ' + signals.length + ' signals</span>' +
-      '<span style="color:rgba(255,255,255,0.5);font-size:11px">⬡ ' + status.agentCount + '/8 agents</span>' +
+      '<span style="color:rgba(255,255,255,0.5);font-size:11px">⬡ ' + status.agentCount + '/' + AGENT_DEFS.length + ' agents</span>' +
       (status.hormuzActive ? '<span class="gii-badge" style="background:#ff1744;color:#fff">HORMUZ PATTERN</span>' : '') +
       '</div>';
 
@@ -389,35 +424,7 @@
     html += '</div>';
 
     // ── Row 7: Agent status panel ──
-    var AGENT_DEFS = [
-      { name: 'energy',        global: 'GII_AGENT_ENERGY'         },
-      { name: 'conflict',      global: 'GII_AGENT_CONFLICT'       },
-      { name: 'macro',         global: 'GII_AGENT_MACRO'          },
-      { name: 'sanctions',     global: 'GII_AGENT_SANCTIONS'      },
-      { name: 'maritime',      global: 'GII_AGENT_MARITIME'       },
-      { name: 'social',        global: 'GII_AGENT_SOCIAL'         },
-      { name: 'polymarket',    global: 'GII_AGENT_POLYMARKET'     },
-      { name: 'regime',        global: 'GII_AGENT_REGIME'         },
-      { name: 'satellite',     global: 'GII_AGENT_SATELLITE'      },
-      { name: 'historical',    global: 'GII_AGENT_HISTORICAL'     },
-      { name: 'liquidity',     global: 'GII_AGENT_LIQUIDITY'      },
-      { name: 'calendar',      global: 'GII_AGENT_CALENDAR'       },
-      { name: 'chokepoint',    global: 'GII_AGENT_CHOKEPOINT'     },
-      { name: 'narrative',     global: 'GII_AGENT_NARRATIVE'      },
-      { name: 'escalation',    global: 'GII_AGENT_ESCALATION'     },
-      { name: 'scenario',      global: 'GII_AGENT_SCENARIO'       },
-      { name: 'technicals',    global: 'GII_AGENT_TECHNICALS'     },
-      { name: 'scalper',         global: 'GII_AGENT_SCALPER'         },
-      { name: 'scalper-session', global: 'GII_AGENT_SCALPER_SESSION' },
-      { name: 'optimizer',       global: 'GII_AGENT_OPTIMIZER'       },
-      { name: 'smartmoney',      global: 'GII_AGENT_SMARTMONEY'      },
-      { name: 'marketstructure', global: 'GII_AGENT_MARKETSTRUCTURE' },
-      { name: 'deescalation ⚑', global: 'GII_AGENT_DEESCALATION'   },
-      { name: 'risk ⚑',         global: 'GII_AGENT_RISK'           },
-      { name: 'entry ✦',         global: 'GII_AGENT_ENTRY'           },
-      { name: 'exit ✦',          global: 'GII_AGENT_EXIT'            },
-      { name: 'manager ✦',       global: 'GII_AGENT_MANAGER'         }
-    ];
+    // AGENT_DEFS is now defined at module level above render() — 29 agents total
 
     function _relTime(ts) {
       if (!ts) return '—';

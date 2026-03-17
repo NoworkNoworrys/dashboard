@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v18
+/* GII Core — gii-core.js v19
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -850,7 +850,11 @@
         volatilityBoost:  _volatilityBoost,
         marketLagActive:  _marketLagActive,   // Module 4
         lagBoost:         _lagBoost,           // Module 4
-        agentCount:       AGENTS.filter(function (d) { return !!_getAgent(d); }).length,
+        agentCount:       AGENTS.filter(function (d) { return !!_getAgent(d); }).length +
+                          // coordination + infrastructure agents not in Bayesian AGENTS array
+                          ['GII_AGENT_ENTRY','GII_AGENT_EXIT','GII_AGENT_MANAGER',
+                           'GII_ROUTING','GII_SCRAPER_MANAGER']
+                            .filter(function (k) { return !!window[k]; }).length,
         signalCount:      _lastSignals.length,
         posteriorRegions: Object.keys(_posteriors).length,
         convergence:      Object.assign({}, _convergence)

@@ -542,7 +542,11 @@
           : 'never',
         lastDecision:   _decisions[0] || null
       };
-    }
+    },
+
+    // signals() stub — routing is infrastructure, not a signal emitter,
+    // but health panels call this so return empty array rather than throw
+    signals: function () { return []; }
   };
 
   if (typeof console !== 'undefined') {

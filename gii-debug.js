@@ -16,35 +16,38 @@
   var MAX_LOG_ROWS = 80;
   var PANEL_ID     = 'giiDebugWrap';
 
-  // All 27 known agents (signal agents + opposition agents + coordination layer)
+  // All 29 known agents (signal agents + opposition agents + coordination layer + infrastructure)
+  // ✦ = coordination  ⚑ = opposition  ⬡ = infrastructure (no Bayesian contribution)
   var KNOWN_AGENTS = [
-    { key: 'GII_AGENT_ENERGY',           label: 'energy'         },
-    { key: 'GII_AGENT_CONFLICT',         label: 'conflict'       },
-    { key: 'GII_AGENT_MACRO',            label: 'macro'          },
-    { key: 'GII_AGENT_SANCTIONS',        label: 'sanctions'      },
-    { key: 'GII_AGENT_MARITIME',         label: 'maritime'       },
-    { key: 'GII_AGENT_SOCIAL',           label: 'social'         },
-    { key: 'GII_AGENT_POLYMARKET',       label: 'polymarket'     },
-    { key: 'GII_AGENT_REGIME',           label: 'regime'         },
-    { key: 'GII_AGENT_SATELLITE',        label: 'satellite'      },
-    { key: 'GII_AGENT_HISTORICAL',       label: 'historical'     },
-    { key: 'GII_AGENT_LIQUIDITY',        label: 'liquidity'      },
-    { key: 'GII_AGENT_CALENDAR',         label: 'calendar'       },
-    { key: 'GII_AGENT_CHOKEPOINT',       label: 'chokepoint'     },
-    { key: 'GII_AGENT_NARRATIVE',        label: 'narrative'      },
-    { key: 'GII_AGENT_ESCALATION',       label: 'escalation'     },
-    { key: 'GII_AGENT_SCENARIO',         label: 'scenario'       },
-    { key: 'GII_AGENT_TECHNICALS',       label: 'technicals'     },
-    { key: 'GII_AGENT_SCALPER',          label: 'scalper'        },
-    { key: 'GII_AGENT_SCALPER_SESSION',  label: 'scalper-ses'    },
-    { key: 'GII_AGENT_OPTIMIZER',        label: 'optimizer'      },
-    { key: 'GII_AGENT_SMARTMONEY',       label: 'smartmoney'     },
-    { key: 'GII_AGENT_MARKETSTRUCTURE',  label: 'mktstructure'   },
-    { key: 'GII_AGENT_DEESCALATION',     label: 'deescalation ⚑' },
-    { key: 'GII_AGENT_RISK',             label: 'risk ⚑'         },
-    { key: 'GII_AGENT_ENTRY',            label: 'entry ✦'        },
-    { key: 'GII_AGENT_EXIT',             label: 'exit ✦'         },
-    { key: 'GII_AGENT_MANAGER',          label: 'manager ✦'      }
+    { key: 'GII_AGENT_ENERGY',           label: 'energy'          },
+    { key: 'GII_AGENT_CONFLICT',         label: 'conflict'        },
+    { key: 'GII_AGENT_MACRO',            label: 'macro'           },
+    { key: 'GII_AGENT_SANCTIONS',        label: 'sanctions'       },
+    { key: 'GII_AGENT_MARITIME',         label: 'maritime'        },
+    { key: 'GII_AGENT_SOCIAL',           label: 'social'          },
+    { key: 'GII_AGENT_POLYMARKET',       label: 'polymarket'      },
+    { key: 'GII_AGENT_REGIME',           label: 'regime'          },
+    { key: 'GII_AGENT_SATELLITE',        label: 'satellite'       },
+    { key: 'GII_AGENT_HISTORICAL',       label: 'historical'      },
+    { key: 'GII_AGENT_LIQUIDITY',        label: 'liquidity'       },
+    { key: 'GII_AGENT_CALENDAR',         label: 'calendar'        },
+    { key: 'GII_AGENT_CHOKEPOINT',       label: 'chokepoint'      },
+    { key: 'GII_AGENT_NARRATIVE',        label: 'narrative'       },
+    { key: 'GII_AGENT_ESCALATION',       label: 'escalation'      },
+    { key: 'GII_AGENT_SCENARIO',         label: 'scenario'        },
+    { key: 'GII_AGENT_TECHNICALS',       label: 'technicals'      },
+    { key: 'GII_AGENT_SCALPER',          label: 'scalper'         },
+    { key: 'GII_AGENT_SCALPER_SESSION',  label: 'scalper-ses'     },
+    { key: 'GII_AGENT_OPTIMIZER',        label: 'optimizer'       },
+    { key: 'GII_AGENT_SMARTMONEY',       label: 'smartmoney'      },
+    { key: 'GII_AGENT_MARKETSTRUCTURE',  label: 'mktstructure'    },
+    { key: 'GII_AGENT_DEESCALATION',     label: 'deescalation ⚑'  },
+    { key: 'GII_AGENT_RISK',             label: 'risk ⚑'          },
+    { key: 'GII_AGENT_ENTRY',            label: 'entry ✦'         },
+    { key: 'GII_AGENT_EXIT',             label: 'exit ✦'          },
+    { key: 'GII_AGENT_MANAGER',          label: 'manager ✦'       },
+    { key: 'GII_ROUTING',                label: 'routing ⬡'       },
+    { key: 'GII_SCRAPER_MANAGER',        label: 'scraper-mgr ⬡'   }
   ];
 
   // ── activity log ──────────────────────────────────────────────────────────
