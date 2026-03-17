@@ -1,4 +1,4 @@
-/* GII UI — gii-ui.js v6
+/* GII UI — gii-ui.js v7
  * GII panel renderer — injects #giiWrap after #eeWrap
  * Depends on: window.GII, window.GII_AGENT_*, window.GII_SCRAPER_MANAGER
  * Exposes: window.GII_UI
@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var RENDER_INTERVAL = 15000; // re-render every 15s
+  var RENDER_INTERVAL = 30000; // v60: 15s → 30s — halves CPU overhead, still timely
   var GII_COLOR       = '#e040fb';
   var GII_DIM         = 'rgba(224,64,251,0.18)';
 
@@ -187,9 +187,21 @@
   function _pct(v) { return (v * 100).toFixed(0) + '%'; }
   function _esc(s) { return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+  // ── dirty flag — set by GII core after each cycle ─────────────────────────
+  var _dirty = true;          // start dirty so first render always runs
+  var _lastRenderTs = 0;
+
+  function markDirty() { _dirty = true; }
+
   // ── main render ────────────────────────────────────────────────────────────
 
   function render() {
+    var now = Date.now();
+    // v60: skip rebuild if data hasn't changed AND last render was recent (< 60s)
+    if (!_dirty && (now - _lastRenderTs) < 60000) return;
+    _dirty = false;
+    _lastRenderTs = now;
+
     var GII = window.GII;
     var content = document.getElementById('giiContent');
     if (!content || !GII) return;
@@ -593,7 +605,8 @@
   // ── public API ─────────────────────────────────────────────────────────────
 
   window.GII_UI = {
-    render: render
+    render:    render,
+    markDirty: markDirty   // v60: called by gii-core after each cycle
   };
 
   // ── init ───────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-/* GII Scalper Brain — gii-scalper-brain.js v1
+/* GII Scalper Brain — gii-scalper-brain.js v2
  *
  * Shared intelligence hub for all scalping agents.
  * Aggregates cross-agent feedback, provides inherited knowledge to new instances,
@@ -47,12 +47,28 @@
   }
 
   function _save() {
+    // v60: cap both stat objects before persisting to keep localStorage lean
+    _trimStatObj(_setupStats, 150);
+    _trimStatObj(_assetStats, 150);
     try {
-      localStorage.setItem(BRAIN_KEY, JSON.stringify({
-        setupStats: _setupStats,
-        assetStats: _assetStats
-      }));
+      var payload = JSON.stringify({ setupStats: _setupStats, assetStats: _assetStats });
+      // Guard: warn if over 60 KB (browser localStorage limit is ~5 MB per origin)
+      if (payload.length > 61440) {
+        _trimStatObj(_setupStats, 80);
+        _trimStatObj(_assetStats, 80);
+        payload = JSON.stringify({ setupStats: _setupStats, assetStats: _assetStats });
+        console.warn('[BRAIN] stat objects pruned further due to size >', Math.round(payload.length / 1024) + 'KB');
+      }
+      localStorage.setItem(BRAIN_KEY, payload);
     } catch (e) {}
+  }
+
+  // Keep only the top-N entries by total trade count; drop the rest
+  function _trimStatObj(obj, maxKeys) {
+    var keys = Object.keys(obj);
+    if (keys.length <= maxKeys) return;
+    keys.sort(function (a, b) { return (obj[b].total || 0) - (obj[a].total || 0); });
+    keys.slice(maxKeys).forEach(function (k) { delete obj[k]; });
   }
 
   // ── helpers ───────────────────────────────────────────────────────────────

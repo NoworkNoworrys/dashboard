@@ -679,9 +679,12 @@
     // 8. Portfolio decision
     _portfolioDecision(allSignals);
 
-    // 9. Update UI
-    if (window.GII_UI && typeof window.GII_UI.render === 'function') {
-      try { window.GII_UI.render(); } catch (e) {}
+    // 9. Update UI — mark dirty first so the render knows new data is ready
+    if (window.GII_UI) {
+      try {
+        if (typeof window.GII_UI.markDirty === 'function') window.GII_UI.markDirty();
+        if (typeof window.GII_UI.render    === 'function') window.GII_UI.render();
+      } catch (e) {}
     }
   }
 
@@ -715,6 +718,14 @@
       fb.reputation = _clamp(fb.winRate * (1 - fb.fpr * 0.5), 0.10, 1.0);
       changed = true;
     });
+    // v60: hard cap — keep only top-400 entries by total to prevent unbounded growth
+    var fbKeys = Object.keys(_feedback);
+    if (fbKeys.length > 400) {
+      fbKeys.sort(function (a, b) { return (_feedback[b].total || 0) - (_feedback[a].total || 0); });
+      fbKeys.slice(400).forEach(function (k) { delete _feedback[k]; });
+      changed = true;
+    }
+
     if (changed) _saveFeedback();
   }
 

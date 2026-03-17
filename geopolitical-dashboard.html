@@ -9501,6 +9501,16 @@ document.addEventListener('DOMContentLoaded', function() {
         IC._eventTimes[k] = e.ts || Date.now();
       });
     }
+    // v60: prune dead regionStates entries (prob < 5 AND no event in 72h)
+    var cutoff72h = Date.now() - 72 * 60 * 60 * 1000;
+    if (IC.regionStates) {
+      Object.keys(IC.regionStates).forEach(function (region) {
+        var rs = IC.regionStates[region];
+        if (rs && (rs.prob || 0) < 5 && rs.lastEvt && rs.lastEvt < cutoff72h) {
+          delete IC.regionStates[region];
+        }
+      });
+    }
   }
   setInterval(_pruneEventIds, 30 * 60 * 1000);   // run every 30 min
   window.__IC = IC;
@@ -12862,7 +12872,7 @@ function _modalKeyHandler(e) {
 <script src="polymarket.js?v=15"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=56"></script>
+<script src="executionEngine.js?v=57"></script>
 
 <!-- GII Multi-Agent Intelligence System — agents first, then core, then UI -->
 <script src="agents/gii-energy.js?v=2"></script>
@@ -12895,7 +12905,7 @@ function _modalKeyHandler(e) {
   };
 </script>
 <script src="agents/gii-technicals.js?v=2"></script>
-<script src="gii-scalper-brain.js?v=1"></script>
+<script src="gii-scalper-brain.js?v=2"></script>
 <script src="agents/gii-scalper.js?v=6"></script>
 <script src="agents/gii-scalper-session.js?v=2"></script>
 <script src="agents/gii-scraper-manager.js?v=3"></script>
@@ -12908,9 +12918,9 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-entry.js?v=3"></script>
 <script src="agents/gii-exit.js?v=4"></script>
 <script src="agents/gii-routing.js?v=3"></script>
-<script src="gii-core.js?v=15"></script>
+<script src="gii-core.js?v=16"></script>
 <script src="gii-meta.js?v=2"></script>
-<script src="gii-ui.js?v=9"></script>
+<script src="gii-ui.js?v=10"></script>
 <script src="gii-debug.js?v=2"></script>
 <script src="gii-gatekeeper.js?v=1"></script>
 

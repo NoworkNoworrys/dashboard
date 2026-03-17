@@ -428,6 +428,14 @@
   }
 
   function saveTrades() {
+    // v60: in-memory soft cap — keep ALL open trades + last 500 closed.
+    // Full history is always safe in localStorage and the Render SQLite backend.
+    var open   = _trades.filter(function (t) { return t.status === 'OPEN'; });
+    var closed = _trades.filter(function (t) { return t.status !== 'OPEN'; });
+    if (closed.length > 500) {
+      closed = closed.slice(-500);   // keep most-recent 500 closed
+      _trades = open.concat(closed);
+    }
     try {
       localStorage.setItem(TRADES_KEY, JSON.stringify(_trades));
     } catch (e) {
@@ -614,6 +622,16 @@
         });
       })
       .catch(function () { clearTimeout(tid); });   // silent — fetchPrice falls through to other sources
+
+    // v60: prune stale _priceCache entries (older than 5 min) to prevent unbounded growth
+    var _PRUNE_AGE = 300000;
+    var _now = Date.now();
+    Object.keys(_priceCacheTs).forEach(function (tok) {
+      if (_now - _priceCacheTs[tok] > _PRUNE_AGE) {
+        delete _priceCache[tok];
+        delete _priceCacheTs[tok];
+      }
+    });
   }
 
   /* Record one signal event — action: 'TRADED' | 'SKIPPED' | 'WATCH' */
@@ -1812,7 +1830,7 @@
 
   function log(action, msg, colour) {
     _log.unshift({ ts: new Date().toISOString(), action: action, msg: msg, colour: colour || 'dim' });
-    if (_log.length > 60) _log.pop();
+    if (_log.length > 200) _log.length = 200;   // v60: raised cap to 200; trim in-place
     var el = document.getElementById('eeActivityLog');
     if (el) renderLog(el);
   }
@@ -3414,6 +3432,22 @@
     /* ── Data access for external scripts / debugging ── */
     getOpenTrades:  function () { return openTrades().slice(); },
     getAllTrades:    function () { return _trades.slice(); },
+
+    /* ── v60: Memory stats — call EE.memStats() in console to inspect sizes ── */
+    memStats: function () {
+      return {
+        log:           _log.length,
+        trades:        _trades.length,
+        tradesOpen:    openTrades().length,
+        tradesClosed:  _trades.filter(function(t){ return t.status !== 'OPEN'; }).length,
+        signalLog:     _signalLog.length,
+        pnlHistory:    _pnlHistory.length,
+        priceCache:    Object.keys(_priceCache).length,
+        backendPrices: Object.keys(_backendPrices).length,
+        livePrice:     Object.keys(_livePrice).length,
+        priceFeedHealth: Object.keys(_priceFeedHealth).length
+      };
+    },
 
     /* ── Unrealised P&L for open trades using latest live prices ── */
     unrealisedPnl: function () {
