@@ -3338,6 +3338,7 @@
       _sessionStart = new Date().toISOString();
       _sessionStartBalance = DEFAULTS.virtual_balance;
       try { localStorage.setItem('geodash_session_start_v1', _sessionStart); } catch(e) {}
+      try { localStorage.removeItem('geodash_session_balance_v1'); } catch(e) {}   // v63: clear persisted day-open balance on reset
       _recordPnlSnapshot('account-reset', 0);
       log('CONFIG', 'Account reset: balance restored to $' + DEFAULTS.virtual_balance, 'amber');
       renderUI();
@@ -3677,8 +3678,25 @@
     _sessionStart = storedSession || new Date().toISOString();
     try { localStorage.setItem('geodash_session_start_v1', _sessionStart); } catch(e) {}
 
-    // Record balance at session start for daily loss limit tracking
-    _sessionStartBalance = _cfg.virtual_balance;
+    // Record balance at session start for daily loss limit tracking.
+    // v63: persist to localStorage so page reloads don't reset the baseline —
+    // otherwise a reload after a 3% loss lets the engine lose another 5% (8% total).
+    var _todayKey = new Date().toISOString().slice(0, 10);   // 'YYYY-MM-DD' UTC
+    var _savedSBal = null;
+    try {
+      var _sbRaw = localStorage.getItem('geodash_session_balance_v1');
+      if (_sbRaw) {
+        var _sb = JSON.parse(_sbRaw);
+        if (_sb && _sb.date === _todayKey && typeof _sb.balance === 'number') _savedSBal = _sb.balance;
+      }
+    } catch(e) {}
+    if (_savedSBal !== null) {
+      _sessionStartBalance = _savedSBal;   // reload mid-session — restore today's opening balance
+      log('RISK', 'Session balance restored from today\'s open: $' + _savedSBal.toFixed(2), 'dim');
+    } else {
+      _sessionStartBalance = _cfg.virtual_balance;
+      try { localStorage.setItem('geodash_session_balance_v1', JSON.stringify({ date: _todayKey, balance: _sessionStartBalance })); } catch(e) {}
+    }
 
     /* Auto-start: honour the auto_start config flag (M6).
        Defaults to true (original behaviour) — set auto_start: false to keep
