@@ -1295,7 +1295,8 @@
       timestamp_close: trade.timestamp_close,
       close_reason:    trade.close_reason,
       pnl_pct:         trade.pnl_pct,
-      pnl_usd:         trade.pnl_usd
+      pnl_usd:         trade.pnl_usd,
+      price_source:    trade.price_source || 'SIMULATED'
     });
 
     log('CLOSED',
@@ -1380,6 +1381,20 @@
         var remapped = ASSET_REMAP[normaliseAsset(sig.asset)];
         log('SYSTEM', sig.asset + ' remapped → ' + remapped + ' (untradeable asset replaced with proxy)', 'dim');
         sig = Object.assign({}, sig, { asset: remapped });
+      }
+
+      // GII Routing: check if there is a better HL instrument (e.g. GLD → XAU)
+      // and whether leverage improves EV for this confidence level.
+      // Runs after ASSET_REMAP so routing sees the final tradeable asset name.
+      if (window.GII_ROUTING && typeof GII_ROUTING.route === 'function') {
+        var _routed = GII_ROUTING.route(sig);
+        if (_routed !== sig) {
+          var _routeNote = (_routed.asset !== sig.asset)
+            ? sig.asset + ' → ' + _routed.asset + (_routed.leverage > 1 ? ' ' + _routed.leverage + '×' : '')
+            : (_routed.leverage > 1 ? sig.asset + ' ' + _routed.leverage + '× lev' : null);
+          if (_routeNote) log('ROUTING', _routeNote, 'purple');
+          sig = _routed;
+        }
       }
 
       // Pre-validate signal shape before any further processing
@@ -3269,6 +3284,12 @@
       if (!asset || !price || price <= 0 || !isFinite(price)) return;
       var tok = normaliseAsset(asset);
       _cacheSet(tok, price);
+      // Mark HL feed health as ok whenever a price is injected from HL.
+      // Without this the feed dot stays grey even when the WS is streaming.
+      if (window.HLFeed && typeof HLFeed.covers === 'function' && HLFeed.covers(tok)) {
+        _priceFeedHealth['hl'] = { ok: true, lastOk: Date.now(),
+          lastFail: (_priceFeedHealth['hl'] || {}).lastFail || null };
+      }
       // Also set any aliases so all spelling variants get the update
       var aliasMap = { 'OIL': 'WTI', 'CRUDE': 'WTI', 'BRENT': 'OIL', 'XAU': 'GOLD', 'XAG': 'SILVER' };
       if (aliasMap[tok]) _cacheSet(aliasMap[tok], price);
