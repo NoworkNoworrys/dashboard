@@ -695,11 +695,6 @@
 
         var sig = _buildSignal(bestDir, ind, bestSetup);
 
-        // v61: apply GTI size multiplier to confidence
-        if (_gtiM < 1.0) {
-          sig.confidence = _round2(_clamp(sig.confidence * _gtiM, 0, 0.88));
-        }
-
         if (sig.confidence < MIN_CONF) {
           _signals = [];
           _status.note = 'Below grade threshold (conf=' + sig.confidence + ')';
@@ -724,7 +719,7 @@
               conf:            Math.round(sig.confidence * 100),
               reason:          'SCALPER-SESSION: ' + sig.reasoning,
               region:          sig.region || 'GLOBAL',
-              impactMult:      1.0,
+              impactMult:      _gtiM,  // v61b: GTI reduces position SIZE, not signal confidence
               atrStop:         sig.atrStop,
               atrTarget:       sig.atrTarget,
               matchedKeywords: sig.evidenceKeys || [],

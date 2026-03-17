@@ -705,9 +705,6 @@
         } catch (e) {}
       }
 
-      // v61: apply GTI size multiplier to confidence
-      if (_gtiM < 1.0) conf = _clamp(conf * _gtiM, 0, 0.88);
-
       conf = _round2(conf);
 
       if (conf < MIN_CONF) return;
@@ -725,7 +722,7 @@
         conf:         Math.round(conf * 100),
         reason:       'SCRAPER[' + inst.asset + ']: ' + reasons.join(' | '),
         region:       'GLOBAL',
-        impactMult:   1.0,
+        impactMult:   _gtiM,  // v61b: GTI reduces position SIZE, not signal confidence
         atrStop:      stopDist,
         atrTarget:    targetDist,
         matchedKeywords: [inst.asset.toLowerCase(), inst.sector, bestSetup.entryType],
