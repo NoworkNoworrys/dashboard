@@ -5037,6 +5037,31 @@
       </div>
     </div>
 
+    <!-- Portfolio Watchlist — top-ranked candidates from GII_AGENT_PORTFOLIO -->
+    <div class="ee-config-section" style="margin-bottom:16px">
+      <div class="ee-panel-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <span>★ Portfolio Watchlist <span style="color:var(--dim);font-weight:400;font-size:8px">(best available trades right now)</span></span>
+        <span id="eePortfolioMeta" style="font-size:9px;color:var(--dim);font-weight:400">scanning…</span>
+      </div>
+      <div style="display:grid;grid-template-columns:55px 60px 45px 55px 1fr;gap:0;font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:0.8px;padding:0 4px 4px;border-bottom:1px solid var(--border);margin-bottom:4px;margin-top:8px">
+        <span>Asset</span><span>Dir</span><span>Score</span><span>Agents</span><span>Reason</span>
+      </div>
+      <div id="eePortfolioWatchlist" style="max-height:240px;overflow-y:auto">
+        <div class="ee-placeholder">Waiting for portfolio agent first scan (25s after load)…</div>
+      </div>
+      <div style="margin-top:8px;font-size:9px;color:var(--dim);border-top:1px solid var(--border);padding-top:6px">
+        Last rotation: <span id="eePortfolioLastRotation" style="color:var(--bright)">none this session</span>
+      </div>
+    </div>
+    <style>
+      .ee-pw-row { display:grid; grid-template-columns:55px 60px 45px 55px 1fr; gap:0; padding:4px; font-size:9px; border-bottom:1px solid rgba(255,255,255,0.04); }
+      .ee-pw-row:hover { background:var(--bg3); }
+      .ee-pw-row.top1 { background:rgba(0,200,160,0.06); }
+      .ee-pw-asset { font-weight:700; color:var(--bright); }
+      .ee-pw-score { color:#ff9500; }
+      .ee-pw-reason { color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    </style>
+
     <!-- Flagged Trades — signals blocked by HL-only gate -->
     <div class="ee-config-section" style="margin-bottom:16px">
       <div class="ee-panel-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">

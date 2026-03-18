@@ -27,7 +27,8 @@
     GII_AGENT_ENTRY:           4  * 60 * 1000,
     GII_AGENT_EXIT:            4  * 60 * 1000,
     GII_AGENT_DEESCALATION:    3  * 60 * 1000,
-    GII_AGENT_RISK:            3  * 60 * 1000
+    GII_AGENT_RISK:            3  * 60 * 1000,
+    GII_AGENT_PORTFOLIO:       8  * 60 * 1000   // proactive portfolio ranker — polls every 3min
   };
 
   /* Agents that should always have signals when the backend is online */

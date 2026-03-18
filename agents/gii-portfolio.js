@@ -116,7 +116,7 @@
 
   /* ── STEP 1: COLLECT ALL AGENT SIGNALS ──────────────────────────────────── */
   function _collectSignals() {
-    var collected = {};  // { 'BTC_long': { asset, dir, totalScore, agentCount, agentNames, reasons } }
+    var collected = {};  // { 'BTC_LONG': { asset, dir, totalScore, agentCount, agentNames, reasons } }
 
     SIGNAL_AGENTS.forEach(function (agentName) {
       var agent = window[agentName];
@@ -126,20 +126,29 @@
       var sigs = [];
       try { sigs = agent.signals() || []; } catch (e) { return; }
 
+      /* Deduplicate: one agent gets ONE vote per asset/direction.
+         If the agent has multiple signals for the same asset, use the highest-confidence one.
+         This prevents any single agent from inflating scores by emitting many signals. */
+      var bestPerKey = {};  // { 'BTC_LONG': bestSig }
       sigs.forEach(function (sig) {
         if (!sig || !sig.asset || !sig.bias) return;
-
-        /* Only consider HL-universe assets */
         var asset = (sig.asset || '').toUpperCase();
         if (HL_UNIVERSE.indexOf(asset) === -1) return;
-
         var dir = sig.bias === 'short' ? 'SHORT' : 'LONG';
         var key = asset + '_' + dir;
+        var conf = isFinite(sig.confidence) ? +sig.confidence : 0.5;
+        if (!bestPerKey[key] || conf > bestPerKey[key].conf) {
+          bestPerKey[key] = { asset: asset, dir: dir, conf: conf, reasoning: sig.reasoning || '' };
+        }
+      });
 
+      /* Now add one entry per agent per asset/direction */
+      Object.keys(bestPerKey).forEach(function (key) {
+        var best = bestPerKey[key];
         if (!collected[key]) {
           collected[key] = {
-            asset:      asset,
-            dir:        dir,
+            asset:      best.asset,
+            dir:        best.dir,
             totalScore: 0,
             agentCount: 0,
             agentNames: [],
@@ -147,13 +156,11 @@
             maxConf:    0
           };
         }
-
-        var conf = isFinite(sig.confidence) ? +sig.confidence : 0.5;
-        collected[key].totalScore  += conf * weight;
-        collected[key].agentCount  += 1;
+        collected[key].totalScore += best.conf * weight;
+        collected[key].agentCount += 1;
         collected[key].agentNames.push(agentName.replace('GII_AGENT_', '').toLowerCase());
-        if (sig.reasoning) collected[key].reasons.push(sig.reasoning.substring(0, 60));
-        if (conf > collected[key].maxConf) collected[key].maxConf = conf;
+        if (best.reasoning) collected[key].reasons.push(best.reasoning.substring(0, 60));
+        if (best.conf > collected[key].maxConf) collected[key].maxConf = best.conf;
       });
     });
 

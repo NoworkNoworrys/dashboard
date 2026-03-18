@@ -194,6 +194,61 @@
     }).join('') : '<div class="ee-flag-empty">No flagged trades yet — all signals so far are on HL</div>';
   }
 
+  /* Render the portfolio watchlist panel (from gii-portfolio agent) */
+  function renderPortfolioWatchlist() {
+    var listEl = document.getElementById('eePortfolioWatchlist');
+    var metaEl = document.getElementById('eePortfolioMeta');
+    var rotEl  = document.getElementById('eePortfolioLastRotation');
+    if (!listEl) return;
+
+    var agent = window.GII_AGENT_PORTFOLIO;
+    if (!agent) {
+      listEl.innerHTML = '<div class="ee-flag-empty">Portfolio agent not loaded</div>';
+      return;
+    }
+
+    var wl  = agent.watchlist();
+    var st  = agent.status();
+    var rot = agent.rotations();
+
+    /* Meta stats */
+    if (metaEl) {
+      var ago = st.lastPoll ? Math.round((Date.now() - st.lastPoll) / 1000) + 's ago' : 'never';
+      metaEl.textContent = 'Cycle #' + st.pollCount +
+        '  ·  ' + (st.stats.scanned || 0) + ' combos scanned' +
+        '  ·  ' + (st.stats.candidates || 0) + ' candidates' +
+        '  ·  last: ' + ago;
+    }
+
+    /* Candidate rows */
+    if (!wl.length) {
+      listEl.innerHTML = '<div class="ee-flag-empty">No candidates yet — waiting for first scan</div>';
+    } else {
+      listEl.innerHTML = wl.slice(0, 15).map(function (c, i) {
+        var dirHtml = c.dir === 'LONG'
+          ? '<span style="color:#4fc">▲ LONG</span>'
+          : '<span style="color:#f88">▼ SHORT</span>';
+        var scoreColor = c.score >= 4 ? '#4fc' : c.score >= 2.5 ? '#fc4' : '#aaa';
+        return '<div class="ee-pw-row">' +
+          '<span class="ee-pw-asset">' + (i + 1) + '. ' + c.asset + '</span>' +
+          '<span class="ee-pw-dir">' + dirHtml + '</span>' +
+          '<span class="ee-pw-score" style="color:' + scoreColor + '">' + c.score.toFixed(2) + '</span>' +
+          '<span class="ee-pw-agents" style="color:#888">' + c.agentCount + '</span>' +
+          '<span class="ee-pw-reason">' + (c.reason || '').substring(0, 60) + '</span>' +
+          '</div>';
+      }).join('');
+    }
+
+    /* Last rotation */
+    if (rotEl) {
+      var r = rot[0];
+      rotEl.textContent = r
+        ? 'Last rotation: closed ' + r.closed + ' (' + r.closedScore + ') → ' +
+          r.opened + ' (' + r.openScore + ')  Δ' + r.delta
+        : 'No rotations yet';
+    }
+  }
+
   /* ── Asset remap table ─────────────────────────────────────────────────────
      Maps signal asset names that are not directly tradeable to their real-market
      proxies. Applied in onSignals() before any execution logic runs.
@@ -2086,6 +2141,7 @@
     renderSigLog();
     renderSim();
     renderPriceFeedHealth();
+    renderPortfolioWatchlist();
   }
 
   function renderPortfolioSummary() {
