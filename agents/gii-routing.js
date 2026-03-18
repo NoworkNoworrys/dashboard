@@ -71,10 +71,10 @@
     'SILVER': { hlAsset: 'SLV',    sector: 'precious', maxLev: 3 },
     'XAG':    { hlAsset: 'SLV',    sector: 'precious', maxLev: 3 },
     'XAU':    { hlAsset: 'GLD',    sector: 'precious', maxLev: 3 },
-    /* Energy — BRENT confirmed on HL perp as BRENTOIL */
+    /* Energy — both crude perps confirmed on HL */
     'BRENT':    { hlAsset: 'BRENTOIL', sector: 'energy', maxLev: 5 },
     'BRENTOIL': { hlAsset: 'BRENTOIL', sector: 'energy', maxLev: 5 },
-    /* WTI — not confirmed on HL yet (still flagged for Alpaca/CFD broker) */
+    /* WTI confirmed on HL as perp deployed by cash (allMids key = 'WTI') */
     'WTI':    { hlAsset: 'WTI',    sector: 'energy',   maxLev: 5 },
     'OIL':    { hlAsset: 'WTI',    sector: 'energy',   maxLev: 5 },
     'CRUDE':  { hlAsset: 'WTI',    sector: 'energy',   maxLev: 5 },
