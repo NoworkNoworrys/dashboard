@@ -1,12 +1,16 @@
-/* GII Technical Analysis Agent — gii-technicals.js v1
+/* GII Technical Analysis Agent — gii-technicals.js v3
  *
- * Multi-timeframe technical analysis across 11 assets using three free APIs.
- * Outputs regime-gated, composite-scored, GII-integrated signals with ATR stops.
+ * Institutional-grade multi-timeframe TA across 11 assets.
+ * Outputs regime-gated, SMC-confirmed, GII-integrated signals with A2A broadcast.
  *
- * Data sources:
- *   Twelve Data   — stocks/ETFs/BTC  (1h + daily, 200 candles)
- *   Alpha Vantage — WTI/BRENT/WHEAT  (daily only, free commodity endpoint)
- *   CryptoCompare — BTC backup       (1h + daily, no key needed)
+ * Data source hierarchy (per asset):
+ *   1. Hyperliquid    — primary (OHLCV, no key, no quota: BTC 15m/1h/4h/daily)
+ *   2. Twelve Data    — secondary fallback for equities (800/day free)
+ *   3. Alpha Vantage  — tertiary fallback for commodities (25/day free)
+ *   4. CryptoCompare  — BTC final fallback (100k/month free)
+ *   5. Cache          — stale-data fallback with confidence penalty
+ *
+ * HL advantage: native 15m + 4h candles, proper OHLCV, and unlimited quota.
  *
  * Setup (one-time): add before this script loads in the dashboard HTML:
  *   <script>
@@ -23,9 +27,13 @@
  *                                Bollinger squeeze, ADX+DI, OBV divergence,
  *                                volume spikes, pivot S/R, ROC-10, VWAP
  *   3. scoreAsset()            — regime-weighted composite score [-1,+1] per timeframe
- *   4. mtfComposite()          — daily(50%) + 4h(30%) + 1h(20%) with alignment bonus
- *   5. integrateGII()          — GTI, escalation, VIX modifiers from sibling agents
- *   6. buildSignal()           — grade A/B/C filter, ATR stop/target, R:R >= 1.5
+ *   4. SMC detection           — FVG, Order Blocks, CHoCH, Liquidity Zones
+ *   5. mtfComposite()          — daily(50%)+4h(30%)+1h(20%)+15m(confirm) → convictionTier
+ *   6. integrateGII()          — GTI, escalation, VIX modifiers from sibling agents
+ *   7. integrateOrderFlow()    — market microstructure + smart money positioning
+ *   8. feedbackConfMult()      — dynamic confidence from per-asset win rate history
+ *   9. buildSignal()           — A2A payload with stop_loss/take_profit/smc_context
+ *  10. broadcast()             — window.dispatchEvent('GII_TA_SIGNAL') event bus
  *
  * Requires gii-core.js changes (see bottom of file).
  * Exposes: window.GII_AGENT_TECHNICALS
@@ -34,7 +42,11 @@
   'use strict';
 
   // ── Constants ─────────────────────────────────────────────────────────────
-  var POLL_INTERVAL  = 1800000;   // 30 minutes — candles don't need faster refresh
+  var HL_INFO        = 'https://api.hyperliquid.xyz/info';
+  var POLL_MIN_MS    = 600000;    // 10 min — floor for adaptive polling
+  var POLL_BASE_MS   = 1800000;   // 30 min — base interval
+  var POLL_MAX_MS    = 3600000;   // 60 min — ceiling for adaptive polling
+  var POLL_INTERVAL  = POLL_BASE_MS;   // legacy compat — overridden by adaptive logic
   var MAX_SIGNALS    = 50;
   var MIN_CONF       = 0.30;
   var MAX_CONF       = 0.85;
@@ -50,6 +62,11 @@
   // api:   primary data source
   // For commodity assets Alpha Vantage returns close-only (no true OHLC),
   // so ATR-based stops fall back to 1.5% for those assets.
+  // hlCoin — Hyperliquid ticker for candleSnapshot (primary OHLCV source).
+  // hl4h    — true when HL native 4h bars are available (skip build-from-1h).
+  // NOTE: HL candleSnapshot only works for crypto assets. Equity/commodity perps
+  // (SPY, TSM, XLE, SMH, CL, BRENTOIL) return empty arrays from candleSnapshot
+  // even though they stream via HLFeed WebSocket. Only BTC confirmed working.
   var ASSETS = [
     { id:'SPY',   sym:'SPY',    api:'twelvedata',    type:'equity',    region:'US'           },
     { id:'GLD',   sym:'GLD',    api:'twelvedata',    type:'equity',    region:'GLOBAL'       },
@@ -58,7 +75,7 @@
     { id:'XLE',   sym:'XLE',    api:'twelvedata',    type:'equity',    region:'US'           },
     { id:'SMH',   sym:'SMH',    api:'twelvedata',    type:'equity',    region:'US'           },
     { id:'SOXX',  sym:'SOXX',   api:'twelvedata',    type:'equity',    region:'US'           },
-    { id:'BTC',   sym:'BTC',    api:'cryptocompare', type:'crypto',    region:'GLOBAL'       },
+    { id:'BTC',   sym:'BTC',    api:'cryptocompare', type:'crypto',    region:'GLOBAL',      hlCoin:'BTC', hl4h:true },
     { id:'WTI',   sym:'WTI',    api:'alphavantage',  type:'commodity', region:'MIDDLE EAST'  },
     { id:'BRENT', sym:'BRENT',  api:'alphavantage',  type:'commodity', region:'MIDDLE EAST'  },
     { id:'WEAT',  sym:'WHEAT',  api:'alphavantage',  type:'commodity', region:'UKRAINE'      }
@@ -79,14 +96,16 @@
   };
 
   // ── State ──────────────────────────────────────────────────────────────────
-  var _signals  = [];
-  var _cache    = {};   // { 'SPY_daily': { candles:[], fetchedAt:ts, source:'' } }
-  var _status   = { lastPoll:null, assetsAnalysed:0, activeSignals:[], dataStatus:{} };
-  var _accuracy = { total:0, correct:0, winRate:null };
-  var _feedback = {};
-  var _fetchSeq = Promise.resolve();   // serialised fetch queue
+  var _signals       = [];
+  var _cache         = {};   // { 'SPY_daily': { candles:[], fetchedAt:ts, source:'' } }
+  var _status        = { lastPoll:null, assetsAnalysed:0, activeSignals:[], dataStatus:{}, health:'UNKNOWN' };
+  var _accuracy      = { total:0, correct:0, winRate:null };
+  var _feedback      = {};
+  var _fetchSeq      = Promise.resolve();   // serialised fetch queue
+  var _hlFetchErrors = 0;    // consecutive HL fetch failures — triggers health downgrade
+  var _pollTimer     = null; // reference to current setTimeout for adaptive rescheduling
   // Daily API quota tracker: { date:'YYYY-MM-DD', twelvedata:N, alphavantage:N }
-  var _quota    = { date: '', twelvedata: 0, alphavantage: 0 };
+  var _quota         = { date: '', twelvedata: 0, alphavantage: 0 };
 
   // ── Persistence ────────────────────────────────────────────────────────────
   (function _boot() {
@@ -411,6 +430,132 @@
       .sort(function (a, b) { return a.timestamp - b.timestamp; });
   }
 
+  // ── Smart Money Concepts (SMC) Detection ────────────────────────────────────
+  // Pure functions — input: candles array. All return null on insufficient data.
+
+  // Fair Value Gap: 3-bar imbalance where the impulse bar skips over the prior bar.
+  // Bullish FVG: candles[i].low > candles[i-2].high
+  // Bearish FVG: candles[i].high < candles[i-2].low
+  function _detectFVG(candles) {
+    if (!candles || candles.length < 5) return null;
+    var result = { bullish: [], bearish: [], latest: null };
+    for (var i = 2; i < candles.length; i++) {
+      var prev2 = candles[i - 2];
+      var curr  = candles[i];
+      if (curr.low > prev2.high) {
+        result.bullish.push({ index: i, gapHigh: curr.low, gapLow: prev2.high, size: curr.low - prev2.high });
+      } else if (curr.high < prev2.low) {
+        result.bearish.push({ index: i, gapHigh: prev2.low, gapLow: curr.high, size: prev2.low - curr.high });
+      }
+    }
+    var recent = candles.length - 10;
+    var rb = result.bullish.filter(function (g) { return g.index >= recent; });
+    var rr = result.bearish.filter(function (g) { return g.index >= recent; });
+    if (rb.length)      result.latest = { type: 'bullish', fvg: rb[rb.length - 1] };
+    else if (rr.length) result.latest = { type: 'bearish', fvg: rr[rr.length - 1] };
+    return result;
+  }
+
+  // Order Block: last counter-trend candle before a significant impulse (≥1.8× ATR).
+  // Bullish OB: last bearish candle before an up move.
+  // Bearish OB: last bullish candle before a down move.
+  function _detectOrderBlocks(candles) {
+    if (!candles || candles.length < 10) return null;
+    var atrArr  = _atr(candles, 14);
+    var atrSlice = _validSlice(atrArr, candles.length - 20);
+    var atrBase = _mean(atrSlice) || 0;
+    if (atrBase === 0) return null;
+    var blocks = [];
+    for (var i = 2; i < candles.length - 1; i++) {
+      var move      = Math.abs(candles[i + 1].close - candles[i].open);
+      if (move < atrBase * 1.8) continue;
+      var impulseUp = candles[i + 1].close > candles[i].open;
+      if (impulseUp && candles[i].close < candles[i].open) {
+        blocks.push({ type: 'bullish', index: i, high: candles[i].high, low: candles[i].low,
+                      price: (candles[i].high + candles[i].low) / 2 });
+      } else if (!impulseUp && candles[i].close > candles[i].open) {
+        blocks.push({ type: 'bearish', index: i, high: candles[i].high, low: candles[i].low,
+                      price: (candles[i].high + candles[i].low) / 2 });
+      }
+    }
+    var recent    = candles.length - 15;
+    var latest    = blocks.filter(function (b) { return b.index >= recent; });
+    var currentPx = candles[candles.length - 1].close;
+    var near      = latest.filter(function (b) { return Math.abs(currentPx - b.price) < atrBase; });
+    return { blocks: latest, nearPrice: near, atrBase: atrBase };
+  }
+
+  // Change of Character: swing structure break signals potential reversal.
+  // Bullish CHoCH: bearish structure (lower-highs/lows) but price breaks above last swing high.
+  // Bearish CHoCH: bullish structure (higher-highs/lows) but price breaks below last swing low.
+  function _detectCHoCH(candles) {
+    if (!candles || candles.length < 20) return null;
+    var n = candles.length;
+    var swingHighs = [], swingLows = [];
+    for (var i = 5; i < n - 2; i++) {
+      var isH = candles[i].high > candles[i-1].high && candles[i].high > candles[i-2].high &&
+                candles[i].high > candles[i+1].high && candles[i].high > candles[i+2].high;
+      var isL = candles[i].low  < candles[i-1].low  && candles[i].low  < candles[i-2].low  &&
+                candles[i].low  < candles[i+1].low  && candles[i].low  < candles[i+2].low;
+      if (isH) swingHighs.push({ index: i, price: candles[i].high });
+      if (isL) swingLows.push({ index: i, price: candles[i].low  });
+    }
+    if (swingHighs.length < 2 || swingLows.length < 2) return null;
+    var lastHigh  = swingHighs[swingHighs.length - 1];
+    var prevHigh  = swingHighs[swingHighs.length - 2];
+    var lastLow   = swingLows[swingLows.length - 1];
+    var prevLow   = swingLows[swingLows.length - 2];
+    var currentPx = candles[n - 1].close;
+    var choch = null;
+    if (lastHigh.price < prevHigh.price && lastLow.price < prevLow.price && currentPx > lastHigh.price) {
+      choch = { type: 'bullish', breakLevel: lastHigh.price, confirmed: true };
+    } else if (lastHigh.price > prevHigh.price && lastLow.price > prevLow.price && currentPx < lastLow.price) {
+      choch = { type: 'bearish', breakLevel: lastLow.price, confirmed: true };
+    }
+    return { choch: choch, lastSwingHigh: lastHigh, lastSwingLow: lastLow };
+  }
+
+  // Liquidity Zones: clusters of equal highs/lows (within 0.3%) where stop orders pool.
+  // Also detects sweeps: price spikes through zone then closes back (reversal signal).
+  function _detectLiquidityZones(candles) {
+    if (!candles || candles.length < 15) return null;
+    var n      = candles.length;
+    var thresh = 0.003;
+    var current = candles[n - 1].close;
+    function cluster(vals, label) {
+      var zones = [];
+      for (var i = 0; i < vals.length; i++) {
+        var found = false;
+        for (var z = 0; z < zones.length; z++) {
+          if (Math.abs(vals[i] - zones[z].price) / zones[z].price < thresh) {
+            zones[z].price = (zones[z].price * zones[z].count + vals[i]) / (zones[z].count + 1);
+            zones[z].count++;
+            found = true;
+            break;
+          }
+        }
+        if (!found) zones.push({ price: vals[i], count: 1, type: label });
+      }
+      return zones.filter(function (z) { return z.count >= 2; });
+    }
+    var highZones = cluster(candles.map(function (c) { return c.high; }), 'resistance');
+    var lowZones  = cluster(candles.map(function (c) { return c.low;  }), 'support');
+    var recent3   = candles.slice(-3);
+    var sweeps    = [];
+    highZones.forEach(function (z) {
+      if (recent3.some(function (c) { return c.high > z.price && c.close < z.price; }))
+        sweeps.push({ type: 'high_sweep', price: z.price });
+    });
+    lowZones.forEach(function (z) {
+      if (recent3.some(function (c) { return c.low < z.price && c.close > z.price; }))
+        sweeps.push({ type: 'low_sweep', price: z.price });
+    });
+    var above = highZones.filter(function (z) { return z.price > current; }).sort(function (a, b) { return a.price - b.price; });
+    var below = lowZones.filter(function (z)  { return z.price < current; }).sort(function (a, b) { return b.price - a.price; });
+    return { highZones: highZones, lowZones: lowZones, sweeps: sweeps,
+             nearestResistance: above[0] || null, nearestSupport: below[0] || null };
+  }
+
   // ── Adaptive RSI Period ──────────────────────────────────────────────────────
   // Shorter period when volatility is high (market moving faster)
   function _adaptiveRsiPeriod(atrVal, atrBase) {
@@ -658,20 +803,24 @@
   }
 
   // ── Multi-Timeframe Composite ──────────────────────────────────────────────
-  function _mtfComposite(s1h, s4h, sDaily, assetType, regime) {
+  function _mtfComposite(s1h, s4h, sDaily, assetType, regime, s15m) {
     // Commodities have daily data only
     if (assetType === 'commodity') {
       var abs = Math.abs(sDaily);
       var grade = abs > 0.45 ? 'A' : abs > 0.30 ? 'B' : abs > 0.18 ? 'C' : 'D';
-      return { composite: sDaily, grade: grade, allAligned: true, alignBonus: 1.0, regime: regime };
+      var ct = grade === 'A' ? 'STRUCTURE' : grade === 'B' ? 'SETUP' : 'WEAK';
+      return { composite: sDaily, grade: grade, allAligned: true, alignBonus: 1.0, regime: regime,
+               convictionTier: ct, m15Aligned: false };
     }
 
     var daily = _notNaN(sDaily) ? sDaily : 0;
     var h4    = _notNaN(s4h)    ? s4h    : daily * 0.8;
     var h1    = _notNaN(s1h)    ? s1h    : h4    * 0.8;
+    var m15   = _notNaN(s15m)   ? s15m   : null;
 
-    var allAligned = _sign(daily) !== 0 && _sign(daily) === _sign(h4) && _sign(h4) === _sign(h1);
-    var alignBonus = allAligned ? 1.15 : 1.0;
+    var allAligned  = _sign(daily) !== 0 && _sign(daily) === _sign(h4) && _sign(h4) === _sign(h1);
+    var m15Aligned  = m15 !== null && _sign(m15) !== 0 && _sign(m15) === _sign(daily);
+    var alignBonus  = allAligned ? 1.15 : 1.0;
 
     // 1h or 4h fighting daily: reduce their contribution
     var h4w = (_sign(h4) !== _sign(daily) && daily !== 0) ? 0.12 : 0.30;
@@ -688,7 +837,14 @@
               : (absC > 0.30 && (allAligned || absC > 0.40)) ? 'B'
               : absC > 0.18                                   ? 'C' : 'D';
 
-    return { composite: comp, grade: grade, allAligned: allAligned, alignBonus: alignBonus, regime: regime };
+    // Three-tier conviction gate: 1D+4H+1H+15M all aligned = HIGH_CONVICTION
+    var convictionTier = (allAligned && m15Aligned) ? 'HIGH_CONVICTION'
+                       : allAligned                 ? 'STRUCTURE'
+                       : absC > 0.18                ? 'SETUP'
+                                                    : 'WEAK';
+
+    return { composite: comp, grade: grade, allAligned: allAligned, alignBonus: alignBonus,
+             regime: regime, convictionTier: convictionTier, m15Aligned: m15Aligned };
   }
 
   // ── GII Context Integration ────────────────────────────────────────────────
@@ -727,8 +883,50 @@
     };
   }
 
+  // ── Inter-Agent Order Flow Integration ────────────────────────────────────
+  // Queries GII_AGENT_MARKETSTRUCTURE.books() and GII_AGENT_SMARTMONEY.snapshot().
+  // Returns confidence adjustment in [-0.06, +0.06].
+  function _integrateOrderFlow(assetId, bias) {
+    var adj = 0;
+    try {
+      var books = window.GII_AGENT_MARKETSTRUCTURE && window.GII_AGENT_MARKETSTRUCTURE.books && window.GII_AGENT_MARKETSTRUCTURE.books();
+      if (books && books[assetId]) {
+        var imb = books[assetId].imbalance || 0;   // positive = bid pressure
+        if ((bias === 'long'  && imb >  0.10) || (bias === 'short' && imb < -0.10)) adj += 0.04;
+        if ((bias === 'long'  && imb < -0.10) || (bias === 'short' && imb >  0.10)) adj -= 0.04;
+      }
+    } catch (e) {}
+    try {
+      var snap = window.GII_AGENT_SMARTMONEY && window.GII_AGENT_SMARTMONEY.snapshot && window.GII_AGENT_SMARTMONEY.snapshot();
+      if (snap && snap[assetId]) {
+        var longRatio = snap[assetId].long || 0.5;
+        if ((bias === 'long'  && longRatio > 0.60) || (bias === 'short' && longRatio < 0.40)) adj += 0.02;
+        if ((bias === 'long'  && longRatio < 0.40) || (bias === 'short' && longRatio > 0.60)) adj -= 0.02;
+      }
+    } catch (e) {}
+    return _clamp(adj, -0.06, 0.06);
+  }
+
+  // ── Dynamic Confidence from Trade Feedback ───────────────────────────────
+  // Returns multiplier [0.70, 1.30] based on historical win rate per asset/bias.
+  // Only activates after ≥10 trades — returns 1.0 before that.
+  function _feedbackConfMult(assetId, bias) {
+    var fb = _feedback[assetId + '_' + bias];
+    if (!fb || fb.total < 10) return 1.0;
+    // 0% WR → 0.70, 50% WR → 1.0, 100% WR → 1.30
+    return _clamp(0.70 + (fb.winRate || 0.5) * 0.60, 0.70, 1.30);
+  }
+
+  // ── A2A Event Broadcasting ──────────────────────────────────────────────────
+  // Dispatches standardised signal to window event bus for inter-agent consumption.
+  function _broadcast(signal) {
+    try {
+      window.dispatchEvent(new CustomEvent('GII_TA_SIGNAL', { detail: signal, bubbles: false }));
+    } catch (e) {}
+  }
+
   // ── Signal Builder ─────────────────────────────────────────────────────────
-  function _buildSignal(assetDef, mtf, gii, indDaily) {
+  function _buildSignal(assetDef, mtf, gii, indDaily, smc) {
     if (Math.abs(gii.composite) < 0.15) return null;
     if (mtf.grade === 'D')              return null;
 
@@ -741,9 +939,9 @@
     var price = indDaily ? indDaily.price  : 0;
 
     // ATR-based stop (1.5× ATR) and target (pivot or 2.5× ATR fallback)
-    var atrStop   = atr > 0 ? atr * 1.5 : price * 0.015;   // fallback 1.5% for commodities
+    var atrStop   = atr > 0 ? atr * 1.5 : price * 0.015;
     var atrTarget = atr > 0 ? atr * 2.5 : price * 0.025;
-    var rr        = 2.5;   // default R:R
+    var rr        = 2.5;
 
     if (indDaily && indDaily.pivots && atrStop > 0) {
       var cand  = bias === 'long' ? indDaily.pivots.r1 : indDaily.pivots.s1;
@@ -756,7 +954,37 @@
       }
     }
 
-    if (rr < 1.5) return null;  // minimum R:R gate
+    if (rr < 1.5) return null;   // minimum R:R gate
+
+    // ── SMC confluence ──────────────────────────────────────────────────────
+    var smcSignals = 0;
+    var smcContext = {};
+    if (smc) {
+      if (smc.fvg && smc.fvg.latest) {
+        var fvgOk = (bias === 'long'  && smc.fvg.latest.type === 'bullish') ||
+                    (bias === 'short' && smc.fvg.latest.type === 'bearish');
+        if (fvgOk) { smcSignals++; smcContext.fvg = smc.fvg.latest.type; }
+      }
+      if (smc.ob && smc.ob.nearPrice && smc.ob.nearPrice.length > 0) {
+        var obOk = smc.ob.nearPrice.some(function (b) {
+          return (bias === 'long' && b.type === 'bullish') || (bias === 'short' && b.type === 'bearish');
+        });
+        if (obOk) { smcSignals++; smcContext.orderBlock = true; }
+      }
+      if (smc.choch && smc.choch.choch && smc.choch.choch.confirmed) {
+        var chochOk = (bias === 'long'  && smc.choch.choch.type === 'bullish') ||
+                      (bias === 'short' && smc.choch.choch.type === 'bearish');
+        if (chochOk) { smcSignals++; smcContext.choch = smc.choch.choch.type; }
+      }
+      if (smc.liquidity && smc.liquidity.sweeps && smc.liquidity.sweeps.length > 0) {
+        var sweepOk = smc.liquidity.sweeps.some(function (s) {
+          return (bias === 'long' && s.type === 'low_sweep') || (bias === 'short' && s.type === 'high_sweep');
+        });
+        if (sweepOk) { smcSignals++; smcContext.liquiditySweep = true; }
+      }
+    }
+    // Bonus: +0.05 per confirmed SMC signal when ≥2 align, capped at +0.10
+    if (smcSignals >= 2) conf = _clamp(conf + Math.min(smcSignals * 0.05, 0.10), MIN_CONF, MAX_CONF);
 
     var id  = assetDef.id;
     var ind = indDaily;
@@ -764,29 +992,49 @@
       'regime=' + mtf.regime,
       'score='  + gii.composite.toFixed(2),
       'grade='  + mtf.grade,
+      'conviction=' + mtf.convictionTier,
       mtf.allAligned ? 'MTF✓' : 'MTF~',
       'GTI×' + gii.gtiMod.toFixed(2)
     ];
-    if (ind && ind.rsiDiv)            parts.push('RSIdiv:' + ind.rsiDiv.type);
+    if (ind && ind.rsiDiv)                parts.push('RSIdiv:' + ind.rsiDiv.type);
     if (ind && ind.obvDiv === 'divergence') parts.push('OBVdiv');
-    if (ind && ind.volRatio > 1.8)    parts.push('vol×' + ind.volRatio.toFixed(1));
-    if (ind && ind.sqzRatio < 0.10)   parts.push('BBsqueeze');
+    if (ind && ind.volRatio > 1.8)        parts.push('vol×' + ind.volRatio.toFixed(1));
+    if (ind && ind.sqzRatio < 0.10)       parts.push('BBsqueeze');
+    if (smcSignals >= 2)                  parts.push('SMC×' + smcSignals);
 
-    return {
-      source:       'technicals',
-      asset:        id,
-      bias:         bias,
-      confidence:   _clamp(conf, MIN_CONF, MAX_CONF),
-      reasoning:    '[TA] ' + parts.join(' | '),
-      region:       assetDef.region,
-      evidenceKeys: ['technical', mtf.regime.toLowerCase(), bias, 'grade-' + mtf.grade],
-      // ATR stop/target fields — gii-core passes these through to EE (see wiring notes)
-      atrStop:      isFinite(atrStop)  ? +atrStop.toFixed(4)  : undefined,
-      atrTarget:    isFinite(atrTarget) ? +atrTarget.toFixed(4) : undefined,
-      taGrade:      mtf.grade,
-      taRegime:     mtf.regime,
-      _agentName:   'technicals'
+    var confFinal  = _clamp(conf, MIN_CONF, MAX_CONF);
+    var stopLoss   = price > 0 ? (bias === 'long' ? price - atrStop   : price + atrStop)   : undefined;
+    var takeProfit = price > 0 ? (bias === 'long' ? price + atrTarget : price - atrTarget) : undefined;
+    var reason     = '[TA] ' + parts.join(' | ');
+
+    var signal = {
+      // ── A2A standardised payload ──────────────────────────────────────────
+      ticker:              id,
+      source:              'GII_AGENT_TECHNICALS',
+      bias:                bias,
+      confidence_score:    confFinal,
+      conviction:          mtf.convictionTier,
+      timeframe_alignment: mtf.allAligned,
+      stop_loss:           stopLoss   !== undefined ? +stopLoss.toFixed(4)   : undefined,
+      take_profit:         takeProfit !== undefined ? +takeProfit.toFixed(4) : undefined,
+      reason:              reason,
+      smc_context:         Object.keys(smcContext).length > 0 ? smcContext : undefined,
+      // ── Legacy fields (backwards compat for gii-core + executionEngine) ──
+      asset:               id,
+      confidence:          confFinal,
+      reasoning:           reason,
+      region:              assetDef.region,
+      evidenceKeys:        ['technical', mtf.regime.toLowerCase(), bias, 'grade-' + mtf.grade,
+                            mtf.convictionTier.toLowerCase()],
+      atrStop:             isFinite(atrStop)   ? +atrStop.toFixed(4)   : undefined,
+      atrTarget:           isFinite(atrTarget) ? +atrTarget.toFixed(4) : undefined,
+      taGrade:             mtf.grade,
+      taRegime:            mtf.regime,
+      _agentName:          'technicals'
     };
+
+    _broadcast(signal);
+    return signal;
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -794,7 +1042,7 @@
   // ────────────────────────────────────────────────────────────────────────────
 
   // Cache TTLs
-  var TTL = { '1h': 55 * 60000, daily: 23 * 3600000 };
+  var TTL = { '15m': 14 * 60000, '1h': 55 * 60000, '4h': 230 * 60000, daily: 23 * 3600000 };
 
   function _isFresh(key, tf) {
     var e = _cache[key];
@@ -810,6 +1058,47 @@
     if (age < 43200000) return 0.75;
     if (age < 86400000) return 0.55;
     return 0.30;
+  }
+
+  // ── Hyperliquid candleSnapshot (primary, no key, no quota) ─────────────────
+  // interval: 'daily' | '4h' | '1h'   →   maps to HL's '1d' | '4h' | '1h'
+  function _hl(coin, interval, numCandles) {
+    var hlInterval = interval === 'daily' ? '1d' : interval;   // '4h' and '1h' pass through
+    var msPerBar   = interval === 'daily' ? 86400000 : interval === '4h' ? 14400000 : interval === '15m' ? 900000 : 3600000;
+    var now        = Date.now();
+    var startTime  = now - numCandles * msPerBar * 2;   // 2× buffer for gaps
+    return fetch(HL_INFO, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        type: 'candleSnapshot',
+        req:  { coin: coin, interval: hlInterval, startTime: startTime, endTime: now }
+      })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!Array.isArray(data) || data.length === 0) return null;
+        var candles = data.map(function (d) {
+          return {
+            timestamp: Math.floor(d.t / 1000),   // ms → seconds
+            open:      parseFloat(d.o),
+            high:      parseFloat(d.h),
+            low:       parseFloat(d.l),
+            close:     parseFloat(d.c),
+            volume:    parseFloat(d.v) || 0
+          };
+        }).filter(function (c) { return _notNaN(c.close) && c.close > 0; });
+        if (candles.length >= 10) {
+          _hlFetchErrors = 0;   // reset error counter on success
+          return candles.slice(-numCandles);
+        }
+        return null;
+      })
+      .catch(function (e) {
+        _hlFetchErrors++;
+        console.warn('[GII-TA] HL fetch failed (' + coin + ' ' + interval + '): ' + e.message);
+        return null;
+      });
   }
 
   // Twelve Data
@@ -875,11 +1164,34 @@
     return _fetchSeq;
   }
 
-  // Fetch candles for one asset/timeframe, with cache and fallback
+  // Fetch candles for one asset/timeframe.
+  // Priority: Hyperliquid (if hlCoin set) → original API → stale cache
   function _fetchCandles(assetDef, tf) {
     var key = assetDef.id + '_' + tf;
     if (_isFresh(key, tf)) return Promise.resolve(_cache[key].candles);
 
+    // ── Step 1: Try Hyperliquid if asset is covered ─────────────────────────
+    if (assetDef.hlCoin) {
+      // HL always returns proper OHLCV — much better than AV's close-only for commodities
+      var hlCoin = assetDef.hlCoin;
+      var hlBars = (tf === 'daily') ? 250 : (tf === '4h') ? 200 : 200;
+      return _hl(hlCoin, tf, hlBars).then(function (candles) {
+        if (candles && candles.length >= 30) {
+          _cache[key] = { candles: candles, fetchedAt: Date.now(), source: 'hyperliquid' };
+          _saveCache();
+          return candles;
+        }
+        // HL failed or returned too few bars — fall through to legacy API
+        return _fetchLegacy(assetDef, tf, key);
+      });
+    }
+
+    // ── Step 2: No HL coverage — use legacy API directly ────────────────────
+    return _fetchLegacy(assetDef, tf, key);
+  }
+
+  // Legacy fetch (Twelve Data / Alpha Vantage / CryptoCompare) + stale cache fallback
+  function _fetchLegacy(assetDef, tf, key) {
     var prom;
     if (assetDef.api === 'twelvedata') {
       var tdInt = tf === '1h' ? '1h' : '1day';
@@ -893,14 +1205,13 @@
     } else {
       return Promise.resolve(null);
     }
-
     return prom.then(function (candles) {
       if (candles && candles.length >= 30) {
         _cache[key] = { candles: candles, fetchedAt: Date.now(), source: assetDef.api };
         _saveCache();
         return candles;
       }
-      return (_cache[key] || {}).candles || null;   // stale fallback
+      return (_cache[key] || {}).candles || null;   // stale cache as last resort
     });
   }
 
@@ -913,57 +1224,137 @@
     var type = assetDef.type;
 
     var dailyC = (_cache[id + '_daily'] || {}).candles;
-    var h1C    = type !== 'commodity' ? (_cache[id + '_1h'] || {}).candles : null;
     if (!dailyC || dailyC.length < 35) return null;
 
     var sm     = _staleMult(id + '_daily');
     var regime = _regimeDetect(dailyC);
 
-    var indD = _computeIndicators(dailyC, 'daily', regime, id);
-    var ind1h = null, ind4h = null;
-    if (h1C && h1C.length >= 35) {
-      ind1h = _computeIndicators(h1C, '1h', regime, id);
-      var c4h = _build4h(h1C);
-      if (c4h && c4h.length >= 12) ind4h = _computeIndicators(c4h, '4h', regime, id);
+    var indD   = _computeIndicators(dailyC, 'daily', regime, id);
+    var ind1h  = null, ind4h = null, ind15m = null;
+
+    // 4h candles: prefer native HL bars (better quality than built-from-1h)
+    var h4C = assetDef.hl4h ? (_cache[id + '_4h'] || {}).candles : null;
+    if (h4C && h4C.length >= 12) {
+      ind4h = _computeIndicators(h4C, '4h', regime, id);
     }
 
-    var sD  = indD  ? _scoreAsset(indD,  regime) : 0;
-    var s4h = ind4h ? _scoreAsset(ind4h, regime) : NaN;
-    var s1h = ind1h ? _scoreAsset(ind1h, regime) : NaN;
+    // 15m candles: HL assets only (BTC); reuse 1h indicator weights
+    var m15C = assetDef.hlCoin ? (_cache[id + '_15m'] || {}).candles : null;
+    if (m15C && m15C.length >= 20) {
+      ind15m = _computeIndicators(m15C, '1h', regime, id);
+    }
 
-    var mtf = _mtfComposite(s1h, s4h, sD, type, regime);
+    // 1h candles: for non-commodities that don't have native HL 4h
+    var h1C = type !== 'commodity' ? (_cache[id + '_1h'] || {}).candles : null;
+    if (h1C && h1C.length >= 35) {
+      ind1h = _computeIndicators(h1C, '1h', regime, id);
+      // Build 4h from 1h only when no native 4h available
+      if (!ind4h) {
+        var c4h = _build4h(h1C);
+        if (c4h && c4h.length >= 12) ind4h = _computeIndicators(c4h, '4h', regime, id);
+      }
+    }
+
+    var sD   = indD   ? _scoreAsset(indD,   regime) : 0;
+    var s4h  = ind4h  ? _scoreAsset(ind4h,  regime) : NaN;
+    var s1h  = ind1h  ? _scoreAsset(ind1h,  regime) : NaN;
+    var s15m = ind15m ? _scoreAsset(ind15m, regime) : NaN;
+
+    var mtf = _mtfComposite(s1h, s4h, sD, type, regime, s15m);
     var gii = _integrateGII(mtf.composite, id, regime);
 
     // Apply staleness discount
     gii.confidence *= sm;
     gii.composite  *= sm;
 
-    _status.dataStatus[id] = {
-      daily: !!dailyC, h1: !!h1C, regime: regime, staleMult: sm
+    // SMC analysis on 4h candles (fall back to daily when no 4h)
+    var smcCandles = h4C || dailyC;
+    var smc = {
+      fvg:       _detectFVG(smcCandles),
+      ob:        _detectOrderBlocks(smcCandles),
+      choch:     _detectCHoCH(smcCandles),
+      liquidity: _detectLiquidityZones(smcCandles)
     };
 
-    return _buildSignal(assetDef, mtf, gii, indD);
+    // Dynamic confidence from feedback win rate
+    var bias = gii.composite > 0 ? 'long' : 'short';
+    gii.confidence = _clamp(gii.confidence * _feedbackConfMult(id, bias), MIN_CONF, MAX_CONF);
+
+    // Order flow confirmation/opposition boost
+    var ofAdj = _integrateOrderFlow(id, bias);
+    gii.confidence = _clamp(gii.confidence + ofAdj, MIN_CONF, MAX_CONF);
+
+    var dailySrc = (_cache[id + '_daily'] || {}).source || 'none';
+    _status.dataStatus[id] = {
+      daily: !!dailyC, h1: !!h1C, h4native: !!h4C, m15: !!m15C,
+      source: dailySrc, regime: regime, staleMult: sm
+    };
+
+    return _buildSignal(assetDef, mtf, gii, indD, smc);
+  }
+
+  // ── System health state ─────────────────────────────────────────────────────
+  // HEALTHY: most assets have fresh data, HL working
+  // DEGRADED: some data stale or HL having issues
+  // FAILING: most data stale or no signals possible
+  function _computeHealth() {
+    var total     = ASSETS.length;
+    var freshCount = 0;
+    var staleCut  = Date.now() - 86400000;  // 24h
+    ASSETS.forEach(function (a) {
+      var e = _cache[a.id + '_daily'];
+      if (e && e.fetchedAt && e.fetchedAt > staleCut && e.candles && e.candles.length >= 30) freshCount++;
+    });
+    var ratio = freshCount / total;
+    if (ratio >= 0.75 && _hlFetchErrors < 3)  return 'HEALTHY';
+    if (ratio >= 0.40 || freshCount >= 3)      return 'DEGRADED';
+    return 'FAILING';
+  }
+
+  // ── Adaptive poll interval ─────────────────────────────────────────────────
+  // Poll faster during volatile markets, slower during quiet periods.
+  function _nextPollMs() {
+    var hasVolatile = Object.values(_status.dataStatus || {}).some(function (s) {
+      return s.regime === 'VOLATILE';
+    });
+    // If HL is having trouble, back off slightly to reduce pressure
+    if (_hlFetchErrors >= 3)    return POLL_BASE_MS * 1.5;
+    if (hasVolatile)             return POLL_MIN_MS;     // 10 min — market moving fast
+    // Check if all daily caches are still fresh (no rush to refetch)
+    var allFresh = ASSETS.every(function (a) { return _isFresh(a.id + '_daily', 'daily'); });
+    if (allFresh)                return POLL_MAX_MS;     // 60 min — no stale data
+    return POLL_BASE_MS;                                  // 30 min — default
   }
 
   // ── Poll ───────────────────────────────────────────────────────────────────
   function poll() {
     _status.lastPoll = Date.now();
 
-    // Build fresh fetch promises for all assets (queued, rate-limited)
+    // Build fetch promises for all assets
+    // HL assets (hlCoin set) get daily + 4h + 1h from HL with no quota cost.
+    // Legacy-only assets get daily + 1h (4h built from 1h as before).
+    // Commodities without hlCoin: only refetch daily when >22h stale (AV quota).
     var fetches = [];
     ASSETS.forEach(function (a) {
-      if (a.type === 'commodity') {
-        // AV credits are precious — only refetch daily if cache is >22h old
-        if (!_isFresh(a.id + '_daily', 22 * 3600000)) {
+      if (a.hlCoin) {
+        // HL covers this asset — fetch all four timeframes freely
+        fetches.push(_fetchCandles(a, 'daily'));
+        fetches.push(_fetchCandles(a, '4h'));
+        fetches.push(_fetchCandles(a, '1h'));
+        fetches.push(_fetchCandles(a, '15m'));
+      } else if (a.type === 'commodity') {
+        // AV credits are precious — only refetch when stale
+        if (!_isFresh(a.id + '_daily', 'daily')) {
           fetches.push(_fetchCandles(a, 'daily'));
         }
       } else {
+        // Standard equity/crypto with no HL — daily + 1h (4h built from 1h)
         fetches.push(_fetchCandles(a, 'daily'));
         fetches.push(_fetchCandles(a, '1h'));
       }
     });
 
-    // After all fetches complete, run analysis
+    // After all fetches complete, run analysis then reschedule adaptively
     Promise.all(fetches).then(function () {
       var newSigs = [];
       _status.assetsAnalysed = 0;
@@ -982,6 +1373,17 @@
       if (newSigs.length > 0) {
         _signals = newSigs.slice(0, MAX_SIGNALS);
       }
+
+      // Update health state
+      _status.health    = _computeHealth();
+      _status.hlErrors  = _hlFetchErrors;
+      _status.apiQuota  = Object.assign({}, _quota);
+
+      // Adaptive reschedule — cancel previous timer if any
+      if (_pollTimer) clearTimeout(_pollTimer);
+      var nextMs = _nextPollMs();
+      _status.nextPollMs = nextMs;
+      _pollTimer = setTimeout(poll, nextMs);
     });
   }
 
@@ -1008,32 +1410,61 @@
     status:        function () { return Object.assign({}, _status); },
     accuracy:      function () { return Object.assign({}, _accuracy); },
     onTradeResult: onTradeResult,
+
+    // Health state: 'HEALTHY' | 'DEGRADED' | 'FAILING'
+    health:    function () { return _computeHealth(); },
+
     // Diagnostic helpers
-    regime:   function (assetId) {
+    regime:    function (assetId) {
       var c = (_cache[assetId + '_daily'] || {}).candles;
       return c ? _regimeDetect(c) : 'NO_DATA';
     },
     cacheInfo: function () {
       var info = {};
       Object.keys(_cache).forEach(function (k) {
-        info[k] = { count: _cache[k].candles.length, ageMin: Math.round((Date.now() - _cache[k].fetchedAt) / 60000), source: _cache[k].source };
+        var e = _cache[k];
+        info[k] = {
+          count:   e.candles.length,
+          ageMin:  Math.round((Date.now() - e.fetchedAt) / 60000),
+          source:  e.source
+        };
       });
       return info;
     },
-    apiQuota:  function () { _quotaToday(); return Object.assign({}, _quota, { limits: QUOTA_LIMITS }); }
+    apiQuota:  function () { _quotaToday(); return Object.assign({}, _quota, { limits: QUOTA_LIMITS }); },
+    hlStatus:  function () {
+      return {
+        errors:        _hlFetchErrors,
+        healthy:       _hlFetchErrors < 3,
+        hlAssets:      ASSETS.filter(function (a) { return !!a.hlCoin; }).map(function (a) { return a.id; }),
+        legacyAssets:  ASSETS.filter(function (a) { return !a.hlCoin; }).map(function (a) { return a.id; })
+      };
+    },
+
+    // A2A event bus subscription — handler called with each signal as it's emitted.
+    // Usage: GII_AGENT_TECHNICALS.on(function(sig) { console.log(sig); })
+    on: function (handler) {
+      if (typeof handler !== 'function') return;
+      window.addEventListener('GII_TA_SIGNAL', function (e) { handler(e.detail); });
+    }
   };
 
   // ── Init ───────────────────────────────────────────────────────────────────
   // 11.5s delay — after all other agents (scenario loads at 10.2s)
+  // poll() is self-rescheduling via adaptive setTimeout — no setInterval needed.
   window.addEventListener('load', function () {
     setTimeout(function () {
       poll();
-      setInterval(poll, POLL_INTERVAL);
+      // Note: poll() reschedules itself adaptively. No setInterval.
     }, 11500);
   });
 
   /*
    * ── WIRING NOTES (changes needed in other files) ──────────────────────────
+   *
+   * v3 changes: SMC detection, 15M timeframe, A2A event bus, order flow + feedback.
+   * No new wiring required vs v2 — all changes are internal to this file.
+   * Listen to signals: GII_AGENT_TECHNICALS.on(fn) or window 'GII_TA_SIGNAL' events.
    *
    * 1. gii-core.js AGENTS array — add after scenario:
    *      { name: 'technicals', global: 'GII_AGENT_TECHNICALS' }
@@ -1051,9 +1482,14 @@
    *
    * 4. gii-meta.js known[] array — add: 'GII_AGENT_TECHNICALS'
    *
-   * 5. geopolitical-dashboard.html — add BEFORE gii-core.js:
-   *      <script src="agents/gii-technicals.js?v=1"></script>
-   *    And set your keys in a <script> block before that.
+   * 5. geopolitical-dashboard.html — update version tag:
+   *      <script src="agents/gii-technicals.js?v=3"></script>
+   *
+   * Diagnostics (browser console):
+   *   GII_AGENT_TECHNICALS.health()    → 'HEALTHY' | 'DEGRADED' | 'FAILING'
+   *   GII_AGENT_TECHNICALS.hlStatus()  → HL error count + covered asset list
+   *   GII_AGENT_TECHNICALS.cacheInfo() → per-asset cache age + data source
+   *   GII_AGENT_TECHNICALS.apiQuota()  → TD + AV quota usage vs daily limits
    */
 
 })();
