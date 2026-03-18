@@ -19,8 +19,9 @@ from sse_starlette.sse import EventSourceResponse
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DASHBOARD_HTML = os.path.join(_PROJECT_ROOT, 'geopolitical-dashboard.html')
 
-from config import HOST, PORT, SSE_KEEPALIVE
+from config import HOST, PORT, SSE_KEEPALIVE, UW_API_KEY
 from event_store import get_store
+from uw_store import get_uw_store
 import trades_store
 
 
@@ -421,6 +422,71 @@ async def api_regime():
         'asset_biases':  asset_biases,
         'ts':            int(time.time() * 1000),
     })
+
+
+@app.get('/api/uw/status')
+async def uw_status():
+    """UW integration status — key configured, data counts, latest tide."""
+    uw = get_uw_store()
+    stats    = await asyncio.get_event_loop().run_in_executor(None, uw.stats)
+    tide     = await asyncio.get_event_loop().run_in_executor(None, uw.get_latest_tide)
+    iv_ranks = await asyncio.get_event_loop().run_in_executor(None, uw.get_iv_ranks)
+    return JSONResponse(content={
+        'key_configured': bool(UW_API_KEY),
+        'stats':    stats,
+        'tide':     tide,
+        'iv_ranks': iv_ranks,
+        'ts':       int(time.time() * 1000),
+    })
+
+
+@app.get('/api/uw/flow-alerts')
+async def uw_flow_alerts(limit: int = 50, hours: int = 24):
+    """Recent unusual options flow alerts (sorted newest first)."""
+    uw = get_uw_store()
+    data = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: uw.get_flow_alerts(limit=limit, hours=hours)
+    )
+    return JSONResponse(content={'data': data, 'count': len(data)})
+
+
+@app.get('/api/uw/darkpool')
+async def uw_darkpool(limit: int = 30, hours: int = 24):
+    """Recent dark pool prints on tracked assets (> $2M)."""
+    uw = get_uw_store()
+    data = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: uw.get_darkpool(limit=limit, hours=hours)
+    )
+    return JSONResponse(content={'data': data, 'count': len(data)})
+
+
+@app.get('/api/uw/congress')
+async def uw_congress(limit: int = 20, days: int = 90):
+    """Recent congressional trades in geopolitically relevant sectors."""
+    uw = get_uw_store()
+    data = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: uw.get_congress(limit=limit, days=days)
+    )
+    return JSONResponse(content={'data': data, 'count': len(data)})
+
+
+@app.get('/api/uw/tide')
+async def uw_tide(hours: int = 8):
+    """Market tide time series — net call/put premium over last N hours."""
+    uw = get_uw_store()
+    data = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: uw.get_tide(hours=hours)
+    )
+    latest = data[-1] if data else None
+    return JSONResponse(content={'data': data, 'latest': latest, 'count': len(data)})
+
+
+@app.get('/api/uw/iv-ranks')
+async def uw_iv_ranks():
+    """Current IV rank (0–100) for all tracked tickers."""
+    uw = get_uw_store()
+    data = await asyncio.get_event_loop().run_in_executor(None, uw.get_iv_ranks)
+    return JSONResponse(content={'data': data, 'ts': int(time.time() * 1000)})
 
 
 @app.get('/api/correlation')

@@ -17,6 +17,7 @@ DB_PATH         = os.path.join(os.path.dirname(__file__), 'events.db')
 # ── Optional API keys (set via environment variables) ───────────────────────
 ALPHA_VANTAGE_KEY = os.getenv('AV_KEY', '')          # free key from alphavantage.co
 NEWS_API_KEY      = os.getenv('NEWS_API_KEY', '')    # newsapi.org (optional)
+UW_API_KEY        = os.getenv('UW_API_KEY', '')      # unusualwhales.com API key
 
 # ── GDELT ───────────────────────────────────────────────────────────────────
 GDELT_URL = (

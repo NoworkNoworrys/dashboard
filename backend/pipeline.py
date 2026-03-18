@@ -9,18 +9,30 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict
 
-from config import CYCLE_SECONDS
+from config import CYCLE_SECONDS, UW_API_KEY
 from event_store import get_store
 from keyword_detector import dedupe_key
+from uw_store import get_uw_store
 
 # Import ingest modules (all are synchronous; we wrap them in run_in_executor)
 from ingest.gdelt      import fetch_gdelt
 from ingest.rss_feeds  import fetch_rss
 from ingest.reddit     import fetch_reddit
 from ingest.market_data import fetch_market_prices
+from ingest.unusual_whales import (
+    fetch_flow_alerts, fetch_darkpool, fetch_congress_trades,
+    fetch_market_tide, fetch_iv_ranks,
+)
 
 # Shared thread pool for synchronous network calls
-_executor = ThreadPoolExecutor(max_workers=6)
+_executor = ThreadPoolExecutor(max_workers=8)
+
+# UW state — track last poll times and flow alert watermark
+_uw_last_flow_ts    = 0   # ms — only fetch alerts newer than this
+_uw_last_dp_cycle   = 0   # cycle number
+_uw_last_cong_cycle = 0
+_uw_last_iv_cycle   = 0
+_uw_tide: dict      = {}  # latest tide snapshot (used by regime detector)
 
 # Reference to broadcast functions — set by server.py at startup
 _broadcast_event  = None
@@ -102,20 +114,103 @@ async def _ingest_market() -> Dict:
 
 def _regime_multiplier(market: Dict) -> float:
     """
-    Return a signal multiplier based on VIX level.
-    CRISIS regime amplifies signals (same event = bigger deal during panic).
-    RISK_ON dampens signals (markets are complacent, events matter less).
+    Return a signal multiplier based on VIX level AND UW market tide.
+    CRISIS regime amplifies signals; RISK_ON dampens them.
+    Negative tide adds a further 5% amplification (institutional put buying = fear).
     """
     vix = (market.get('VIX') or {}).get('price')
-    if vix is None:
-        return 1.0
-    if vix >= 30:
-        return 1.20   # CRISIS — amplify
-    if vix >= 20:
-        return 1.10   # RISK_OFF
-    if vix < 15:
-        return 0.90   # RISK_ON — dampen
-    return 1.0        # TRANSITIONING
+    mult = 1.0
+    if vix is not None:
+        if vix >= 30:   mult = 1.20
+        elif vix >= 20: mult = 1.10
+        elif vix < 15:  mult = 0.90
+
+    # Tide adjustment: strong put flow = additional risk-off signal
+    if _uw_tide:
+        tide_pct = _uw_tide.get('tide_pct', 0)
+        if tide_pct < -30:   mult = min(1.35, mult + 0.10)  # strongly bearish tide
+        elif tide_pct < -10: mult = min(1.25, mult + 0.05)  # bearish tide
+        elif tide_pct > 30:  mult = max(0.85, mult - 0.05)  # bullish tide = dampen fear
+
+    return mult
+
+
+async def _ingest_uw() -> List[Dict]:
+    """
+    Fetch from Unusual Whales on a staggered schedule:
+      Every cycle  (60s) → flow alerts (most time-sensitive)
+      Every 5 cyc  (5min) → dark pool + market tide
+      Every 30 cyc (30min) → congress trades
+      Every 15 cyc (15min) → IV ranks
+    Returns events ready to enter the main event pipeline.
+    Returns [] if no UW key is configured.
+    """
+    global _uw_last_flow_ts, _uw_last_dp_cycle, _uw_last_cong_cycle, _uw_last_iv_cycle, _uw_tide
+
+    if not UW_API_KEY:
+        return []
+
+    uw_store = get_uw_store()
+    events   = []
+
+    # ── Flow alerts — every cycle ──────────────────────────────────────────
+    try:
+        alerts = await _run_sync(fetch_flow_alerts, UW_API_KEY, _uw_last_flow_ts or None)
+        for evt in alerts:
+            is_new = await _run_sync(uw_store.upsert_flow_alert, evt)
+            if is_new:
+                events.append(evt)
+                _uw_last_flow_ts = max(_uw_last_flow_ts, evt.get('ts', 0))
+    except Exception as e:
+        print(f'[UW] flow_alerts error: {e}')
+
+    # ── Dark pool + market tide — every 5 cycles ───────────────────────────
+    if _cycle_n - _uw_last_dp_cycle >= 5 or _uw_last_dp_cycle == 0:
+        _uw_last_dp_cycle = _cycle_n
+        try:
+            dp_evts = await _run_sync(fetch_darkpool, UW_API_KEY)
+            for evt in dp_evts:
+                is_new = await _run_sync(uw_store.upsert_darkpool, evt)
+                if is_new:
+                    events.append(evt)
+        except Exception as e:
+            print(f'[UW] darkpool error: {e}')
+
+        try:
+            tide = await _run_sync(fetch_market_tide, UW_API_KEY)
+            if tide:
+                _uw_tide = tide
+                await _run_sync(uw_store.upsert_tide, tide)
+        except Exception as e:
+            print(f'[UW] market_tide error: {e}')
+
+    # ── IV ranks — every 15 cycles ─────────────────────────────────────────
+    if _cycle_n - _uw_last_iv_cycle >= 15 or _uw_last_iv_cycle == 0:
+        _uw_last_iv_cycle = _cycle_n
+        try:
+            iv_map = await _run_sync(fetch_iv_ranks, UW_API_KEY)
+            if iv_map:
+                await _run_sync(uw_store.upsert_iv_ranks, iv_map)
+        except Exception as e:
+            print(f'[UW] iv_ranks error: {e}')
+
+    # ── Congress trades — every 30 cycles ──────────────────────────────────
+    if _cycle_n - _uw_last_cong_cycle >= 30 or _uw_last_cong_cycle == 0:
+        _uw_last_cong_cycle = _cycle_n
+        try:
+            cong_evts = await _run_sync(fetch_congress_trades, UW_API_KEY)
+            for evt in cong_evts:
+                is_new = await _run_sync(uw_store.upsert_congress, evt)
+                if is_new:
+                    events.append(evt)
+        except Exception as e:
+            print(f'[UW] congress error: {e}')
+
+    # Prune old data every 10 cycles
+    if _cycle_n % 10 == 0:
+        await _run_sync(uw_store.prune)
+
+    return events
 
 
 async def _pipeline_cycle():
@@ -130,12 +225,17 @@ async def _pipeline_cycle():
     run_gdelt = (_cycle_n % 5 == 1)
     print(f'[PIPELINE] cycle {_cycle_n} starting… (GDELT: {"yes" if run_gdelt else "skip"})')
 
-    # Run news ingestion and market data concurrently
+    # Run news ingestion, market data, and UW concurrently
     events_task = asyncio.create_task(_ingest_events(run_gdelt=run_gdelt))
     market_task = asyncio.create_task(_ingest_market())
+    uw_task     = asyncio.create_task(_ingest_uw())
 
-    events = await events_task
-    market = await market_task
+    events    = await events_task
+    market    = await market_task
+    uw_events = await uw_task
+
+    # Merge UW events into the main event stream
+    events.extend(uw_events)
 
     # Compute regime multiplier from live VIX
     mult = _regime_multiplier(market)

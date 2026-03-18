@@ -6412,6 +6412,32 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════════════
+       UNUSUAL WHALES INTELLIGENCE
+       Options flow · Dark pool · Congress trades · Market tide · IV rank
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num" style="background:#7b2fff">UW</span>
+      <span class="section-title" style="color:#a78bfa">Unusual Whales Intelligence</span>
+      <span class="section-ts">Options Flow · Dark Pool · Congress · IV Rank</span>
+    </div>
+    <div style="padding:0 2px">
+      <div class="card" style="border-top:2px solid #7b2fff">
+        <div class="card-title" style="display:flex;align-items:center;gap:8px">
+          <span class="signal-tag shadowbroker" style="background:#7b2fff">LIVE</span>
+          Smart Money Signals
+          <button onclick="if(window.UWIntel) UWIntel.refresh();"
+            style="margin-left:auto;font-size:9px;padding:2px 8px;background:var(--bg3);border:1px solid #7b2fff;color:#a78bfa;cursor:pointer;border-radius:2px;letter-spacing:0.5px">
+            ⟳ REFRESH</button>
+        </div>
+        <div id="uwIntelPanel" style="font-size:11px;color:var(--dim);padding:4px 0">
+          Loading UW data…
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════════
        POLYMARKET PREDICTION MARKET INTELLIGENCE
        Gamma API (YES price = wallet cluster consensus) · CLOB order book · Whale trades
        ══════════════════════════════════════════════════════════════════════════════ -->
@@ -12923,6 +12949,8 @@ function _modalKeyHandler(e) {
 
 <!-- ShadowBroker Integration — injects OSINT feeds into the AI pipeline -->
 <script src="shadowbroker.js?v=23"></script>
+<!-- Unusual Whales Intelligence — options flow, dark pool, congress, IV rank, tide -->
+<script src="agents/uw-intelligence.js?v=1"></script>
 <!-- Polymarket Integration — prediction market consensus → IC pipeline (paper trading only) -->
 <script src="polymarket.js?v=15"></script>
 
