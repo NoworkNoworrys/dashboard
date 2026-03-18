@@ -543,6 +543,22 @@
     _stats.spawned++;
     console.info('[SCRAPER MGR] Spawned scraper for ' + asset +
       ' (' + watchItem.hlTicker + ')  spike=' + voltPct.toFixed(2) + '% stagger=' + staggerIdx);
+
+    // ── Dashboard notification — visible in EE signal log as a WATCH event ──
+    // Uses dir:'WATCH' so it's logged but never opens a trade.
+    if (window.EE && typeof EE.onSignals === 'function') {
+      EE.onSignals([{
+        asset:  asset,
+        dir:    'WATCH',
+        conf:   0,
+        region: 'SYSTEM',
+        reason: '🔍 Scraper spawned: ' + asset + ' (' + watchItem.hlTicker + ')' +
+                '  vol-spike=' + voltPct.toFixed(2) + '%' +
+                '  sector=' + watchItem.sector +
+                '  thresh=' + thresh.toFixed(1) + '% — monitoring for TA signals',
+        from:   'GII-SCRAPER-MGR'
+      }]);
+    }
   }
 
   function _retireInstance(inst, reason) {
@@ -565,6 +581,21 @@
     _stats.retired++;
     console.info('[SCRAPER MGR] Retired scraper for ' + inst.asset + ' — ' + reason +
       ' (' + (inst._signalCount || 0) + ' signals)');
+
+    // ── Dashboard notification ────────────────────────────────────────────────
+    if (window.EE && typeof EE.onSignals === 'function') {
+      EE.onSignals([{
+        asset:  inst.asset,
+        dir:    'WATCH',
+        conf:   0,
+        region: 'SYSTEM',
+        reason: '⏹ Scraper retired: ' + inst.asset +
+                '  reason=' + reason +
+                '  signals=' + (inst._signalCount || 0) +
+                '  lived=' + Math.round((Date.now() - inst.spawnedAt) / 60000) + 'min',
+        from:   'GII-SCRAPER-MGR'
+      }]);
+    }
   }
 
   function _checkRetire(inst) {

@@ -66,7 +66,7 @@
     trailing_stop_pct:     1.0,          // trail distance as % of entry
     break_even_enabled:    true,         // move stop to entry once 50% to TP
     partial_tp_enabled:    true,         // take 50% profit at TP1 (midpoint to TP)
-    daily_loss_limit_pct:  5,            // pause if session P&L drops below -5%
+    daily_loss_limit_pct:  50,           // pause if session P&L drops below -50% (drawdown tolerance)
     event_gate_enabled:    true,         // block new trades near major calendar events
     event_gate_hours:      0.5,          // hours before event to block (0.5 = 30min)
     max_risk_usd:          50            // v61: hard cap reduced from $75 → $50 — kicks in earlier at ~$2.5k balance
@@ -499,6 +499,10 @@
         console.info('[EE] State version migrating from', _cfg._state_version || 'none', '→', STATE_VERSION);
       }
       _cfg._state_version = STATE_VERSION;
+      // v72+ migration: raise legacy 5% daily loss limit to new default of 50%
+      if (_cfg.daily_loss_limit_pct < 10) {
+        _cfg.daily_loss_limit_pct = DEFAULTS.daily_loss_limit_pct;
+      }
     } catch (e) { _cfg = Object.assign({}, DEFAULTS); }
   }
 
@@ -1211,6 +1215,18 @@
     // Hard cap: prevents compounding from creating unrealistically large positions
     // e.g. at $147k balance, 3% = $4,410 per trade — way more than intended
     if (_cfg.max_risk_usd > 0) riskAmt = Math.min(riskAmt, _cfg.max_risk_usd);
+
+    // Scalper-specific risk cap: scraper/scalper signals are short-timeframe with
+    // fast-moving entries — cap them at $15 max to prevent a single BTC scalp
+    // from taking a large chunk of the session balance.
+    var _isScalperSig = (sig.reason && sig.reason.indexOf('SCALPER') === 0) ||
+                        (sig.from  && sig.from.toLowerCase().indexOf('scalp')   !== -1) ||
+                        (sig.from  && sig.from.toLowerCase().indexOf('scraper') !== -1);
+    var SCALPER_RISK_CAP = 15;  // $15 max per scalp entry
+    if (_isScalperSig && riskAmt > SCALPER_RISK_CAP) {
+      log('SCALPER', sig.asset + ' scalper risk capped $' + riskAmt.toFixed(2) + ' → $' + SCALPER_RISK_CAP, 'dim');
+      riskAmt = SCALPER_RISK_CAP;
+    }
     var slDist   = Math.abs(entryPrice - stopLoss);
 
     // Risk-of-ruin guard: scale down so total max drawdown stays ≤ 20% of balance
@@ -1725,19 +1741,14 @@
         _cfg.enabled = false;
         saveCfg();
         log('RISK', 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached (' +
-          sessionLossPct.toFixed(1) + '%) — auto-execution paused', 'red');
-        _notify('⛔ Daily Loss Limit Hit',
-          'Session P&L: ' + sessionLossPct.toFixed(1) + '% — auto-execution paused',
+          sessionLossPct.toFixed(1) + '%) — no new trades until tomorrow', 'red');
+        _notify('⚠ Daily Loss Limit Hit',
+          'Session P&L: ' + sessionLossPct.toFixed(1) + '% — paused for new entries. Existing trades run to TP/SL.',
           'ee-daily-limit');
-        // v61: close all currently-losing open trades to stop the bleed
-        openTrades().forEach(function (t) {
-          var px = _livePrice[t.trade_id];
-          if (!px) return;
-          var pnlUsd = t.direction === 'LONG'
-            ? (px - t.entry_price) * t.units
-            : (t.entry_price - px) * t.units;
-          if (pnlUsd < 0) closeTrade(t.trade_id, px, 'DAILY_LIMIT');
-        });
+        // Existing open trades are left to run to their natural TP/SL —
+        // force-closing mid-trade locks in losses and can turn recoverable
+        // drawdowns into confirmed ones. The stop-loss on each trade IS the
+        // real risk-management tool.
         renderUI();
       }
     }
@@ -3378,7 +3389,7 @@
         virtual_balance:      { min: 100, max: 10000000, int: false },
         max_risk_usd:         { min: 0,   max: 10000,    int: false },
         trailing_stop_pct:    { min: 0.1, max: 10,       int: false },
-        daily_loss_limit_pct: { min: 1,   max: 20,       int: false },
+        daily_loss_limit_pct: { min: 1,   max: 100,      int: false },
         event_gate_hours:     { min: 0,   max: 4,        int: false }
       };
       Object.keys(rules).forEach(function (f) {

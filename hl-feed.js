@@ -51,12 +51,15 @@
      ASML, XLE, SMH, SOXX, TLT, XOM, GDX, CORN, WHEAT, DAL, UAL.            */
   var HL_MAP = {
     /* Crypto perps — named tickers present in allMids */
-    'BTC':   ['BTC', 'BITCOIN'],
-    'ETH':   ['ETH', 'ETHEREUM'],
-    'SOL':   ['SOL'],
-    'XRP':   ['XRP'],
-    'BNB':   ['BNB'],
-    'ADA':   ['ADA'],
+    'BTC':      ['BTC', 'BITCOIN'],
+    'ETH':      ['ETH', 'ETHEREUM'],
+    'SOL':      ['SOL'],
+    'XRP':      ['XRP'],
+    'BNB':      ['BNB'],
+    'ADA':      ['ADA'],
+
+    /* Commodity perps — confirmed live on HL (allMids key = 'BRENTOIL') */
+    'BRENTOIL': ['BRENT', 'BRENTOIL'],   // Brent crude oil perp (~$80/barrel)
 
     /* Spot equity/ETF tokens — @N pair-index, full USD price (Mar 2026 spotMeta)
        Prices ~10-20% of real stock price on some tokens due to oracle/synthetic
