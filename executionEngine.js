@@ -1282,6 +1282,7 @@
       partial_tp_price:     null,    // price at which partial was taken
       partial_pnl_usd:      null,    // P&L banked from partial close
       // ────────────────────────────────────────────────────────────────────────
+      venue:            sig._venue || 'HL',  // 'HL' | 'ALPACA' — which platform executed
       broker:           _cfg.mode === 'LIVE' ? _cfg.broker : 'SIMULATION',
       // Broker integration stubs — set by adapter on live execution
       broker_order_id:  null,
@@ -1349,6 +1350,21 @@
     _cooldown[sig.asset] = Date.now();
     saveTrades();
     _apiPostTrade(trade);   // async push to SQLite (fire-and-forget)
+
+    // ── Fire Alpaca order if this trade is routed to Alpaca ──────────────
+    if (trade.venue === 'ALPACA' && window.AlpacaBroker && AlpacaBroker.isConnected()) {
+      var _alpSide = trade.direction === 'LONG' ? 'buy' : 'sell';
+      AlpacaBroker.placeOrder(trade.asset, null, _alpSide, { notional: trade.size_usd })
+        .then(function (order) {
+          trade.broker_order_id = order.id;
+          trade.broker_status   = order.status;
+          saveTrades();
+          log('ALPACA', trade.asset + ' order placed: ' + order.id + ' (' + order.status + ')', 'cyan');
+        })
+        .catch(function (e) {
+          log('ALPACA', '⚠ Order failed for ' + trade.asset + ': ' + e.message, 'amber');
+        });
+    }
 
     // Auto-capture in Hit Rate Tracker if available
     if (window.HRS && typeof HRS.capture === 'function') {
@@ -1512,6 +1528,13 @@
       }
     }
 
+    // ── Close Alpaca position if routed there ────────────────────────────
+    if (trade.venue === 'ALPACA' && window.AlpacaBroker && AlpacaBroker.isConnected()) {
+      AlpacaBroker.closePosition(trade.asset).catch(function (e) {
+        log('ALPACA', '⚠ Close position failed for ' + trade.asset + ': ' + e.message, 'amber');
+      });
+    }
+
     saveTrades();
     // Async push updated trade to SQLite (fire-and-forget)
     _apiPatchTrade(trade.trade_id, {
@@ -1636,14 +1659,22 @@
         return;
       }
 
-      // ── HL-only gate: runs regardless of enabled/disabled state ─────────────
-      // Captures every missed opportunity for platform integration decisions.
-      var _hlAsset = normaliseAsset(sig.asset);
-      if (!window.HLFeed || !HLFeed.covers(_hlAsset)) {
-        _flagTrade(sig, 'Not available on Hyperliquid — flag for future platform');
-        _logSignal(sig, 'SKIPPED', 'Not on HL: ' + sig.asset);
+      // ── Venue router: HL → Alpaca → flag ────────────────────────────────────
+      // Runs before the enabled check so every signal is routed or captured.
+      // Priority: HL spot/perp first (lowest cost + fastest execution), then
+      // Alpaca for US stocks/ETFs not on HL, else flag for future integration.
+      var _asset = normaliseAsset(sig.asset);
+      var _venue;
+      if (window.HLFeed && HLFeed.covers(_asset)) {
+        _venue = 'HL';
+      } else if (window.AlpacaBroker && AlpacaBroker.covers(_asset)) {
+        _venue = 'ALPACA';
+      } else {
+        _flagTrade(sig, 'No venue — not on Hyperliquid or Alpaca. Add broker for this asset.');
+        _logSignal(sig, 'SKIPPED', 'No venue: ' + sig.asset);
         return;
       }
+      sig = Object.assign({}, sig, { _venue: _venue });
 
       if (!_cfg.enabled) {
         _logSignal(sig, 'SKIPPED', 'Auto-execution paused');
@@ -2250,10 +2281,14 @@
           '</div>';
       }
 
+      var venueBadge = t.venue === 'ALPACA'
+        ? '<span style="font-size:7px;padding:1px 4px;border-radius:2px;background:#1a2a4a;color:#4da6ff;margin-left:4px;letter-spacing:0.5px">ALPACA</span>'
+        : '<span style="font-size:7px;padding:1px 4px;border-radius:2px;background:#1a1a3a;color:#a78bfa;margin-left:4px;letter-spacing:0.5px">HL</span>';
       return '<div class="ee-trade-card">' +
         '<div class="ee-tc-hdr">' +
           '<span class="' + dirCls + '">' + t.direction + '</span>' +
           '<span class="ee-tc-asset">' + _esc(t.asset) + '</span>' +
+          venueBadge +
           '<span class="ee-tc-conf">' + t.confidence + '%</span>' +
           '<span class="ee-tc-age">' + _age(t.timestamp_open) + '</span>' +
           '<span class="ee-tc-mode ' + (t.mode === 'LIVE' ? 'live' : 'sim') + '">' + t.mode + '</span>' +
