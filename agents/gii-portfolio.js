@@ -177,8 +177,13 @@
       /* Need at least MIN_AGENTS agreeing */
       if (c.agentCount < MIN_AGENTS) return;
 
-      /* Final score: weighted sum * agent count bonus */
-      var score = c.totalScore * (1 + (c.agentCount - MIN_AGENTS) * 0.15);
+      /* Final score: weighted sum * agent count bonus, capped at 1.5×.
+         Audit fix: was uncapped — 10 correlated agents agreeing multiplied
+         score by 2.35×, removing the diversity benefit of confluence.
+         Cap at 1.5× means each extra agent beyond MIN_AGENTS adds +15%
+         but the total multiplier can never exceed 1.5 (3+ agents above min). */
+      var _agentBonus = Math.min(1.5, 1 + (c.agentCount - MIN_AGENTS) * 0.15);
+      var score = c.totalScore * _agentBonus;
       if (score < MIN_SCORE) return;
 
       /* Regime veto: CRISIS/RISK_OFF → no risk-asset longs */

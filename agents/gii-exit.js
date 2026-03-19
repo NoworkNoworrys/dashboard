@@ -128,7 +128,12 @@
         var relevant = sigs.filter(function (s) {
           return s.asset === asset || (region && s.region === region);
         });
-        if (!relevant.length) relevant = sigs;
+        /* Audit fix: phantom fallback — same bug fixed in gii-entry.js.
+           Agent with no view on this asset/region should ABSTAIN, not fall
+           back to all its signals. Old line: if (!relevant.length) relevant = sigs
+           caused unrelated energy/sanctions signals to count as opposition to
+           crypto trades, triggering premature force-closes. */
+        if (!relevant.length) return;
         var hasOpp = relevant.some(function (s) { return s.bias === oppDir; });
         var hasAgr = relevant.some(function (s) { return s.bias === biasDir; });
         if (hasOpp && !hasAgr) { opposing++; oppCats[cat] = true; }

@@ -108,16 +108,15 @@
     var pnlMap = {};
     unrealised.forEach(function (u) { pnlMap[u.trade_id] = u.pnlPct; });
 
-    /* Fall back to stop/entry distance as proxy when live prices unavailable */
+    /* Only count trades with confirmed negative P&L as stressed.
+       Audit fix: removed the stop-distance proxy (dist < 0.5% flagged as
+       "near-stopped"). That logic is backwards — a tight stop means disciplined
+       risk management, not distress. Without live price data we cannot know
+       if a trade is losing, so we exclude it from the stress count rather than
+       guessing wrong and generating false portfolio stress alerts. */
     var inDrawdown = open.filter(function (t) {
       var pnl = pnlMap[t.trade_id];
-      if (pnl != null) return pnl < -1.0;
-      /* Proxy: if stop is very close to entry, assume near-stopped */
-      if (t.entry_price && t.stop_loss) {
-        var dist = Math.abs(t.entry_price - t.stop_loss) / t.entry_price;
-        return dist < 0.005;
-      }
-      return false;
+      return pnl != null && pnl < -1.0;
     });
 
     var stressPct = inDrawdown.length / open.length;

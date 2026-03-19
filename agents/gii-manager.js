@@ -186,13 +186,19 @@
       if (closed.length >= 10) {
         var wins = closed.filter(function (t) { return (t.pnl_pct || 0) > 0; }).length;
         var wr   = wins / closed.length;
-        // At 2.5 R:R breakeven = 28.6% — warn at 33% (buffer above breakeven)
-        if (wr < 0.28) {
+        // At 2.5 R:R breakeven = 28.6%.
+        // Audit fix: old thresholds (28% error / 33% warn) were too low —
+        // 28% is already below breakeven, so the error fired too late.
+        // New: warn at 35% (meaningful buffer above breakeven), error at 30%
+        // (clearly in loss territory with no room for variance).
+        if (wr < 0.30) {
           _addAlert('ee_winrate', 'error', 'EE',
-            'Win rate critically low: ' + Math.round(wr * 100) + '% on last ' + closed.length + ' trades');
-        } else if (wr < 0.33) {
+            'Win rate critically low: ' + Math.round(wr * 100) + '% on last ' + closed.length +
+            ' trades (breakeven: 29% at 2.5R — system is losing money)');
+        } else if (wr < 0.35) {
           _addAlert('ee_winrate', 'warn', 'EE',
-            'Win rate below target: ' + Math.round(wr * 100) + '% on last ' + closed.length + ' trades');
+            'Win rate below target: ' + Math.round(wr * 100) + '% on last ' + closed.length +
+            ' trades (target: 35%+ for healthy margin above breakeven)');
         } else {
           _resolve('ee_winrate');
         }
