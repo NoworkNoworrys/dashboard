@@ -633,7 +633,7 @@
     var IC = window.__IC;
     if (IC && IC.regionStates) {
       Object.keys(IC.regionStates).forEach(function (r) {
-        if (IC.regionStates[r].prob > 15) regions[r] = true;   // lowered from 30 — catches new events faster
+        if (IC.regionStates[r].prob > 20) regions[r] = true;   // raised from 15→20: filters noise regions while still catching early-stage events
       });
     }
     return Object.keys(regions);

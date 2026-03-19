@@ -184,14 +184,16 @@
            (e.g. news cycle moved on) is a weak signal on its own — the market often
            continues the geopolitical trend for hours after headlines fade.
            Require Bayesian posterior confirmation before force-closing:
-           - If posterior still elevated (>45%): just tighten stop, don't force-close.
+           - If posterior still elevated (>40%): just tighten stop, don't force-close.
+             Threshold tightened 0.45→0.40: a posterior of 41-44% is barely above base-rate
+             and offers little edge — treating it as "weak" is more correct.
            - If BOTH signals are weak: force-close only if also in a loss.             */
         var _bayesianWeak = false;
         try {
           if (window.GII) {
             var _icPost = GII.posterior(region);
             if (_icPost && typeof _icPost.posterior === 'number') {
-              _bayesianWeak = _icPost.posterior < 0.45;
+              _bayesianWeak = _icPost.posterior < 0.40;
             } else {
               _bayesianWeak = true;  // no posterior data → be conservative
             }
@@ -468,7 +470,7 @@
 
     /* 1:1 → move stop to breakeven */
     if (rr >= 1.0 && level === 'none') {
-      var beBuf  = stopDist * 0.02;  // 2% of stop distance as buffer
+      var beBuf  = stopDist * 0.05;  // 5% of stop distance as buffer (raised 2%→5% for breathing room)
       var newBE  = dir === 'LONG'
         ? +(entry + beBuf).toFixed(4)
         : +(entry - beBuf).toFixed(4);

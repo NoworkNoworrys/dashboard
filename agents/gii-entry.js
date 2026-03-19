@@ -25,7 +25,7 @@
 
   /* Minimum confluence score to approve entry */
   var MIN_SCORE_GEO    = 4.5;   // IC/GII geopolitical trades
-  var MIN_SCORE_SCALPER = 2.0;  // Scalper trades (already pre-filtered by RSI/ATR)
+  var MIN_SCORE_SCALPER = 3.0;  // Scalper trades — raised 2.0→3.0 to filter weak single-corroboration combos
 
   /* Minimum number of distinct agent categories that must agree */
   var MIN_CATEGORIES = 2;
@@ -638,10 +638,12 @@
       });
 
       /* Boost confidence by confluence (up to +5 points), capped at 88.
+         Multiplier reduced 0.6→0.4 so high-scoring signals receive proportionally
+         more lift than borderline passes — preserves quality differentiation.
          Audit finding: with +8 boost and 95 cap, nearly all approved trades hit 95%
          making confidence indistinguishable between winners and losers.
          Smaller boost + lower cap preserves meaningful differentiation. */
-      var confBoost = Math.min(5, Math.floor(result.score * 0.6));
+      var confBoost = Math.min(5, Math.floor(result.score * 0.4));
       enriched.conf = Math.min(88, (sig.conf || 50) + confBoost);
 
       toEmit.push(enriched);

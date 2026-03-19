@@ -23,8 +23,10 @@
   var GK_CONFIG = {
     maxSignalsPerRegionPerBatch: 4,   // thundering-herd cap: max signals per region per cycle
     maxSignalAgeMins:            5,   // hard-reject stale signals older than this
-    extremeGTIThreshold:        80,   // GTI level that tightens the confidence floor
-    extremeGTIMinConf:          78,   // min conf% required when GTI is extreme
+    elevatedGTIThreshold:       70,   // intermediate GTI tier: elevated tension floor
+    elevatedGTIMinConf:         72,   // min conf% required when GTI is elevated (70-79)
+    extremeGTIThreshold:        80,   // GTI level that tightens the confidence floor further
+    extremeGTIMinConf:          78,   // min conf% required when GTI is extreme (≥80)
     rapidReentryMs:        300000,   // 5 min: block re-entry after same-asset close
     regimeWarnGTI:              65,   // elevated GTI: apply soft confidence penalty
     regimeWarnPenalty:           5,   // conf% deducted when regime is elevated
@@ -138,9 +140,10 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════════════════
-     CHECK 5 — Extreme GTI gate
-     When global tension is extreme (≥80), only high-confidence signals pass.
-     Extreme conditions make signal noise higher, so the bar rises.
+     CHECK 5 — GTI gate (two-tier: elevated 70-79, extreme ≥80)
+     Smooths the previous hard cliff at 80 into a graduated scale:
+       GTI 70-79 → conf must be ≥ 72% (elevated floor)
+       GTI  ≥80  → conf must be ≥ 78% (extreme floor)
      ══════════════════════════════════════════════════════════════════════════════ */
   function _checkGTIGate(sig) {
     if (!window.GII || typeof GII.gti !== 'function') return null;
@@ -149,6 +152,9 @@
     if (!isFinite(gti)) return null;
     if (gti >= GK_CONFIG.extremeGTIThreshold && sig.conf < GK_CONFIG.extremeGTIMinConf) {
       return 'GTI ' + gti.toFixed(0) + '/100 (EXTREME) — conf ' + sig.conf + '% below ' + GK_CONFIG.extremeGTIMinConf + '% floor';
+    }
+    if (gti >= GK_CONFIG.elevatedGTIThreshold && sig.conf < GK_CONFIG.elevatedGTIMinConf) {
+      return 'GTI ' + gti.toFixed(0) + '/100 (ELEVATED) — conf ' + sig.conf + '% below ' + GK_CONFIG.elevatedGTIMinConf + '% floor';
     }
     return null;
   }
