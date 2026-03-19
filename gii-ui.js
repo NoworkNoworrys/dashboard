@@ -218,8 +218,11 @@
     { name: 'entry ✦',          global: 'GII_AGENT_ENTRY'          },
     { name: 'exit ✦',           global: 'GII_AGENT_EXIT'           },
     { name: 'manager ✦',        global: 'GII_AGENT_MANAGER'        },
+    { name: 'portfolio ⬡',      global: 'GII_AGENT_PORTFOLIO'      },
     { name: 'routing ⬡',        global: 'GII_ROUTING'              },
-    { name: 'scraper-mgr ⬡',   global: 'GII_SCRAPER_MANAGER'      }
+    { name: 'scraper-mgr ⬡',   global: 'GII_SCRAPER_MANAGER'      },
+    { name: 'uw-intel ⬡',       global: 'UWIntel'                  },
+    { name: 'alpaca ⬡',         global: 'AlpacaBroker'             }
   ];
 
   // ── dirty flag — set by GII core after each cycle ─────────────────────────
@@ -503,6 +506,18 @@
           noteText = mgrAlerts.length === 0 ? 'No active alerts' : mgrAlerts.length + ' active alert' + (mgrAlerts.length !== 1 ? 's' : '');
         } catch (e) {}
       }
+      // Special case: portfolio — show watchlist depth and rotation count
+      if (def.global === 'GII_AGENT_PORTFOLIO' && st.stats) {
+        try {
+          var pfWl = GII_AGENT_PORTFOLIO.watchlist();
+          var pfRt = GII_AGENT_PORTFOLIO.rotations();
+          noteText = pfWl.length + ' candidates · ' + pfRt.length + ' rotations · cycles: ' + (st.stats.pollCount || 0);
+        } catch (e) {}
+      }
+      // Special case: uw-intel — note comes from status() (key configured + IV/tide)
+      if (def.global === 'UWIntel') { noteText = st.note || noteText; }
+      // Special case: alpaca — note comes from status() (connected/paper + equity)
+      if (def.global === 'AlpacaBroker') { noteText = st.note || noteText; }
 
       html += '<tr>' +
         '<td style="color:var(--gii)">' + def.name + '</td>' +

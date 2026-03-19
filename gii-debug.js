@@ -16,7 +16,7 @@
   var MAX_LOG_ROWS = 80;
   var PANEL_ID     = 'giiDebugWrap';
 
-  // All 29 known agents (signal agents + opposition agents + coordination layer + infrastructure)
+  // All 32 known agents (signal agents + opposition agents + coordination layer + infrastructure)
   // ✦ = coordination  ⚑ = opposition  ⬡ = infrastructure (no Bayesian contribution)
   var KNOWN_AGENTS = [
     { key: 'GII_AGENT_ENERGY',           label: 'energy'          },
@@ -46,8 +46,11 @@
     { key: 'GII_AGENT_ENTRY',            label: 'entry ✦'         },
     { key: 'GII_AGENT_EXIT',             label: 'exit ✦'          },
     { key: 'GII_AGENT_MANAGER',          label: 'manager ✦'       },
+    { key: 'GII_AGENT_PORTFOLIO',        label: 'portfolio ⬡'     },
     { key: 'GII_ROUTING',                label: 'routing ⬡'       },
-    { key: 'GII_SCRAPER_MANAGER',        label: 'scraper-mgr ⬡'   }
+    { key: 'GII_SCRAPER_MANAGER',        label: 'scraper-mgr ⬡'   },
+    { key: 'UWIntel',                    label: 'uw-intel ⬡'      },
+    { key: 'AlpacaBroker',               label: 'alpaca ⬡'        }
   ];
 
   // ── activity log ──────────────────────────────────────────────────────────

@@ -469,6 +469,27 @@
     getIVRanks: function () { return _state.ivRanks; },
     getTide:    function () { return _state.tide; },
     setThresh:  function (n) { window._uwSetThreshold(n); },
+
+    /* Standard agent interface — used by gii-ui.js + gii-debug.js */
+    status: function () {
+      var lp = Math.max(
+        _state.localPoll.flow     || 0,
+        _state.localPoll.iv       || 0,
+        _state.localPoll.tide     || 0,
+        _state.localPoll.darkpool || 0,
+        _state.localPoll.congress || 0
+      );
+      var ivCount = Object.keys(_state.ivRanks).length;
+      return {
+        lastPoll: lp || 0,
+        ready:    _state.ready,
+        note: _state.keyConfigured
+          ? 'IV: ' + ivCount + ' assets · tide: ' + (_state.tide ? _state.tide.direction : 'n/a') +
+            ' · flow: ' + _state.flowAlerts.length
+          : 'API key not configured'
+      };
+    },
+    signals: function () { return _state.flowAlerts.slice(0, 10); },
   };
 
   if (document.readyState === 'loading') {

@@ -209,9 +209,10 @@
       _cfg.paper     = paper !== false;
       try {
         var acct       = await _api('/v2/account');
-        _cfg.connected = true;
-        _cfg.equity    = parseFloat(acct.equity);
-        _cfg.buyingPow = parseFloat(acct.buying_power);
+        _cfg.connected   = true;
+        _cfg.equity      = parseFloat(acct.equity);
+        _cfg.buyingPow   = parseFloat(acct.buying_power);
+        _cfg.connectedAt = Date.now();
         _saveCfg();
         renderCard();
         return { ok: true, account: acct };
@@ -321,17 +322,24 @@
       }
     },
 
-    /* Status summary for UI */
+    /* Status summary for UI + standard agent interface (lastPoll, signals) */
     status: function () {
       return {
+        lastPoll:   _cfg.connected ? (_cfg.connectedAt || 0) : 0,
         connected:  _cfg.connected,
         paper:      _cfg.paper,
         equity:     _cfg.equity,
         buyingPow:  _cfg.buyingPow,
         apiKeyHint: _cfg.apiKey ? _cfg.apiKey.substring(0, 6) + '…' : '',
-        assetCount: Object.keys(ALPACA_ASSETS).length
+        assetCount: Object.keys(ALPACA_ASSETS).length,
+        note: _cfg.connected
+          ? (_cfg.paper ? 'Paper' : 'Live') + ' · equity $' +
+            (_cfg.equity ? _cfg.equity.toFixed(0) : '—') + ' · ' +
+            Object.keys(ALPACA_ASSETS).length + ' assets'
+          : 'Not connected'
       };
-    }
+    },
+    signals: function () { return []; }   /* Alpaca is execution-only, no trading signals */
   };
 
   _loadCfg();
