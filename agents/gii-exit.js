@@ -56,11 +56,14 @@
   /* Trailing stop: tighten to this fraction of current profit */
   var TRAIL_LOCK_FRACTION = 0.75;   // lock in 75% of paper profit when tightening
 
-  /* Defensive assets exempt from VIX/GTI emergency closes */
-  var DEFENSIVE = ['GLD', 'XAU', 'SLV', 'JPY', 'CHF', 'VIX', 'TLT', 'GAS'];
-
-  /* Risk assets that get force-closed in emergencies */
-  var RISK_ASSETS = ['BTC', 'SPY', 'QQQ', 'TSM', 'NVDA', 'TSLA', 'SMH', 'FXI'];
+  /* Defensive / risk asset lists — canonical source is GII.defensiveAssets() /
+     GII.riskAssets(). Static fallbacks used only if GII loads after this IIFE. */
+  var DEFENSIVE   = (window.GII && typeof GII.defensiveAssets === 'function')
+                    ? GII.defensiveAssets()
+                    : ['GLD', 'XAU', 'SLV', 'JPY', 'CHF', 'VIX', 'TLT', 'GAS'];
+  var RISK_ASSETS = (window.GII && typeof GII.riskAssets === 'function')
+                    ? GII.riskAssets()
+                    : ['BTC', 'SPY', 'QQQ', 'TSM', 'NVDA', 'TSLA', 'SMH', 'FXI'];
 
   /* ── STATE ──────────────────────────────────────────────────────────────── */
   var _lastPoll    = 0;

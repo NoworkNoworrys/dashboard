@@ -1,4 +1,4 @@
-/* GII Core — gii-core.js v19
+/* GII Core — gii-core.js v20
  * Multi-agent orchestrator: Bayesian engine, GTI, convergence, portfolio manager
  * Depends on: all GII_AGENT_* globals, window.__IC, window.PM, window.EE
  * Exposes: window.GII
@@ -61,6 +61,12 @@
   var _lastSignals     = [];
   var _giiTradeMap     = {};   // { "ASSET_bias": [agentName, ...] } — attribution for feedback
   var _prevGTI         = null;  // Module 4: market lag detection
+
+  // ── Canonical asset classification (single source of truth) ───────────────
+  // gii-entry.js and gii-exit.js reference these via GII.defensiveAssets() /
+  // GII.riskAssets() so any change here propagates automatically.
+  var _DEFENSIVE  = ['GLD', 'XAU', 'SLV', 'JPY', 'CHF', 'VIX', 'TLT', 'GAS'];
+  var _RISK_ASSETS = ['BTC', 'SPY', 'QQQ', 'TSM', 'NVDA', 'TSLA', 'SMH', 'FXI'];
   var _lagBoost        = 1.0;   // Module 4: applied in portfolioDecision
   var _marketLagActive = false; // Module 4: exposed in status()
 
@@ -282,11 +288,13 @@
 
     var prev = _posteriors[region] ? _posteriors[region].posterior : null;
     _posteriors[region] = {
-      region: region,
-      prior: prior,
-      posterior: posterior,
-      confidence_interval: ci,
-      contributing_signals: contributing
+      region:               region,
+      prior:                prior,
+      posterior:            posterior,
+      confidence_interval:  ci,
+      contributing_signals: contributing,
+      contributing:         contributing,   // alias used by pruner
+      lastUpdated:          new Date().toISOString()
     };
 
     // Audit trail: record significant changes (>0.03 delta or first entry)
@@ -633,6 +641,36 @@
 
   // ── main cycle ─────────────────────────────────────────────────────────────
 
+  /* Prune posteriors for regions that have received no signals for an extended
+     period AND whose posterior has drifted back near their base-rate prior.
+     This prevents _posteriors from accumulating hundreds of one-off entries
+     (e.g. event regions that fired once and were never mentioned again).
+     Threshold: posterior within 5% of base-rate AND last update > 14 days ago. */
+  var _POSTERIOR_STALE_MS = 14 * 24 * 60 * 60 * 1000;  // 14 days
+  function _pruneInactivePosteriors() {
+    var now = Date.now();
+    Object.keys(_posteriors).forEach(function (region) {
+      var p = _posteriors[region];
+      if (!p) return;
+      // Skip regions that are still contributing active signals
+      if (p.contributing && p.contributing.length > 0) return;
+      // Calculate staleness
+      var lastTs = p.lastUpdated ? new Date(p.lastUpdated).getTime() : 0;
+      var stale  = (now - lastTs) > _POSTERIOR_STALE_MS;
+      if (!stale) return;
+      // Only prune if posterior has returned near base-rate (±5%)
+      var base = BASE_RATES[region] || 0.20;
+      var nearBase = Math.abs(p.posterior - base) <= 0.05;
+      if (nearBase) {
+        delete _posteriors[region];
+        delete _posteriorHistory[region];
+        delete _convergence[region];
+        console.log('[GII] Pruned inactive posterior for region: ' + region +
+                    ' (posterior ' + (p.posterior * 100).toFixed(0) + '% ≈ base-rate, stale > 14d)');
+      }
+    });
+  }
+
   function _cycle() {
     _lastCycleTs = Date.now();
 
@@ -670,6 +708,9 @@
 
     // 6. Regime shift
     _checkRegimeShift();
+
+    // 6b. Prune orphaned Bayesian posteriors for long-inactive regions
+    _pruneInactivePosteriors();
 
     // 7. GTI
     _computeGTI();
@@ -859,6 +900,8 @@
         convergence:      Object.assign({}, _convergence)
       };
     },
+    defensiveAssets: function () { return _DEFENSIVE.slice(); },
+    riskAssets:      function () { return _RISK_ASSETS.slice(); },
     pollNow: function () { _cycle(); }
   };
 

@@ -535,9 +535,10 @@
     'NOK':    'NOK'
   };
 
-  var _priceCache   = {};   // token → last known price (any source)
-  var _priceCacheTs = {};   // token → ms timestamp of last successful fetch
-  var _CACHE_TTL    = 15000; // 15 s — shorter than 30-s monitor cycle so prices are fresh
+  var _priceCache       = {};   // token → last known price (any source)
+  var _priceCacheTs     = {};   // token → ms timestamp of last successful fetch
+  var _CACHE_TTL        = 15000; // 15 s — shorter than 30-s monitor cycle so prices are fresh
+  var _noPriceThrottle  = {};   // asset → ts of last "Price unavailable" siglog entry (1h throttle)
 
   /* ══════════════════════════════════════════════════════════════════════════════
      PERSISTENCE
@@ -824,6 +825,15 @@
 
   /* Record one signal event — action: 'TRADED' | 'SKIPPED' | 'WATCH' */
   function _logSignal(sig, action, skipReason) {
+    // Throttle "Price unavailable" skips to one entry per asset per hour.
+    // Assets like SOXX/SMH/XLE that never have a price feed would otherwise
+    // consume all 200 siglog slots with identical SKIPPED entries each cycle.
+    if (skipReason && skipReason.indexOf('Price unavailable') !== -1) {
+      var _throttleKey = sig.asset || '__unknown__';
+      var _lastLogged  = _noPriceThrottle[_throttleKey] || 0;
+      if (Date.now() - _lastLogged < 3600000) return;  // skip — already logged within 1h
+      _noPriceThrottle[_throttleKey] = Date.now();
+    }
     _signalLog.unshift({
       ts:          new Date().toISOString(),
       asset:       sig.asset  || '—',
@@ -1681,6 +1691,11 @@
 
     // Update virtual balance (pnl_usd is net of close commission; open commission already deducted at open)
     _cfg.virtual_balance += trade.pnl_usd;
+    if (_cfg.virtual_balance < 0) {
+      log('RISK', 'Virtual balance negative (' + _cfg.virtual_balance.toFixed(2) +
+          ') after closing ' + trade.asset + ' — resetting to $1 to prevent Kelly sizing errors', 'amber');
+      _cfg.virtual_balance = 1;
+    }
     saveCfg();
     _recordPnlSnapshot('close:' + reason, trade.pnl_usd);
 

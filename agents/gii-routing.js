@@ -567,6 +567,26 @@
     console.log('[GII-ROUTING v3] Loaded — ' + Object.keys(INSTRUMENT_MAP).length +
                 ' instruments | HL-FIRST mode | WARM tier (30s-2min) routes at 1× | ' +
                 'lev: ≥65%→2×, ≥75%→3×, ≥85%→5× | GII_ROUTING.preview("GLD",80) to test');
+
+    // Boot-time sync check: warn about INSTRUMENT_MAP assets not covered by HL feed
+    // Runs after load to give HLFeed time to register its coverage list.
+    window.addEventListener('load', function () {
+      setTimeout(function () {
+        if (!window.HLFeed || typeof HLFeed.coverage !== 'function') return;
+        var hlCovered  = HLFeed.coverage();                  // EE canonical names HL covers
+        var mapAssets  = Object.keys(INSTRUMENT_MAP);
+        var gaps = mapAssets.filter(function (a) {
+          var hlAsset = INSTRUMENT_MAP[a].hlAsset;
+          return hlCovered.indexOf(hlAsset) === -1 && hlCovered.indexOf(a) === -1;
+        });
+        if (gaps.length) {
+          console.warn('[GII-ROUTING] HL coverage gaps (' + gaps.length + ' assets in INSTRUMENT_MAP ' +
+                       'but not in HLFeed): ' + gaps.join(', '));
+        } else {
+          console.log('[GII-ROUTING] HL coverage check: all INSTRUMENT_MAP assets present in HLFeed ✓');
+        }
+      }, 5000);  // 5s after load — HLFeed WS needs a moment to populate coverage
+    });
   }
 
 }());

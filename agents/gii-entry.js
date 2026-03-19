@@ -30,11 +30,14 @@
   /* Minimum number of distinct agent categories that must agree */
   var MIN_CATEGORIES = 2;
 
-  /* Defensive assets — allowed through even in RISK_OFF/CRISIS */
-  var DEFENSIVE = ['GLD', 'XAU', 'SLV', 'JPY', 'CHF', 'VIX', 'TLT', 'GAS'];
-
-  /* Risk assets — vetoed for LONG in extreme regimes */
-  var RISK_ASSETS = ['BTC', 'SPY', 'QQQ', 'TSM', 'NVDA', 'TSLA', 'SMH', 'FXI'];
+  /* Defensive / risk asset lists — canonical source is GII.defensiveAssets() /
+     GII.riskAssets(). Static fallbacks used only if GII loads after this IIFE. */
+  var DEFENSIVE   = (window.GII && typeof GII.defensiveAssets === 'function')
+                    ? GII.defensiveAssets()
+                    : ['GLD', 'XAU', 'SLV', 'JPY', 'CHF', 'VIX', 'TLT', 'GAS'];
+  var RISK_ASSETS = (window.GII && typeof GII.riskAssets === 'function')
+                    ? GII.riskAssets()
+                    : ['BTC', 'SPY', 'QQQ', 'TSM', 'NVDA', 'TSLA', 'SMH', 'FXI'];
 
   /* ── PER-ASSET VOLATILITY STOPS ─────────────────────────────────────────
    * Flat 3% stops get hit by normal noise on high-vol assets (BTC moves 3%
