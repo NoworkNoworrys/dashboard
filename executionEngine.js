@@ -53,8 +53,8 @@
     risk_per_trade_pct:    2,            // % of balance risked per trade — v61: reduced from 3% to limit concurrent exposure
     stop_loss_pct:         1.5,          // % distance from entry — tighter than original 3%, better capital preservation
     take_profit_ratio:     2.5,          // R:R multiplier — improved from 2:1, more profit per win
-    max_open_trades:       8,            // max concurrent open trades — aggressive
-    max_per_region:        3,            // max open trades per geopolitical region
+    max_open_trades:       5,            // audit: lowered 8→5 — only hold highest-conviction ideas, reduces correlation risk
+    max_per_region:        2,            // audit: lowered 3→2 — tighter regional concentration cap
     max_per_sector:        2,            // max open trades per asset sector
     max_exposure_pct:      30,           // max % of balance in open positions
     cooldown_ms:           120000,       // 2 min cooldown between same-asset signals
@@ -62,11 +62,12 @@
     auto_start:            true,         // if false, auto-execution stays OFF on page load
     max_siglog:            200,          // max entries kept in signal log
     // ── Risk management additions ──────────────────────────────────────────────
-    trailing_stop_enabled: true,         // move stop up as price moves in favour
-    trailing_stop_pct:     1.0,          // trail distance as % of entry
-    break_even_enabled:    true,         // move stop to entry once 50% to TP
-    partial_tp_enabled:    true,         // take 50% profit at TP1 (midpoint to TP)
-    daily_loss_limit_pct:  50,           // pause if session P&L drops below -50% (drawdown tolerance)
+    trailing_stop_enabled: false,        // audit: DISABLED — gii-exit _progressiveTrailCheck owns stop management
+                                         // (milestone-based: 1R→BE, 1.5R→+0.5R). Crude 1% trail conflicted with it.
+    trailing_stop_pct:     1.0,          // kept for reference (not active while trailing_stop_enabled=false)
+    break_even_enabled:    true,         // move stop to entry once 50% to TP (still active as fallback)
+    partial_tp_enabled:    true,         // take partial profit at TP1 (midpoint to TP)
+    daily_loss_limit_pct:  10,           // audit: lowered 50%→10% — 50% was not a real circuit breaker
     event_gate_enabled:    true,         // block new trades near major calendar events
     event_gate_hours:      0.5,          // hours before event to block (0.5 = 30min)
     max_risk_usd:          50            // v61: hard cap reduced from $75 → $50 — kicks in earlier at ~$2.5k balance
@@ -554,10 +555,20 @@
         console.info('[EE] State version migrating from', _cfg._state_version || 'none', '→', STATE_VERSION);
       }
       _cfg._state_version = STATE_VERSION;
-      // v72+ migration: raise legacy 5% daily loss limit to new default of 50%
-      if (_cfg.daily_loss_limit_pct < 10) {
+      // audit-v2 migration: daily loss limit 50%→10% (50% was not a real circuit breaker)
+      if (_cfg.daily_loss_limit_pct > 10 || _cfg.daily_loss_limit_pct < 1) {
         _cfg.daily_loss_limit_pct = DEFAULTS.daily_loss_limit_pct;
       }
+      // audit-v2 migration: max_open_trades 8→5 (only hold highest-conviction ideas)
+      if (_cfg.max_open_trades > 5) {
+        _cfg.max_open_trades = DEFAULTS.max_open_trades;
+      }
+      // audit-v2 migration: max_per_region 3→2 (tighter regional concentration cap)
+      if (_cfg.max_per_region > 2) {
+        _cfg.max_per_region = DEFAULTS.max_per_region;
+      }
+      // audit-v2 migration: disable crude trailing stop — gii-exit progressive trail owns this now
+      _cfg.trailing_stop_enabled = false;
       // audit migration: raise min_confidence from legacy 65 to 70
       if (_cfg.min_confidence < 70) {
         _cfg.min_confidence = DEFAULTS.min_confidence;
@@ -1167,6 +1178,33 @@
       }
     }
 
+    // Time-of-day filter: avoid first and last 30 min of US equity session.
+    // Open (09:30–10:00 ET) and close (15:30–16:00 ET) have wide spreads,
+    // erratic price action, and high false-signal rates for news-based entries.
+    // Scalper signals are exempt — they are specifically designed for short-term moves.
+    var _isScalperForTod = sig.reason && (sig.reason.indexOf('SCALPER') === 0 || sig.reason.indexOf('GII:') === 0);
+    if (!_isScalperForTod) {
+      var _now = new Date();
+      // Convert to US Eastern Time (UTC-5 standard, UTC-4 daylight saving).
+      // Simple approximation: ET = UTC - 5h (adjust for DST where needed).
+      var _utcH = _now.getUTCHours(), _utcM = _now.getUTCMinutes();
+      var _etMins = (_utcH * 60 + _utcM + 1440 - 300) % 1440;  // minutes since midnight ET (EST offset)
+      var _openStart = 9 * 60 + 30, _openEnd = 10 * 60;         // 09:30–10:00
+      var _closeStart = 15 * 60 + 30, _closeEnd = 16 * 60;      // 15:30–16:00
+      if ((_etMins >= _openStart && _etMins < _openEnd) ||
+          (_etMins >= _closeStart && _etMins < _closeEnd)) {
+        return { ok: false, reason: 'Time-of-day gate: US session open/close window (avoid first/last 30min)' };
+      }
+    }
+
+    // Signal age check: if the signal carries a timestamp and it is older than
+    // 15 minutes, reject. The market has already moved on — we're chasing.
+    // Scalper signals are exempt (they expire via their own TTL mechanism).
+    var _isScalperForAge = sig.reason && (sig.reason.indexOf('SCALPER') === 0 || sig.reason.indexOf('GII:') === 0);
+    if (!_isScalperForAge && sig.ts && (Date.now() - sig.ts) > 15 * 60 * 1000) {
+      return { ok: false, reason: 'Signal stale — ' + Math.round((Date.now() - sig.ts) / 60000) + 'min old (>15min threshold)' };
+    }
+
     return { ok: true, reason: 'All risk checks passed' };
   }
 
@@ -1231,42 +1269,50 @@
       ? Math.max(0.1, Math.min(2.0, sig.impactMult))
       : 1.0;
 
-    // EV/Kelly adjustment: if self-learning has a win rate on this asset+direction,
-    // scale size by a simplified Kelly fraction (capped to 0.5× – 1.5× of base risk).
+    // EV/Kelly adjustment: scale size by simplified Kelly fraction using
+    // historical win rate. Uses a global prior from total trade history so that
+    // every trade (not just those with 5+ asset-specific records) gets Kelly sizing.
     // Kelly f* = (W * R - L) / R  where W=winRate, L=1-W, R=TP:SL ratio
-    // We use a half-Kelly approach (×0.5) for safety, and require ≥5 trades of history.
+    // We use a half-Kelly approach (×0.5) for safety.
+    //
+    // Audit fix: previous version used kellyMult=1.0 for assets without ≥5 trades,
+    // meaning untested assets always got full sizing. At a 13% system win rate,
+    // Kelly says negative EV — we should be sizing DOWN on all untested trades.
+    // Now: calculate global win rate from all closed trades as the default prior.
     var kellyMult = 1.0;
-    if (window.GII && typeof GII.agentReputations === 'function') {
-      var reps = GII.agentReputations();
-      var assetKey = normaliseAsset(sig.asset);
-      var biasKey  = dir === 'LONG' ? 'long' : 'short';
-      // Find any feedback entry matching this asset+direction
-      var repEntry = null;
-      Object.keys(reps).forEach(function (k) {
-        if (k.indexOf(assetKey) !== -1 && k.indexOf(biasKey) !== -1 && reps[k].total >= 5) {
-          repEntry = reps[k];
-        }
-      });
-      if (repEntry && typeof repEntry.winRate === 'number') {
-        var W = repEntry.winRate;
-        var R = _cfg.take_profit_ratio;   // reward:risk ratio
-        if (R <= 1.0) {
-          kellyMult = 1.0;  // v54: degenerate config — Kelly undefined at R≤1, use neutral sizing
-        } else {
-          var kelly = (W * R - (1 - W)) / R;
-          if (kelly > 0) {
-            // Half-Kelly normalised so that the break-even Kelly for this R = mult 1.0.
-            // Previously used a fixed 0.25 baseline (calibrated for W=0.5, R=2.5 only).
-            // Now derives the baseline from R dynamically: baseKelly = (0.5*R - 0.5) / R
-            // so mult=1.0 always represents a 50% win rate at whatever R is configured.
-            var baseKelly = Math.max(0.01, (0.5 * R - 0.5) / R);
-            kellyMult = Math.max(0.5, Math.min(1.5, kelly * 0.5 / baseKelly));
-          } else {
-            kellyMult = 0.5;   // negative EV → halve position size
-          }
-        }
+    (function () {
+      var R = _cfg.take_profit_ratio;
+      if (R <= 1.0) return;   // degenerate config — Kelly undefined
+
+      // Global prior: actual win rate across all closed trades (min 10 to trust it)
+      var _allClosed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
+      var _globalW = _allClosed.length >= 10
+        ? _allClosed.filter(function (t) { return (t.pnl_usd || 0) > 0; }).length / _allClosed.length
+        : 0.35;   // uninformed prior: 35% (above breakeven at 2.5R = 28.6%)
+
+      // Per-asset prior: if ≥5 trades exist for this asset+direction, use that instead
+      var W = _globalW;
+      if (window.GII && typeof GII.agentReputations === 'function') {
+        try {
+          var reps    = GII.agentReputations();
+          var assetKey = normaliseAsset(sig.asset);
+          var biasKey  = dir === 'LONG' ? 'long' : 'short';
+          Object.keys(reps).forEach(function (k) {
+            if (k.indexOf(assetKey) !== -1 && k.indexOf(biasKey) !== -1 && reps[k].total >= 5) {
+              W = reps[k].winRate;
+            }
+          });
+        } catch (e) {}
       }
-    }
+
+      var kelly = (W * R - (1 - W)) / R;
+      var baseKelly = Math.max(0.01, (0.5 * R - 0.5) / R);  // BE kelly at 50% win rate
+      if (kelly > 0) {
+        kellyMult = Math.max(0.5, Math.min(1.5, kelly * 0.5 / baseKelly));
+      } else {
+        kellyMult = 0.5;   // negative EV → halve position size
+      }
+    })();
 
     // v61: per-direction loss streak — long losses don't penalise short sizing
     var _dirKey    = (sig.dir || 'LONG').toLowerCase() === 'short' ? 'short' : 'long';
@@ -1525,12 +1571,11 @@
     trade.pnl_usd  = +(trade.pnl_usd - closeComm).toFixed(2);
     trade.costs_usd = +((trade.costs_usd || 0) + closeComm).toFixed(4);
 
-    // Deduct any accumulated funding cost so final pnl_usd is truly net.
-    // Funding was already charged to virtual_balance in real-time; here we just
-    // make sure the stored trade P&L matches what actually hit the balance.
-    if (trade.funding_cost_usd && trade.funding_cost_usd > 0) {
-      trade.pnl_usd = +(trade.pnl_usd - trade.funding_cost_usd).toFixed(2);
-    }
+    // NOTE: do NOT subtract funding_cost_usd here.
+    // Funding is already deducted from virtual_balance in real-time inside monitorTrades()
+    // (balance -= fundingCost each 8h period). Subtracting again here would double-charge
+    // the account. The pnl_usd stored on the trade reflects price movement minus commissions;
+    // the real-time balance already captures the funding impact separately.
 
     // Recalculate pnl_pct from the final net pnl_usd (after commission + funding).
     // pnl_pct was set earlier from the raw price move — it doesn't reflect real costs.

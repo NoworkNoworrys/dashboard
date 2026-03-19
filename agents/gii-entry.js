@@ -116,17 +116,18 @@
     try { sigs = agent.signals ? agent.signals() : []; } catch (e) { return null; }
     if (!sigs.length) return null;
 
-    /* Find signals agreeing with this asset or region */
+    /* Find signals agreeing with this asset or region.
+       NO direction-only fallback — that was causing false confluence:
+       unrelated agents (e.g. Energy agent bearish on WTI) were falsely
+       "confirming" BTC shorts just because both happened to be bearish.
+       If this agent has no signals for the specific asset or region,
+       it abstains from the score (returns null). */
     var relevant = sigs.filter(function (s) {
       var assetMatch  = s.asset === asset;
       var regionMatch = region && s.region === region;
       return assetMatch || regionMatch;
     });
-    if (!relevant.length) {
-      /* Fall back: any signal with same bias (direction) */
-      relevant = sigs.filter(function (s) { return s.bias === (dir === 'SHORT' ? 'short' : 'long'); });
-    }
-    if (!relevant.length) return null;
+    if (!relevant.length) return null;  // agent abstains — no relevant view
 
     var biasDir = dir === 'SHORT' ? 'short' : 'long';
     var matching = relevant.filter(function (s) { return s.bias === biasDir; });
@@ -257,13 +258,34 @@
     }
 
     /* ── CATEGORY: Polymarket edge ───────────────────────────── */
+    /* Audit fix: use per-asset/region signals from Polymarket rather than
+       the global avgEdge. avgEdge is an average across ALL markets — a large
+       edge on a US election market was falsely boosting oil and crypto entries.
+       Now we look for a Polymarket signal that matches this specific asset or region. */
     if (window.GII_AGENT_POLYMARKET) {
       try {
-        var pmSt = GII_AGENT_POLYMARKET.status();
-        if (pmSt.avgEdge > 0.10) {
-          score += 2.0 * Math.min(1, pmSt.avgEdge);
-          categories.probabilistic = true;
-          agentsFor.push('polymarket(' + Math.round(pmSt.avgEdge * 100) + '% edge)');
+        var pmSigs = GII_AGENT_POLYMARKET.signals ? GII_AGENT_POLYMARKET.signals() : [];
+        var pmRelevant = pmSigs.filter(function (s) {
+          return s.asset === asset || (region && s.region === region);
+        });
+        if (pmRelevant.length) {
+          var pmBest = pmRelevant.reduce(function (best, s) {
+            return (s.confidence || 0) > (best.confidence || 0) ? s : best;
+          }, pmRelevant[0]);
+          var pmEdge = pmBest.confidence || 0;
+          if (pmEdge > 0.10) {
+            score += 2.0 * Math.min(1, pmEdge);
+            categories.probabilistic = true;
+            agentsFor.push('polymarket(' + Math.round(pmEdge * 100) + '% edge)');
+          }
+        } else {
+          /* No asset/region match — fall back to global avgEdge but at reduced weight */
+          var pmSt = GII_AGENT_POLYMARKET.status();
+          if (pmSt.avgEdge > 0.15) {  // raised threshold since it's a weak signal
+            score += 0.8 * Math.min(1, pmSt.avgEdge);  // 0.8× instead of 2.0× weight
+            categories.probabilistic = true;
+            agentsFor.push('polymarket-global(' + Math.round(pmSt.avgEdge * 100) + '%)');
+          }
         }
       } catch (e) {}
     }
@@ -323,14 +345,16 @@
       } catch (e) {}
     }
 
-    /* Veto 4: asset already has open position */
-    try {
-      var trades = JSON.parse(localStorage.getItem('geodash_ee_trades_v1') || '[]');
-      var hasOpen = trades.some(function (t) {
-        return t.status === 'OPEN' && t.asset === asset;
-      });
-      if (hasOpen) return 'position-already-open';
-    } catch (e) {}
+    /* Veto 4: asset already has open position.
+       Use EE.getOpenTrades() — authoritative in-memory source.
+       Previous impl read localStorage directly which can diverge from in-memory
+       state after the SQLite backend loads and merges trades. */
+    if (window.EE && typeof EE.getOpenTrades === 'function') {
+      try {
+        var hasOpen = EE.getOpenTrades().some(function (t) { return t.asset === asset; });
+        if (hasOpen) return 'position-already-open';
+      } catch (e) {}
+    }
 
     /* Veto 5: GTI extreme (>85) blocks new risk-asset longs */
     if (window.GII) {
@@ -393,14 +417,21 @@
 
     if (!_queue.length) return;
 
-    /* Deduplicate queue by asset only — prevents both a LONG and SHORT for the
-       same asset firing in the same cycle (contradictory signals). Keeps the
-       highest-confidence signal regardless of direction. */
+    /* Deduplicate queue by asset: if both LONG and SHORT arrive for the same
+       asset, score both and keep the one with higher confluence.
+       Previous impl kept highest raw confidence regardless of direction —
+       a LONG with conf=72 would beat a SHORT with conf=70 and better agent backing.
+       Now we pre-score both and let the signals compete on confluence quality. */
     var byAsset = {};
     _queue.forEach(function (item) {
-      var key = item.sig.asset;   // v53: asset-only key (was asset+dir)
-      if (!byAsset[key] || (item.sig.conf || 0) > (byAsset[key].sig.conf || 0)) {
+      var key = item.sig.asset;
+      if (!byAsset[key]) {
         byAsset[key] = item;
+      } else {
+        /* Both directions queued — score both, keep better confluence */
+        var existingScore = _scoreSignal(byAsset[key]).score;
+        var newScore      = _scoreSignal(item).score;
+        if (newScore > existingScore) byAsset[key] = item;
       }
     });
     _queue = [];   // consumed

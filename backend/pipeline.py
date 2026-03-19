@@ -137,22 +137,34 @@ async def _ingest_market() -> Dict:
 def _regime_multiplier(market: Dict) -> float:
     """
     Return a signal multiplier based on VIX level AND UW market tide.
-    CRISIS regime amplifies signals; RISK_ON dampens them.
-    Negative tide adds a further 5% amplification (institutional put buying = fear).
+
+    AUDIT FIX (2026-03-19): previous logic amplified signals during crisis (VIX>30).
+    This was backwards — high VIX = wider spreads, more noise, faster mean-reversion.
+    Aggressive entries during crises lose money. Now we DAMPEN in crisis and
+    AMPLIFY in calm markets where trend signals are more reliable.
+
+    Calm (VIX < 15):  mult = 1.10  — clear trend, tighter spreads, take more signal
+    Normal (15–20):   mult = 1.00  — neutral
+    Elevated (20–30): mult = 0.90  — rising noise, be more selective
+    Crisis (VIX ≥ 30):mult = 0.75  — high noise/spread, fewer trades, larger stops needed
+
+    Tide: bullish flow (institutions buying calls) = confidence boost;
+          bearish flow (put buying) = additional caution.
     """
     vix = (market.get('VIX') or {}).get('price')
     mult = 1.0
     if vix is not None:
-        if vix >= 30:   mult = 1.20
-        elif vix >= 20: mult = 1.10
-        elif vix < 15:  mult = 0.90
+        if vix >= 30:   mult = 0.75   # crisis — dampen, don't chase spikes
+        elif vix >= 20: mult = 0.90   # elevated — more selective
+        elif vix < 15:  mult = 1.10   # calm — reliable trends, take more signal
 
-    # Tide adjustment: strong put flow = additional risk-off signal
+    # Tide adjustment: bullish institutional flow = confidence; bearish = caution
     if _uw_tide:
         tide_pct = _uw_tide.get('tide_pct', 0)
-        if tide_pct < -30:   mult = min(1.35, mult + 0.10)  # strongly bearish tide
-        elif tide_pct < -10: mult = min(1.25, mult + 0.05)  # bearish tide
-        elif tide_pct > 30:  mult = max(0.85, mult - 0.05)  # bullish tide = dampen fear
+        if tide_pct > 30:    mult = min(1.20, mult + 0.10)  # strong call flow = risk-on
+        elif tide_pct > 10:  mult = min(1.10, mult + 0.05)  # mild bullish tide
+        elif tide_pct < -30: mult = max(0.65, mult - 0.10)  # heavy put flow = cut signal
+        elif tide_pct < -10: mult = max(0.75, mult - 0.05)  # mild bearish tide
 
     return mult
 
