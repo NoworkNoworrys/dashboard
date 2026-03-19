@@ -866,7 +866,23 @@
 
   function normaliseAsset(asset) {
     // "WTI Crude Oil"→"WTI",  "BTC/USD"→"BTC",  "GDX (Gold Miners)"→"GDX"
-    return String(asset || '').toUpperCase().replace(/[^A-Z0-9]/g, ' ').trim().split(' ')[0];
+    // Known multi-word aliases: "NATURAL GAS" was incorrectly → "NATURAL" (not "GAS").
+    // Check full-string alias table before falling through to first-token logic.
+    var MULTI_WORD_ALIASES = {
+      'NATURAL GAS':  'GAS',   'NAT GAS':      'GAS',
+      'CRUDE OIL':    'WTI',   'US OIL':       'WTI',   'LIGHT CRUDE':  'WTI',
+      'BRENT CRUDE':  'BRENT', 'BRENT OIL':    'BRENT',
+      'GOLD':         'XAU',   'SPOT GOLD':    'XAU',
+      'SILVER':       'SLV',   'SPOT SILVER':  'SLV',
+      'S&P 500':      'SPY',   'S&P500':       'SPY',   'SP500':        'SPY',
+      'NASDAQ':       'QQQ',   'NASDAQ 100':   'QQQ',   'NASDAQ100':    'QQQ',
+      'DOW JONES':    'DIA',   'DOW':          'DIA',
+      'BITCOIN':      'BTC',   'ETHEREUM':     'ETH',
+      'JAPANESE YEN': 'JPY',   'SWISS FRANC':  'CHF'
+    };
+    var up = String(asset || '').toUpperCase().trim();
+    if (MULTI_WORD_ALIASES[up]) return MULTI_WORD_ALIASES[up];
+    return up.replace(/[^A-Z0-9]/g, ' ').trim().split(' ')[0];
   }
 
   function _cacheSet(token, price) {
@@ -1142,9 +1158,14 @@
     // Exposure = total risk dollars at stake (units × |entry−stop| per trade).
     // Using notional size_usd here would falsely block every trade because
     // position sizing math produces size_usd ≈ full balance per trade.
+    // Correlated positions (same CORR_GROUP) are weighted 1.5× because they
+    // tend to move together — opening BTC while ETH is live = ~1.5× real BTC risk.
+    var _newCorrGroup = _getCorrGroup(normaliseAsset(sig.asset));
     var exposure = open.reduce(function (s, t) {
       var slDist = Math.abs((t.entry_price || 0) - (t.stop_loss || 0));
-      return s + (slDist > 0 ? (t.units || 0) * slDist : 0);
+      var riskDollars = slDist > 0 ? (t.units || 0) * slDist : 0;
+      var corrMult = (_newCorrGroup && _newCorrGroup.indexOf(normaliseAsset(t.asset)) !== -1) ? 1.5 : 1.0;
+      return s + riskDollars * corrMult;
     }, 0);
     var maxExp   = _cfg.virtual_balance * _cfg.max_exposure_pct / 100;
     if (exposure >= maxExp)
@@ -4026,6 +4047,14 @@
       var open = openTrades();
       var freshSigs = _lastSignals.filter(function (s) {
         var asset = normaliseAsset(s.asset);
+        // Skip WATCH-direction signals — informational only, not tradeable.
+        if (s.dir === 'WATCH') return false;
+        // Skip signals already successfully traded in _signalLog (same asset+dir).
+        // After cooldown expires the re-scan would otherwise re-open a position for a
+        // signal that was already executed and then closed — a stale IC batch.
+        if (_signalLog.some(function (e) {
+          return normaliseAsset(e.asset) === asset && e.dir === s.dir && e.action === 'TRADED';
+        })) return false;
         // Skip if we already have an open trade for this asset.
         // Also check original_asset (pre-remap): GII_ROUTING maps GLD→XAU at signal
         // time. The open trade stores asset='XAU', but _lastSignals still has 'GLD'.

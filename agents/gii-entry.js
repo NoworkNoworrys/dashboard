@@ -303,6 +303,32 @@
       } catch (e) {}
     }
 
+    /* ── CATEGORY: Technical trend alignment ─────────────────── */
+    /* Geopolitical entries often trade against the established technical trend
+       (a crisis shock can break a trend). Rather than a hard veto, apply a
+       score penalty for clear counter-trend entries so only signals with strong
+       multi-agent backing (score >6.0 net) can trade against the trend.
+       Uses GII_AGENT_TECHNICALS signals with confidence threshold 0.50.          */
+    if (window.GII_AGENT_TECHNICALS) {
+      try {
+        var _techSigs = GII_AGENT_TECHNICALS.signals();
+        for (var _ti = 0; _ti < _techSigs.length; _ti++) {
+          if (_techSigs[_ti].asset === asset && (_techSigs[_ti].confidence || 0) >= 0.50) {
+            var _techDir = _techSigs[_ti].bias === 'long' ? 'LONG' : 'SHORT';
+            if (_techDir === dir) {
+              score += 1.0;
+              categories.technical = true;
+              agentsFor.push('technicals-aligned');
+            } else {
+              score -= 1.5;
+              agentsAgainst.push('technicals-counter');
+            }
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+
     var categoryCount = Object.keys(categories).length;
     return { score: score, categories: categoryCount, agentsFor: agentsFor, agentsAgainst: agentsAgainst };
   }
@@ -576,11 +602,27 @@
 
       /* Approved — enrich signal with thesis fingerprint + volatility stops */
       var volStop  = VOL_STOPS[sig.asset] || VOL_STOP_DEFAULT;
+      /* IV-adjusted stop: use UW IV rank as ATR proxy — high IV means wider daily
+         ranges, so we need a wider stop to avoid noise-stop-outs.
+         Adjustments: IV>80 → +50%, IV>60 → +20%, IV<20 → -15% (quiet market).
+         Falls back to VOL_STOPS table value when UW data not available.           */
+      var dynStopPct = volStop.stopPct;
+      try {
+        if (window.GII_AGENT_UW && typeof GII_AGENT_UW.getIVRanks === 'function') {
+          var _ivMap  = GII_AGENT_UW.getIVRanks();
+          var _ivRank = _ivMap[sig.asset];
+          if (typeof _ivRank === 'number') {
+            if      (_ivRank > 80) dynStopPct = Math.min(volStop.stopPct * 1.5, volStop.stopPct * 2.0);
+            else if (_ivRank > 60) dynStopPct = volStop.stopPct * 1.2;
+            else if (_ivRank < 20) dynStopPct = volStop.stopPct * 0.85;
+          }
+        }
+      } catch (e) {}
       var enriched = Object.assign({}, sig, {
         thesis:          _buildThesis(item, result),
         confluenceScore: result.score,
         source:          item.source,
-        stopPct:         sig.stopPct  || volStop.stopPct,   /* per-asset stop % — EE overrides flat 3% */
+        stopPct:         sig.stopPct  || dynStopPct,   /* IV-adjusted stop % — EE overrides flat % */
         tpRatio:         sig.tpRatio  || volStop.tpRatio    /* per-asset R:R  — EE overrides flat 2.0 */
       });
 

@@ -172,19 +172,44 @@
     if (window.__IC && __IC.regionStates && __IC.regionStates[region]) {
       var regionProb = __IC.regionStates[region].prob || 0;
       if (regionProb < IC_PROB_DROP_THRESHOLD) {
+        /* Audit fix: keyword frequency ≠ financial probability. Region prob collapsing
+           (e.g. news cycle moved on) is a weak signal on its own — the market often
+           continues the geopolitical trend for hours after headlines fade.
+           Require Bayesian posterior confirmation before force-closing:
+           - If posterior still elevated (>45%): just tighten stop, don't force-close.
+           - If BOTH signals are weak: force-close only if also in a loss.             */
+        var _bayesianWeak = false;
+        try {
+          if (window.GII) {
+            var _icPost = GII.posterior(region);
+            if (_icPost && typeof _icPost.posterior === 'number') {
+              _bayesianWeak = _icPost.posterior < 0.45;
+            } else {
+              _bayesianWeak = true;  // no posterior data → be conservative
+            }
+          } else {
+            _bayesianWeak = true;
+          }
+        } catch (e) { _bayesianWeak = true; }
+
         var _livePrice = _getPrice(trade.asset);
         var _inProfit = _livePrice && (
           (dir === 'LONG'  && _livePrice > trade.entry_price) ||
           (dir === 'SHORT' && _livePrice < trade.entry_price)
         );
-        if (_inProfit) {
-          /* Position is profitable — tighten to break-even and let it run */
+        if (!_bayesianWeak) {
+          /* Region prob low but Bayesian posterior still elevated — keyword count is
+             a lagging/noisy signal. Tighten stop only; thesis may still be valid. */
           return { action: 'TIGHTEN_STOP', reason: 'ic-region-collapsed-be', detail:
-            'Region ' + region + ' prob=' + regionProb + '% collapsed — moving to break-even (trade in profit)' };
+            'Region ' + region + ' prob=' + regionProb + '% but Bayesian posterior still elevated — tightening stop only' };
+        } else if (_inProfit) {
+          /* Both signals weak, trade in profit — move to break-even and let it run */
+          return { action: 'TIGHTEN_STOP', reason: 'ic-region-collapsed-be', detail:
+            'Region ' + region + ' prob=' + regionProb + '% (Bayesian confirmed weak) — moving to break-even (trade in profit)' };
         } else {
-          /* Already losing — force-close to limit further damage */
+          /* Both signals weak AND trade is losing — force-close to limit damage */
           return { action: 'FORCE_CLOSE', reason: 'ic-region-collapsed', detail:
-            'Region ' + region + ' prob=' + regionProb + '% < ' + IC_PROB_DROP_THRESHOLD + '% threshold (trade at loss)' };
+            'Region ' + region + ' prob=' + regionProb + '% < ' + IC_PROB_DROP_THRESHOLD + '% threshold (Bayesian confirmed weak, trade at loss)' };
         }
       }
       /* If we stored entry prob, check for significant drop */
