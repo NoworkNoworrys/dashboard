@@ -13070,7 +13070,11 @@ function _modalKeyHandler(e) {
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
 <script src="executionEngine.js?v=76"></script>
 
-<!-- GII Multi-Agent Intelligence System — agents first, then core, then UI -->
+<!-- GII Core — loaded before agents so window.GII (defensiveAssets, riskAssets, etc.) is
+     available when agent IIFEs execute. Agents all guard GII calls, so order is safe. -->
+<script src="gii-core.js?v=21"></script>
+
+<!-- GII Multi-Agent Intelligence System — agents, then UI -->
 <script src="agents/gii-energy.js?v=2"></script>
 <script src="agents/gii-conflict.js?v=3"></script>
 <script src="agents/gii-macro.js?v=4"></script>
@@ -13115,7 +13119,6 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-exit.js?v=6"></script>
 <script src="agents/gii-portfolio.js?v=1"></script>
 <script src="agents/gii-routing.js?v=8"></script>
-<script src="gii-core.js?v=21"></script>
 <script src="gii-meta.js?v=2"></script>
 <script src="gii-ui.js?v=12"></script>
 <script src="gii-debug.js?v=4"></script>
