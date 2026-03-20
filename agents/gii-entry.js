@@ -611,6 +611,16 @@
         } catch (e) {}
       }
 
+      /* Signal age decay: confidence decays within the 8-min TTL window.
+         A signal queued 7 min ago has stale context vs. one queued 10 sec ago.
+         Graduated decay preserves speed-of-signal advantage without hard TTL cliff.
+         < 1 min: 100%, 1–2 min: 95%, 2–4 min: 85%, 4–8 min: 70% */
+      var _sigAgeMin = (now - item.queuedAt) / 60000;
+      var _ageMult   = _sigAgeMin < 1 ? 1.00
+                     : _sigAgeMin < 2 ? 0.95
+                     : _sigAgeMin < 4 ? 0.85
+                     : 0.70;
+
       /* Approved — enrich signal with thesis fingerprint + volatility stops */
       var volStop  = VOL_STOPS[sig.asset] || VOL_STOP_DEFAULT;
       /* IV-adjusted stop: use UW IV rank as ATR proxy — high IV means wider daily
@@ -646,6 +656,15 @@
       var confBoost = Math.min(5, Math.floor(result.score * 0.4));
       enriched.conf = Math.min(88, (sig.conf || 50) + confBoost);
 
+      /* Apply signal age decay: older queued signals get a confidence haircut.
+         Floor: never reduce below 40% (preserves signal even at max age). */
+      if (_ageMult < 1.0) {
+        var _preDecay = enriched.conf;
+        enriched.conf = Math.max(40, Math.round(enriched.conf * _ageMult));
+        console.log('[GII-ENTRY] Age-decay ×' + _ageMult + ' on ' + sig.asset +
+          ' (' + _sigAgeMin.toFixed(1) + 'min old): conf ' + _preDecay + '→' + enriched.conf);
+      }
+
       toEmit.push(enriched);
       _stats.approved++;
       _approved.unshift({
@@ -659,6 +678,21 @@
     });
 
     if (toEmit.length && window.EE && typeof EE.onSignals === 'function') {
+      /* EV-based ranking: sort signals by expected value = (conf/100) × tpRatio
+         before handing off to EE. EE processes signals in-order so highest-EV
+         opportunities fill trade slots first when the portfolio is near capacity.
+         Example: BTC conf=85, tpR=2.5 → EV=2.13 beats SPY conf=88, tpR=2.0 → EV=1.76 */
+      if (toEmit.length > 1) {
+        toEmit.sort(function (a, b) {
+          var evA = (a.conf / 100) * (a.tpRatio || 2.5);
+          var evB = (b.conf / 100) * (b.tpRatio || 2.5);
+          return evB - evA;  // descending: highest EV first
+        });
+        console.log('[GII-ENTRY] EV-ranked ' + toEmit.length + ' signals: ' +
+          toEmit.map(function (s) {
+            return s.asset + '(' + ((s.conf / 100) * (s.tpRatio || 2.5)).toFixed(2) + ')';
+          }).join(', '));
+      }
       EE.onSignals(toEmit);
     }
   }

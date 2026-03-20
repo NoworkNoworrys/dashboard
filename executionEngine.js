@@ -346,22 +346,41 @@
     return TRADING_COSTS.def;
   }
 
+  /* VIX multiplier for slippage: above VIX 20 → wider fills scale linearly.
+     VIX 20 → 1.0×, VIX 30 → 1.5×, VIX 40 → 2.0×. Capped at 3.0× for outlier spikes.
+     Reads from GII_AGENT_MACRO.status().vix if available; falls back to 1.0. */
+  function _vixSlippageMult() {
+    try {
+      if (window.GII_AGENT_MACRO && typeof GII_AGENT_MACRO.status === 'function') {
+        var _vix = GII_AGENT_MACRO.status().vix;
+        if (typeof _vix === 'number' && _vix > 0) {
+          return Math.min(3.0, Math.max(1.0, _vix / 20));
+        }
+      }
+    } catch (e) {}
+    return 1.0;
+  }
+
   /* Adjust entry price for spread (half) + slippage (market order fill degradation).
-     LONG buys at ask (higher); SHORT sells at bid (lower). */
+     LONG buys at ask (higher); SHORT sells at bid (lower).
+     Slippage scaled by VIX: high-vol environments produce wider fills. */
   function _adjustedEntryPrice(asset, price, dir) {
-    var c   = _getCosts(asset);
-    var adj = c.spread / 2 + c.slippage;
+    var c      = _getCosts(asset);
+    var vixMul = _vixSlippageMult();
+    var adj    = c.spread / 2 + c.slippage * vixMul;
     return dir === 'LONG' ? price * (1 + adj) : price * (1 - adj);
   }
 
   /* Adjust exit price for spread (half) and, for market orders, slippage.
      TP = limit order (spread only — guaranteed fill at limit);
      SL / manual = market order (spread + extra slippage — can gap through).
-     LONG sells at bid (lower); SHORT buys back at ask (higher). */
+     LONG sells at bid (lower); SHORT buys back at ask (higher).
+     Slippage scaled by VIX on market orders (SL/manual exits). */
   function _adjustedExitPrice(asset, price, dir, reason) {
-    var c          = _getCosts(asset);
+    var c           = _getCosts(asset);
     var marketOrder = (reason !== 'TAKE_PROFIT');
-    var adj         = c.spread / 2 + (marketOrder ? c.slippage : 0);
+    var vixMul      = marketOrder ? _vixSlippageMult() : 1.0;
+    var adj         = c.spread / 2 + (marketOrder ? c.slippage * vixMul : 0);
     return dir === 'LONG' ? price * (1 - adj) : price * (1 + adj);
   }
 
@@ -435,6 +454,8 @@
   var _lossStreak           = { long: 0, short: 0 };  // v61: per-direction streak — long losses don't penalise short sizing
   var _winStreak            = { long: 0, short: 0 };  // symmetric to _lossStreak — 3 consecutive wins → +15% size
   var _lastPriceTs          = {};  // trade_id → ms of last successful price fetch (stale-price watchdog)
+  var _peakEquity           = null;  // highest virtual_balance since session start — drawdown-from-peak guard
+  var _ddFromPeak           = 0;     // current % drawdown from peak — read by buildTrade for size scaling
   var _wsConnected          = false; // Binance WebSocket status
   var _wsBtcWs              = null;  // WebSocket instance (BTC real-time)
   var _backendPrices = {};  // symbol → price, populated by _pollBackendPrices() every 25 s (H4)
@@ -1371,7 +1392,28 @@
       // Logged on open so the user can see why size is reduced
     }
 
-    var riskAmt  = _cfg.virtual_balance * _cfg.risk_per_trade_pct / 100 * impactMult * kellyMult * streakMult * winStreakMult;
+    // HIGH_CONVICTION timeframe alignment: when all timeframes agree, Kelly gets a 1.2× boost.
+    // convictionTier = 'HIGH_CONVICTION' is set by gii-technicals when multi-TF aligned.
+    // Cap: never push kellyMult above 1.5 even with the boost — prevents overconfidence.
+    if (sig.convictionTier === 'HIGH_CONVICTION' || sig.conviction === 'HIGH_CONVICTION') {
+      var _prevKelly = kellyMult;
+      kellyMult = Math.min(1.5, kellyMult * 1.2);
+      if (kellyMult > _prevKelly) {
+        log('RISK', sig.asset + ' HIGH_CONVICTION alignment → Kelly ×' + kellyMult.toFixed(2) +
+            ' (was ×' + _prevKelly.toFixed(2) + ')', 'green');
+      }
+    }
+
+    // Peak drawdown size scaler: limits new exposure when the account is in a drawdown.
+    // Applied after Kelly/streak so the dd-mult stacks with existing protections.
+    var _ddMult = _ddFromPeak >= 8 ? 0.25   // -8 to -10%: cut to 25%
+               : _ddFromPeak >= 5 ? 0.50    // -5 to -8%:  cut to 50%
+               : 1.0;
+
+    var riskAmt  = _cfg.virtual_balance * _cfg.risk_per_trade_pct / 100 * impactMult * kellyMult * streakMult * winStreakMult * _ddMult;
+    if (_ddMult < 1.0) {
+      log('RISK', sig.asset + ' peak-DD -' + _ddFromPeak.toFixed(1) + '% → size ×' + _ddMult + ' (' + (_ddMult * 100) + '%)', 'amber');
+    }
     // Hard cap: prevents compounding from creating unrealistically large positions
     // e.g. at $147k balance, 3% = $4,410 per trade — way more than intended
     // Dynamic cap: scales with balance above $10k (0.5% of balance, min = config floor).
@@ -1946,6 +1988,34 @@
         // drawdowns into confirmed ones. The stop-loss on each trade IS the
         // real risk-management tool.
         renderUI();
+      }
+    }
+
+    // Peak equity tracking + staged drawdown response.
+    // Update session peak each cycle; staged position-size reductions prevent
+    // blowing the account if multiple trades run in a losing streak.
+    //   -5% from peak → 50% position sizes (caution)
+    //   -8% from peak → 25% position sizes (defensive)
+    //  -10% from peak → auto-execution paused (same as daily loss limit)
+    if (_peakEquity === null) _peakEquity = _cfg.virtual_balance;
+    if (_cfg.virtual_balance > _peakEquity) _peakEquity = _cfg.virtual_balance;  // update high-water mark
+    if (_peakEquity > 0) {
+      var _newDd  = (_peakEquity - _cfg.virtual_balance) / _peakEquity * 100;
+      var _prevDd = _ddFromPeak;
+      _ddFromPeak = _newDd;
+      if (_newDd >= 10 && _prevDd < 10 && _cfg.enabled) {
+        _cfg.enabled = false; saveCfg();
+        log('RISK', '⛔ Peak-equity drawdown -' + _newDd.toFixed(1) + '% (peak $' +
+            _num(_peakEquity) + ') — auto-execution paused', 'red');
+        _notify('⚠ Peak Drawdown -10%', '-' + _newDd.toFixed(1) + '% from peak $' +
+            _num(_peakEquity) + ' — new trades paused.', 'ee-peak-dd');
+        renderUI();
+      } else if (_newDd >= 8 && _prevDd < 8) {
+        log('RISK', '⚠ Peak-equity drawdown -' + _newDd.toFixed(1) + '% — position sizes at 25% until recovery', 'red');
+      } else if (_newDd >= 5 && _prevDd < 5) {
+        log('RISK', '⚠ Peak-equity drawdown -' + _newDd.toFixed(1) + '% — position sizes at 50% until recovery', 'amber');
+      } else if (_prevDd >= 5 && _newDd < 5) {
+        log('RISK', '✓ Drawdown recovered to -' + _newDd.toFixed(1) + '% — full position sizing restored', 'green');
       }
     }
 
@@ -3753,6 +3823,8 @@
       savePnlHistory();
       _sessionStart = new Date().toISOString();
       _sessionStartBalance = DEFAULTS.virtual_balance;
+      _peakEquity  = DEFAULTS.virtual_balance;   // reset peak on account reset
+      _ddFromPeak  = 0;
       try { localStorage.setItem('geodash_session_start_v1', _sessionStart); } catch(e) {}
       try { localStorage.removeItem('geodash_session_balance_v1'); } catch(e) {}   // v63: clear persisted day-open balance on reset
       _recordPnlSnapshot('account-reset', 0);
@@ -4114,6 +4186,10 @@
       _sessionStartBalance = _cfg.virtual_balance;
       try { localStorage.setItem('geodash_session_balance_v1', JSON.stringify({ date: _todayKey, balance: _sessionStartBalance })); } catch(e) {}
     }
+    // Peak equity: initialise at current balance on load
+    // Will update to true high-water mark as trades close
+    _peakEquity = _cfg.virtual_balance;
+    _ddFromPeak = 0;
 
     /* Auto-start: honour the auto_start config flag (M6).
        Defaults to true (original behaviour) — set auto_start: false to keep
