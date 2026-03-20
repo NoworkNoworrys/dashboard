@@ -1367,10 +1367,10 @@
       var _allClosed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
       var _globalW = _allClosed.length >= 10
         ? _allClosed.filter(function (t) { return (t.pnl_usd || 0) > 0; }).length / _allClosed.length
-        : 0.30;   // conservative prior: 30% until 10 trades close (was 35%).
-                  // 30% is still above 2.5R breakeven (28.6%) but sizes trades
-                  // ~55% smaller than a 35% prior until the system is proven.
-                  // Kelly f ≈ 4% at 30% vs 9% at 35% — meaningful protection.
+        : 0.36;   // calibrated prior: 36% until 10 trades close (raised from 30%).
+                  // 36% is comfortably above 2.5R breakeven (28.6%) without being
+                  // overconfident. Kelly f ≈ 10% at 36% vs 4% at 30% — meaningful
+                  // uplift in position sizing from trade 1 while still conservative.
 
       // Per-asset prior: if ≥5 trades exist for this asset+direction, use that instead
       var W = _globalW;

@@ -24,7 +24,7 @@
   var QUEUE_TTL_MS  = 8 * 60 * 1000; // discard pending signals older than 8 min
 
   /* Minimum confluence score to approve entry */
-  var MIN_SCORE_GEO    = 4.5;   // IC/GII geopolitical trades
+  var MIN_SCORE_GEO    = 4.0;   // IC/GII geopolitical trades — lowered 4.5→4.0 for more qualifying events
   var MIN_SCORE_SCALPER = 3.0;  // Scalper trades — raised 2.0→3.0 to filter weak single-corroboration combos
 
   /* Minimum number of distinct agent categories that must agree */

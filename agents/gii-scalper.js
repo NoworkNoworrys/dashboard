@@ -1,6 +1,6 @@
-/* GII Short-Term Scalper Agent — gii-scalper.js v6
+/* GII Short-Term Scalper Agent — gii-scalper.js v11
  *
- * BTC-only 5m/15m technical scalper with one-active-trade discipline.
+ * BTC+ETH 5m/15m technical scalper with one-active-trade discipline.
  * Runs 24/7 — scans every 5 minutes around the clock.
  * Elite TA: RSI-7, EMA 9/21, MACD 3/8/3, Bollinger 20, ADX-14, EMA slope,
  * Stochastic RSI, RSI divergence — with ADX regime gating and BB-width quality
@@ -10,7 +10,7 @@
  *   CryptoCompare histominute (primary, no key needed, 100k/month free)
  *   Hyperliquid candleSnapshot (backup, no key needed, public API)
  *
- * One-at-a-time discipline: no new signal while _activeScalp is set.
+ * Per-asset one-at-a-time discipline: no new signal per asset while that asset's slot is set.
  * Slot is cleared via onTradeResult() or 2h auto-timeout.
  *
  * See also: gii-scalper-session.js — session-hours variant (07:00–22:00 UTC)
@@ -26,6 +26,7 @@
   var POLL_INTERVAL_MS  = 5 * 60 * 1000;     // 5 minutes
   var INIT_DELAY_MS     = 16500;              // after gii-technicals (11.5s) + buffer
   var GTI_GATE          = 65;                 // skip scalping when GTI >= this
+  var SCALPER_ASSETS   = ['BTC', 'ETH'];  // Assets scanned each poll cycle
   var SCALP_TIMEOUT_MS  = 2 * 60 * 60 * 1000; // auto-expire active scalp after 2h
   var MIN_CONF          = 0.60;               // minimum conf to emit (Grade B floor)
   var CC_BASE           = 'https://min-api.cryptocompare.com/data/v2/';
@@ -50,7 +51,7 @@
   var _signals      = [];      // max 1 — scalper emits at most one signal per cycle
   var _status       = {};
   var _accuracy     = {};      // per-direction accuracy tracking
-  var _activeScalp  = null;    // { asset, bias, signalTs } — one-at-a-time
+  var _activeScalps = {};     // { 'BTC': { asset, bias, signalTs }, 'ETH': ... } — per-asset
   var _cache        = {};      // { '5m': [...], '15m': [...] }
   var _feedback     = {};      // { 'BTC_long': { total, correct, winRate, lastTs } }
   var _lastPollTs    = 0;
@@ -288,9 +289,9 @@
   // ── data fetching ─────────────────────────────────────────────────────────
 
   // CryptoCompare histominute: fetch N*period minutes of 1-min data, aggregate manually
-  function _ccFetch(period, numCandles) {
+  function _ccFetch(sym, period, numCandles) {
     var limit = numCandles * period + 5;  // extra bars as buffer
-    var url = CC_BASE + 'histominute?fsym=BTC&tsym=USD&limit=' + limit;
+    var url = CC_BASE + 'histominute?fsym=' + sym + '&tsym=USD&limit=' + limit;
     return fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -324,7 +325,7 @@
   }
 
   // Hyperliquid candleSnapshot backup
-  function _hlFetch(interval, numCandles) {
+  function _hlFetch(sym, interval, numCandles) {
     var now = Date.now();
     var msPerBar = (interval === '5m') ? 5 * 60000 : 15 * 60000;
     var startTime = now - numCandles * msPerBar * 2;  // fetch 2x for buffer
@@ -333,7 +334,7 @@
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         type: 'candleSnapshot',
-        req:  { coin: 'BTC', interval: interval, startTime: startTime, endTime: now }
+        req:  { coin: sym, interval: interval, startTime: startTime, endTime: now }
       })
     })
       .then(function (r) { return r.json(); })
@@ -355,14 +356,14 @@
 
   // ── context filters ───────────────────────────────────────────────────────
 
-  // Get 1h BTC bias from the TA agent (trend filter)
-  function _get1hTrend() {
+  // Get 1h bias from the TA agent (trend filter)
+  function _get1hTrend(asset) {
     var ta = window.GII_AGENT_TECHNICALS;
     if (!ta) return 'neutral';
     try {
       var sigs = ta.signals();
       for (var i = 0; i < sigs.length; i++) {
-        if (sigs[i].asset === 'BTC' && sigs[i].confidence >= 0.45) {
+        if (sigs[i].asset === asset && sigs[i].confidence >= 0.45) {
           return sigs[i].bias;  // 'long' | 'short'
         }
       }
@@ -385,11 +386,11 @@
     } catch (e) { return 1.0; }
   }
 
-  // Scalper slot: one trade at a time
-  function _slotFree() {
-    if (!_activeScalp) return true;
-    if (Date.now() - _activeScalp.signalTs > SCALP_TIMEOUT_MS) {
-      _activeScalp = null;
+  // Scalper slot: one trade at a time, per asset
+  function _slotFreeFor(asset) {
+    if (!_activeScalps[asset]) return true;
+    if (Date.now() - _activeScalps[asset].signalTs > SCALP_TIMEOUT_MS) {
+      _activeScalps[asset] = null;
       return true;
     }
     return false;
@@ -574,7 +575,7 @@
     return 45;  // pullback
   }
 
-  function _buildSignal(dir, ind, setup) {
+  function _buildSignal(asset, dir, ind, setup) {
     // Base confidence from setup score (score 0.20 → conf 0.60; score 0.60+ → conf ~0.86)
     var conf = _clamp(0.52 + setup.score * 0.60, 0, 0.88);
     var reasons = setup.reasons.slice();
@@ -586,7 +587,7 @@
     }
 
     // 1h trend filter boost/penalty
-    var trend1h = _get1hTrend();
+    var trend1h = _get1hTrend(asset);
     if (trend1h === dir) {
       conf = _clamp(conf + 0.05, 0, 0.88);
       reasons.push('1h ' + dir + ' aligned');
@@ -596,7 +597,7 @@
     }
 
     // Feedback self-learning adjustment
-    var fbKey = 'BTC_' + dir;
+    var fbKey = asset + '_' + dir;
     var fb = _feedback[fbKey];
     if (fb && fb.total >= 5) {
       var wr = fb.winRate || 0;
@@ -608,7 +609,7 @@
     // Brain sector alignment boost (other crypto assets agreeing = real signal)
     if (window.GII_SCALPER_BRAIN) {
       try {
-        var align = GII_SCALPER_BRAIN.getSectorAlignment('BTC', 'crypto', dir);
+        var align = GII_SCALPER_BRAIN.getSectorAlignment(asset, 'crypto', dir);
         if (align > 0) { conf = _clamp(conf + align * 0.08, 0, 0.88); reasons.push('sector-aligned'); }
       } catch (e) {}
     }
@@ -621,13 +622,13 @@
 
     return {
       source:        'scalper',
-      asset:         'BTC',
+      asset:         asset,
       bias:          dir,
       confidence:    conf,
       reasoning:     reasons.join(' | '),
       timestamp:     Date.now(),
       region:        'GLOBAL',
-      evidenceKeys:  ['btc_5m', 'btc_15m', setup.entryType],
+      evidenceKeys:  [asset.toLowerCase() + '_5m', asset.toLowerCase() + '_15m', setup.entryType],
       // Scalper-specific fields
       scalper:       true,
       leverage:      _leverage(conf),
@@ -641,32 +642,15 @@
 
   // ── main poll ─────────────────────────────────────────────────────────────
 
-  function poll() {
-    _lastPollTs = Date.now();
-    _status.lastPoll = _lastPollTs;
-
-    var _gtiM    = _gtiSizeMult();  // v61: graduated multiplier
-    var slotBusy = !_slotFree();
-
-    _status.gtiGated  = (_gtiM === 0.0);
-    _status.slotBusy  = slotBusy;
-    var _gtiRaw = (window.GII && typeof GII.gti === 'function') ? GII.gti() : null;
-    _status.gtiLevel  = (_gtiRaw && typeof _gtiRaw.value === 'number') ? +_gtiRaw.value.toFixed(1) : 0;
-
-    if (_gtiM === 0.0) {
-      _signals  = [];
-      _status.note = 'GTI=' + _status.gtiLevel + ' >= 90 — scalping stopped';
-      return;
-    }
-    if (slotBusy) {
-      _signals  = [];
-      _status.note = 'Active scalp: ' + JSON.stringify(_activeScalp);
+  function _pollAsset(sym, gtiM) {
+    if (!_slotFreeFor(sym)) {
+      _status['note_' + sym] = 'Active scalp: ' + JSON.stringify(_activeScalps[sym]);
       return;
     }
 
     // Fetch 5m candles (100 bars ≈ 8.3h) and 15m candles (48 bars ≈ 12h)
-    var p5m  = _ccFetch(5, 100);
-    var p15m = _ccFetch(15, 48);
+    var p5m  = _ccFetch(sym, 5, 100);
+    var p15m = _ccFetch(sym, 15, 48);
 
     Promise.all([p5m, p15m])
       .then(function (results) {
@@ -675,8 +659,8 @@
 
         // Fallback to Hyperliquid if CC fails
         var fallbacks = [];
-        if (!c5m)  fallbacks.push(_hlFetch('5m',  100).then(function (d) { c5m  = d; _usedHLBackup = true; }));
-        if (!c15m) fallbacks.push(_hlFetch('15m', 48).then(function (d) { c15m = d; _usedHLBackup = true; }));
+        if (!c5m)  fallbacks.push(_hlFetch(sym, '5m',  100).then(function (d) { c5m  = d; _usedHLBackup = true; }));
+        if (!c15m) fallbacks.push(_hlFetch(sym, '15m', 48).then(function (d) { c15m = d; _usedHLBackup = true; }));
 
         return Promise.all(fallbacks).then(function () { return [c5m, c15m]; });
       })
@@ -684,41 +668,50 @@
         var c5m = data[0], c15m = data[1];
 
         if (!c5m || c5m.length < 30) {
-          _status.error = 'Insufficient 5m data (' + (c5m ? c5m.length : 0) + ' bars)';
+          _status['error_' + sym] = 'Insufficient 5m data (' + (c5m ? c5m.length : 0) + ' bars)';
           return;
         }
         if (!c15m || c15m.length < 25) {
-          _status.error = 'Insufficient 15m data (' + (c15m ? c15m.length : 0) + ' bars)';
+          _status['error_' + sym] = 'Insufficient 15m data (' + (c15m ? c15m.length : 0) + ' bars)';
           return;
         }
 
-        _status.error = null;
+        _status['error_' + sym] = null;
 
         // Cache for UI display
-        _cache['5m']  = c5m.slice(-100);
-        _cache['15m'] = c15m.slice(-48);
+        _cache[sym + '_5m']  = c5m.slice(-100);
+        _cache[sym + '_15m'] = c15m.slice(-48);
         _saveCache();
 
         var ind = _computeIndicators(c5m, c15m);
         if (!ind) {
-          _status.error = 'Indicator computation failed';
+          _status['error_' + sym] = 'Indicator computation failed';
           return;
         }
 
-        _status.price    = ind.price;
-        _status.rsi5m    = Math.round(ind.rsi5m * 10) / 10;
-        _status.emaTrend = ind.emaBullish ? 'bullish' : 'bearish';
-        _status.volRatio = _round2(ind.volRatio);
-        _status.atr5m    = _round2(ind.atr5);
-        _status.trend1h  = _get1hTrend();
+        _status['price_' + sym]    = ind.price;
+        _status['rsi5m_' + sym]    = Math.round(ind.rsi5m * 10) / 10;
+        _status['emaTrend_' + sym] = ind.emaBullish ? 'bullish' : 'bearish';
+        _status['volRatio_' + sym] = _round2(ind.volRatio);
+        _status['atr5m_' + sym]    = _round2(ind.atr5);
+        _status['trend1h_' + sym]  = _get1hTrend(sym);
         _status.dataSource = _usedHLBackup ? 'Hyperliquid' : 'CryptoCompare';
-        _status.note     = null;
+
+        // Backwards-compat: mirror BTC status into top-level keys for dashboard
+        if (sym === 'BTC') {
+          _status.price    = ind.price;
+          _status.rsi5m    = Math.round(ind.rsi5m * 10) / 10;
+          _status.emaTrend = ind.emaBullish ? 'bullish' : 'bearish';
+          _status.volRatio = _round2(ind.volRatio);
+          _status.atr5m    = _round2(ind.atr5);
+          _status.trend1h  = _status['trend1h_' + sym];
+        }
 
         var longSetup  = _scoreSetup(ind, 'long');
         var shortSetup = _scoreSetup(ind, 'short');
 
         // Apply trend filter: penalise counter-trend setups
-        var trend1h = _status.trend1h;
+        var trend1h = _status['trend1h_' + sym];
         if (trend1h === 'short' && longSetup.score  > 0) longSetup.score  *= 0.50;
         if (trend1h === 'long'  && shortSetup.score > 0) shortSetup.score *= 0.50;
 
@@ -729,33 +722,31 @@
         } else if (shortSetup.score >= 0.18) {
           bestDir = 'short'; bestSetup = shortSetup;
         } else {
-          _signals = [];
-          _status.note = 'No setup (L=' + longSetup.score.toFixed(2) + ' S=' + shortSetup.score.toFixed(2) + ')';
+          _signals = _signals.filter(function (s) { return s.asset !== sym; });
+          _status['note_' + sym] = 'No setup (L=' + longSetup.score.toFixed(2) + ' S=' + shortSetup.score.toFixed(2) + ')';
           return;
         }
 
-        var sig = _buildSignal(bestDir, ind, bestSetup);
+        var sig = _buildSignal(sym, bestDir, ind, bestSetup);
 
         if (sig.confidence < MIN_CONF) {
-          _signals = [];
-          _status.note = 'Below grade threshold (conf=' + sig.confidence + ')';
+          _signals = _signals.filter(function (s) { return s.asset !== sym; });
+          _status['note_' + sym] = 'Below grade threshold (conf=' + sig.confidence + ')';
           return;
         }
 
-        /* Brain history validation: if BTC+direction has ≥5 completed trades and
+        /* Brain history validation: if asset+direction has ≥5 completed trades and
            a win rate below 45%, reduce confidence by 25% to make the signal harder
-           to pass EE's min_confidence gate. The scalper brain tracks per-asset
-           outcomes via noteSignal/noteResult — this closes the feedback loop so
-           chronically losing setups are automatically down-weighted. */
+           to pass EE's min_confidence gate. */
         if (window.GII_SCALPER_BRAIN && typeof GII_SCALPER_BRAIN.inheritFeedback === 'function') {
           try {
-            var _brainHistory = GII_SCALPER_BRAIN.inheritFeedback('BTC');
+            var _brainHistory = GII_SCALPER_BRAIN.inheritFeedback(sym);
             if (_brainHistory && _brainHistory[bestDir]) {
               var _bh = _brainHistory[bestDir];
               if (_bh.total >= 5 && _bh.winRate < 0.45) {
                 var _bfConf = sig.confidence;
                 sig.confidence = Math.max(MIN_CONF, sig.confidence * 0.75);
-                console.info('[GII SCALPER] Brain penalty: BTC ' + bestDir + ' WR=' +
+                console.info('[GII SCALPER] Brain penalty: ' + sym + ' ' + bestDir + ' WR=' +
                   Math.round(_bh.winRate * 100) + '% (' + _bh.total + ' trades) → conf ' +
                   _bfConf.toFixed(2) + ' → ' + sig.confidence.toFixed(2));
               }
@@ -763,22 +754,18 @@
           } catch (e) {}
         }
 
-        _signals = [sig];
-        _activeScalp = { asset: 'BTC', bias: bestDir, signalTs: Date.now() };
-        _status.note = 'Signal emitted: ' + bestDir.toUpperCase() + ' BTC conf=' + sig.confidence;
+        // Add signal (replace any existing signal for this asset)
+        _signals = _signals.filter(function (s) { return s.asset !== sym; });
+        _signals.push(sig);
+        _activeScalps[sym] = { asset: sym, bias: bestDir, signalTs: Date.now() };
+        _status['note_' + sym] = 'Signal emitted: ' + bestDir.toUpperCase() + ' ' + sym + ' conf=' + sig.confidence;
         if (window.GII_SCALPER_BRAIN) {
-          try { GII_SCALPER_BRAIN.noteSignal('BTC', 'crypto', bestDir); } catch (e) {}
+          try { GII_SCALPER_BRAIN.noteSignal(sym, 'crypto', bestDir); } catch (e) {}
         }
         console.info('[GII SCALPER] Signal: ' + bestDir.toUpperCase() +
-          ' BTC conf=' + sig.confidence + ' lev=' + sig.leverage + 'x | ' + sig.reasoning);
+          ' ' + sym + ' conf=' + sig.confidence + ' lev=' + sig.leverage + 'x | ' + sig.reasoning);
 
         // ── EE portfolio integration ────────────────────────────────────────
-        // Scalper uses async fetch so its signals are never seen by the GII
-        // synchronous cycle. Call EE.onSignals() directly here so the trade
-        // appears in the main portfolio tracker (balance, analytics, P&L).
-        // EE's cooldown + open-trade dedup prevents double-opens if GII
-        // also routes this asset. Feedback returns via window.onTradeClose
-        // → GII.onTradeResult → GII_AGENT_SCALPER.onTradeResult (clears slot).
         if (window.EE && typeof EE.onSignals === 'function') {
           try {
             EE.onSignals([{
@@ -787,11 +774,11 @@
               conf:            Math.round(sig.confidence * 100),
               reason:          'SCALPER: ' + sig.reasoning,
               region:          sig.region || 'GLOBAL',
-              impactMult:      _gtiM,  // v61b: GTI reduces position SIZE, not signal confidence
+              impactMult:      gtiM,
               atrStop:         sig.atrStop,
               atrTarget:       sig.atrTarget,
               matchedKeywords: sig.evidenceKeys || [],
-              source:          'scalper',  // ← trade tagging for dashboard stats
+              source:          'scalper',
               scalper:         true
             }]);
           } catch (eInner) {
@@ -800,25 +787,43 @@
         }
       })
       .catch(function (e) {
-        _status.error = 'Poll error: ' + (e.message || String(e));
+        _status['error_' + sym] = 'Poll error: ' + (e.message || String(e));
       });
+  }
+
+  function poll() {
+    _lastPollTs = Date.now();
+    _status.lastPoll = _lastPollTs;
+
+    var gtiM    = _gtiSizeMult();
+    var _gtiRaw = (window.GII && typeof GII.gti === 'function') ? GII.gti() : null;
+    _status.gtiGated  = (gtiM === 0.0);
+    _status.slotBusy  = SCALPER_ASSETS.some(function (s) { return !!_activeScalps[s]; });
+    _status.gtiLevel  = (_gtiRaw && typeof _gtiRaw.value === 'number') ? +_gtiRaw.value.toFixed(1) : 0;
+
+    if (gtiM === 0.0) {
+      _signals  = [];
+      _status.note = 'GTI=' + _status.gtiLevel + ' >= 90 — scalping stopped';
+      return;
+    }
+
+    SCALPER_ASSETS.forEach(function (sym) { _pollAsset(sym, gtiM); });
   }
 
   // ── trade result feedback ─────────────────────────────────────────────────
 
   function onTradeResult(trade) {
     if (!trade) return;
-    // Only handle BTC trades
-    var asset = (trade.asset || trade.ticker || '').toUpperCase();
-    if (asset.indexOf('BTC') === -1) return;
+    var asset = (trade.asset || trade.ticker || '').toUpperCase().replace('/USD', '').replace('-USD', '');
+    if (SCALPER_ASSETS.indexOf(asset) === -1) return;
 
-    // Clear active scalp regardless of outcome
-    _activeScalp = null;
-    _signals = [];
+    // Clear active scalp for this asset
+    _activeScalps[asset] = null;
+    _signals = _signals.filter(function (s) { return s.asset !== asset; });
 
     var correct = (trade.pnl !== undefined ? trade.pnl : trade.profit || 0) > 0;
     var dir = (trade.dir || trade.direction || 'long').toLowerCase();
-    var fbKey = 'BTC_' + dir;
+    var fbKey = asset + '_' + dir;
 
     if (!_feedback[fbKey]) _feedback[fbKey] = { total: 0, correct: 0, winRate: 0 };
     _feedback[fbKey].total++;
@@ -828,14 +833,14 @@
     _saveFeedback();
 
     _accuracy = Object.assign({}, _feedback);
-    console.info('[GII SCALPER] Trade result: ' + dir + ' BTC ' + (correct ? 'WIN' : 'LOSS') +
+    console.info('[GII SCALPER] Trade result: ' + dir + ' ' + asset + ' ' + (correct ? 'WIN' : 'LOSS') +
       ' | winRate=' + (_feedback[fbKey].winRate * 100).toFixed(0) + '%');
 
     // Feed brain with cross-agent shared learning
     if (window.GII_SCALPER_BRAIN) {
       try {
         GII_SCALPER_BRAIN.recordOutcome(trade, { sector: 'crypto', setupType: _lastEntryType, gtiRegime: null });
-        GII_SCALPER_BRAIN.clearSignal('BTC');
+        GII_SCALPER_BRAIN.clearSignal(asset);
       } catch (e) {}
     }
   }
@@ -845,7 +850,7 @@
   window.GII_AGENT_SCALPER = {
     poll:          poll,
     signals:       function () { return _signals.slice(); },
-    status:        function () { return Object.assign({ lastPoll: _lastPollTs, activeScalp: _activeScalp }, _status); },
+    status:        function () { return Object.assign({ lastPoll: _lastPollTs, activeScalps: _activeScalps }, _status); },
     accuracy:      function () { return Object.assign({}, _accuracy); },
     onTradeResult: onTradeResult,
     cache:         function () { return Object.assign({}, _cache); }
@@ -861,13 +866,15 @@
       try {
         if (window.EE && typeof EE.getOpenTrades === 'function') {
           var _open = EE.getOpenTrades();
-          var _existing = _open.find(function (t) {
-            return (t.asset || '').toUpperCase() === 'BTC';
+          SCALPER_ASSETS.forEach(function (sym) {
+            var _existing = _open.find(function (t) {
+              return (t.asset || '').toUpperCase() === sym;
+            });
+            if (_existing) {
+              _activeScalps[sym] = { asset: sym, bias: _existing.direction.toLowerCase(), signalTs: Date.now(), entryType: 'unknown' };
+              console.info('[SCALPER] _activeScalps[' + sym + '] restored from open trade');
+            }
           });
-          if (_existing) {
-            _activeScalp = { bias: _existing.direction.toLowerCase(), signalTs: Date.now(), entryType: 'unknown' };
-            console.info('[SCALPER] _activeScalp restored from open BTC trade');
-          }
         }
       } catch (e) {}
     }, 5000);
