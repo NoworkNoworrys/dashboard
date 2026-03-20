@@ -2162,6 +2162,70 @@
     <span class="meta">Source: OSINT aggregation | As of 03-Mar-2026</span>
   </div>
 
+  <!-- ═══════════════════════════ LIVE PERFORMANCE MONITOR ════════════════════════════ -->
+  <div id="lpm-panel"><div style="padding:8px 14px;color:#1e2a3a;font-size:10px;font-family:'Courier New',monospace">◈ LIVE PERFORMANCE MONITOR — Initialising...</div></div>
+  <style>
+  /* ── Live Performance Monitor ─────────────────────────────────────────────────────── */
+  #lpm-panel {
+    background:#060b13; border-bottom:2px solid #1a2436;
+    font-family:'Courier New',Courier,monospace; overflow:hidden;
+  }
+  .lpm-hdr {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:5px 14px; background:#090e1a; border-bottom:1px solid #141f30;
+    cursor:pointer; user-select:none;
+  }
+  .lpm-hdr-title { color:#2a3a50; font-size:10px; letter-spacing:1.5px; font-weight:bold; }
+  .lpm-hdr-right { display:flex; gap:12px; align-items:center; }
+  .lpm-ts     { color:#1a2436; font-size:10px; }
+  .lpm-toggle { color:#2a3a50; font-size:10px; }
+  #lpm-status {
+    padding:8px 14px; font-size:12px; font-weight:bold; letter-spacing:0.3px;
+    display:flex; align-items:center; gap:10px; border-bottom:1px solid #141f30;
+  }
+  .lpm-s-g { background:rgba(34,197,94,0.10); color:#22c55e; border-left:3px solid #22c55e; }
+  .lpm-s-y { background:rgba(245,158,11,0.10); color:#f59e0b; border-left:3px solid #f59e0b; }
+  .lpm-s-r { background:rgba(239,68,68,0.10);  color:#ef4444; border-left:3px solid #ef4444; }
+  .lpm-s-n { background:rgba(20,31,48,0.8);    color:#2a3a50; border-left:3px solid #141f30; }
+  .lpm-grid { display:grid; grid-template-columns:1fr 1fr 1fr; }
+  .lpm-col  { padding:9px 13px; border-right:1px solid #0c1520; }
+  .lpm-col:last-child { border-right:none; }
+  .lpm-coltitle {
+    font-size:9px; color:#1e3050; letter-spacing:1.5px; text-transform:uppercase;
+    font-weight:bold; margin-bottom:6px; padding-bottom:3px; border-bottom:1px solid #0c1520;
+  }
+  .lpm-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:2px 0; border-bottom:1px dotted #090e1a;
+  }
+  .lpm-row:last-child { border-bottom:none; }
+  .lpm-lbl { color:#2a3a50; font-size:10.5px; }
+  .lpm-v   { font-size:10.5px; font-weight:bold; display:flex; align-items:center; gap:3px; }
+  .lpm-g   { color:#22c55e; }
+  .lpm-y   { color:#f59e0b; }
+  .lpm-r   { color:#ef4444; }
+  .lpm-b   { color:#60a5fa; }
+  .lpm-n   { color:#2a3a50; }
+  .lpm-d   { font-size:7px; line-height:1; }
+  .lpm-bar {
+    display:flex; flex-wrap:wrap; gap:5px; padding:6px 13px;
+    background:#040810; border-top:1px solid #0c1520;
+  }
+  .lpm-pill {
+    font-size:10px; padding:1px 7px; border-radius:8px;
+    border:1px solid; display:inline-flex; align-items:center; gap:3px; white-space:nowrap;
+  }
+  .lpm-pg { color:#4ade80; border-color:rgba(34,197,94,0.22);  background:rgba(34,197,94,0.06); }
+  .lpm-py { color:#fbbf24; border-color:rgba(245,158,11,0.22); background:rgba(245,158,11,0.06); }
+  .lpm-pr { color:#f87171; border-color:rgba(239,68,68,0.22);  background:rgba(239,68,68,0.06); }
+  .lpm-pb { color:#93c5fd; border-color:rgba(96,165,250,0.22); background:rgba(96,165,250,0.06); }
+  .lpm-pn { color:#334155; border-color:rgba(51,65,85,0.22);   background:rgba(51,65,85,0.06); }
+  @media (max-width:860px) {
+    .lpm-grid { grid-template-columns:1fr 1fr; }
+    .lpm-col:nth-child(3) { grid-column:1/-1; border-top:1px solid #0c1520; border-right:none; }
+  }
+  </style>
+
   <!-- ═══════════════════════════ LIVE PRICE TICKER ════════════════════════════════ -->
   <div class="ticker-row">
     <div class="tick-item"><span class="tick-name">GOLD</span><span class="tick-price" id="tick-price-GOLD">$5,417</span><span class="tick-chg up">▲ ATH</span></div>
@@ -13148,6 +13212,222 @@ function _modalKeyHandler(e) {
   setTimeout(function() {
     try { if (window.ICRiskEngine) ICRiskEngine.init(); } catch(e) {}
   }, 2000);
+
+  // ── Live Performance Monitor ──────────────────────────────────────────────────────────
+  // Reads ICRiskEngine + localStorage every 8 s and renders a colour-coded status panel.
+  // Answers the question "Is this system making money safely?" at a 5-second glance.
+  setTimeout(function() {
+    (function() {
+      'use strict';
+      var _el = null, _INTERVAL = 8000;
+
+      /* ── Tiny helpers ── */
+      function _d(v, dp) { return isFinite(v) ? v.toFixed(dp !== undefined ? dp : 2) : '—'; }
+      function _pct(v)   { return isFinite(v) ? Math.round(v * 1000) / 10 + '%' : '—'; }
+      function _row(lbl, val) {
+        return '<div class="lpm-row"><span class="lpm-lbl">' + lbl + '</span><span class="lpm-v">' + val + '</span></div>';
+      }
+      function _pill(cls, txt) { return '<span class="lpm-pill lpm-p' + cls + '">' + txt + '</span>'; }
+      function _dot(c)  { return '<span class="lpm-d lpm-' + c + '">●</span>'; }
+      function _g(v)    { return '<span class="lpm-g">' + v + '</span>'; }
+      function _y(v)    { return '<span class="lpm-y">' + v + '</span>'; }
+      function _r(v)    { return '<span class="lpm-r">' + v + '</span>'; }
+      function _b(v)    { return '<span class="lpm-b">' + v + '</span>'; }
+      function _n(v)    { return '<span class="lpm-n">' + v + '</span>'; }
+      function _clr(val, g, y) { return val >= g ? 'g' : val >= y ? 'y' : 'r'; }
+
+      /* ── Data loading ── */
+      function _loadTrades() {
+        try { return JSON.parse(localStorage.getItem('geodash_ee_trades_v1') || '[]') || []; } catch(e) { return []; }
+      }
+      function _loadBal() {
+        try { var c = JSON.parse(localStorage.getItem('geodash_ee_config_v2') || '{}'); return c && c.virtual_balance ? c.virtual_balance : 5000; }
+        catch(e) { return 5000; }
+      }
+
+      /* ── Rolling metrics calculator (mirrors ICRiskEngine logic, no dependency) ── */
+      function _metrics(arr) {
+        if (!arr || !arr.length) return null;
+        var wins = [], losses = [], tpH = 0, slH = 0;
+        arr.forEach(function(t) {
+          var p = parseFloat(t.pnl_usd || 0), r = (t.close_reason || '').toUpperCase();
+          if (p > 0) { wins.push(p); if (r.indexOf('TAKE_PROFIT') !== -1) tpH++; }
+          else       { losses.push(p); if (r.indexOf('STOP_LOSS') !== -1) slH++; }
+        });
+        var n = arr.length, wr = wins.length / n,
+            sumW = wins.reduce(function(a,b){return a+b;}, 0),
+            sumL = losses.reduce(function(a,b){return a+b;}, 0),
+            aW = wins.length ? sumW / wins.length : 0,
+            aL = losses.length ? sumL / losses.length : 0;
+        return { n:n, wr:wr, aW:aW, aL:aL, E: wr*aW + (1-wr)*aL,
+                 tpR: tpH/n, slR: slH/n, pnl: sumW + sumL };
+      }
+
+      /* ── Top-level system verdict ── */
+      function _verdict(eng, m) {
+        var safe = (eng && eng.safety) || {};
+        /* RISK: hard failures */
+        if (safe.regimeDegraded || safe.consecutiveLosses >= 4 ||
+            (m && m.n >= 10 && m.E < 0) || (eng && eng.multiplier <= 0.26)) {
+          var why = safe.regimeDegraded ? 'regime degraded' :
+                    safe.consecutiveLosses >= 4 ? safe.consecutiveLosses + ' consecutive losses → floor' :
+                    m && m.E < 0 ? 'expectancy negative on ' + m.n + ' trades' : 'multiplier at floor';
+          return { cls:'r', label:'🔴 RISK — ' + why };
+        }
+        /* HEALTHY: all green lights */
+        if (m && m.n >= 10 && m.E >= 0.50 && m.tpR >= 0.15 &&
+            !safe.coolingDown && !safe.smokeAlarm && safe.consecutiveLosses <= 1) {
+          return { cls:'g', label:'🟢 HEALTHY — edge confirmed, scaling permitted' };
+        }
+        /* CAUTION: everything else */
+        var why = [];
+        if (!m || m.n < 10)                  why.push('collecting evidence (' + (m ? m.n : 0) + '/10)');
+        else if (m.E < 0.50 && m.E >= 0)     why.push('expectancy weak $' + m.E.toFixed(2));
+        if (m && m.tpR < 0.15 && m.n >= 5)  why.push('TP ' + _pct(m.tpR));
+        if (safe.inProbation)                why.push('probation');
+        if (safe.coolingDown)                why.push('cooling (' + safe.coolingTradesLeft + ' trades)');
+        if (safe.smokeAlarm)                 why.push('smoke alarm');
+        if (safe.consecutiveLosses >= 2)     why.push(safe.consecutiveLosses + ' consec losses');
+        return { cls:'y', label:'🟡 CAUTION — ' + (why.join(' · ') || 'edge borderline') };
+      }
+
+      /* ── Main render ── */
+      function _render() {
+        if (!_el) _el = document.getElementById('lpm-panel');
+        if (!_el) return;
+
+        var all       = _loadTrades();
+        var bal       = _loadBal();
+        var icClosed  = all.filter(function(t){ return t.source === 'ic' && t.status === 'CLOSED'; });
+        var giiClosed = all.filter(function(t){ var s = t.source||''; return s !== 'ic' && s.indexOf('scalp') === -1 && t.status === 'CLOSED'; });
+        var icOpen    = all.filter(function(t){ return t.source === 'ic' && t.status === 'OPEN'; });
+        var allOpen   = all.filter(function(t){ return t.status === 'OPEN'; });
+
+        var m20 = _metrics(icClosed.slice(-20));
+        var m60 = _metrics(icClosed.slice(-60));
+
+        var peak = 0, maxDD = 0, run = 0;
+        icClosed.forEach(function(t) {
+          run += parseFloat(t.pnl_usd || 0);
+          if (run > peak) peak = run;
+          var d = peak - run; if (d > maxDD) maxDD = d;
+        });
+
+        var icPnL     = icClosed.reduce(function(s,t){ return s + parseFloat(t.pnl_usd||0); }, 0);
+        var giiPnL    = giiClosed.reduce(function(s,t){ return s + parseFloat(t.pnl_usd||0); }, 0);
+        var icOpenUSD = icOpen.reduce(function(s,t){ return s + Math.abs(parseFloat(t.size_usd||0)); }, 0);
+        var icExpPct  = bal > 0 ? icOpenUSD / bal * 100 : 0;
+        var rotations = icClosed.filter(function(t){ return (t.close_reason||'').toLowerCase().indexOf('rotat') !== -1; }).length;
+        var lastIC    = icClosed.length ? icClosed[icClosed.length - 1] : null;
+
+        var eng  = null;
+        try { if (window.ICRiskEngine) eng = ICRiskEngine.getStatus(); } catch(e) {}
+        var safe = (eng && eng.safety) || {};
+        var logEntry = eng && eng.recentLog && eng.recentLog[0];
+
+        var sys = _verdict(eng, m20);
+
+        /* ── Column 1: IC Performance ── */
+        var c1 = '<div class="lpm-coltitle">IC Performance</div>';
+        var ecls = !m20 ? 'n' : _clr(m20.E, 0.50, 0);
+        var wcls = !m20 ? 'n' : _clr(m20.wr, 0.25, 0.15);
+        var tcls = !m20 ? 'n' : _clr(m20.tpR, 0.15, 0.10);
+        var scls = !m20 ? 'n' : m20.slR < 0.60 ? 'g' : m20.slR < 0.80 ? 'y' : 'r';
+        var e6cls = !m60 ? 'n' : _clr(m60.E, 0.50, 0);
+        c1 += _row('Expectancy (last 20)', m20 ? '<span class="lpm-'+ecls+'">$'+_d(m20.E)+'</span> '+_dot(ecls) : _n('No data yet'));
+        c1 += _row('Win rate',    m20 ? '<span class="lpm-'+wcls+'">'+_pct(m20.wr)+'</span> '+_dot(wcls) : _n('—'));
+        c1 += _row('TP hit rate', m20 ? '<span class="lpm-'+tcls+'">'+_pct(m20.tpR)+'</span> '+_dot(tcls) : _n('—'));
+        c1 += _row('SL hit rate', m20 ? '<span class="lpm-'+scls+'">'+_pct(m20.slR)+'</span>' : _n('—'));
+        c1 += _row('Avg win',  m20 && m20.aW ? _g('$'+_d(m20.aW)) : _n('—'));
+        c1 += _row('Avg loss', m20 && m20.aL ? _r('$'+_d(m20.aL)) : _n('—'));
+        c1 += _row('Expectancy (last 60)', m60 ? '<span class="lpm-'+e6cls+'">$'+_d(m60.E)+'</span>' : _n('—'));
+        c1 += _row('Sample size', m20 ? '<span class="lpm-'+(m20.n>=10?'g':m20.n>=5?'y':'r')+'">'+m20.n+' trades</span>' : _n('0'));
+
+        /* ── Column 2: Scaling Engine ── */
+        var mult = eng ? eng.multiplier : null;
+        var mcls = mult === null ? 'n' : mult >= 1.0 ? 'g' : mult >= 0.5 ? 'y' : 'r';
+        var stateStr, stateCls;
+        if (logEntry) {
+          var lr = logEntry.reason || '';
+          if      (lr.indexOf('SCALE UP') !== -1)                                              { stateStr = 'SCALING UP ↑';  stateCls = 'g'; }
+          else if (lr.indexOf('SCALE DOWN') !== -1 || lr.indexOf('CUT') !== -1 || lr.indexOf('FLOOR') !== -1) { stateStr = 'SCALING DOWN ↓'; stateCls = 'r'; }
+          else if (lr.indexOf('COOLING') !== -1 || lr.indexOf('ALARM') !== -1 || lr.indexOf('REGIME') !== -1) { stateStr = 'LOCKED ✕';     stateCls = 'r'; }
+          else                                                                                 { stateStr = 'HOLDING';       stateCls = 'y'; }
+        } else { stateStr = '—'; stateCls = 'n'; }
+        var ceilStr  = eng ? (safe.inProbation ? '1.50x (probation)' : '2.50x (full)') : '—';
+        var dailyUps = safe.recentScaleUps24h !== undefined ? safe.recentScaleUps24h + '/2' : '—';
+        var lastDec  = logEntry ? (logEntry.reason || '').substring(0, 42) + ((logEntry.reason||'').length > 42 ? '…' : '') : '—';
+        var c2 = '<div class="lpm-coltitle">Scaling Engine</div>';
+        c2 += _row('Multiplier',  mult !== null ? '<span class="lpm-'+mcls+'">'+mult.toFixed(2)+'x</span>' : _n('—'));
+        c2 += _row('State',       '<span class="lpm-'+stateCls+'">'+stateStr+'</span>');
+        c2 += _row('Mode',        safe.inProbation ? _y('PROBATION') : _g('FULL SCALING'));
+        c2 += _row('Ceiling',     _b(ceilStr));
+        c2 += _row('Scale-ups / 24h', '<span class="lpm-'+(safe.recentScaleUps24h >= 2 ? 'y' : 'g')+'">'+dailyUps+'</span>');
+        c2 += _row('Cooling',     safe.coolingDown ? _r('YES ('+safe.coolingTradesLeft+' trades)') : _g('No'));
+        c2 += _row('Last decision', '<span style="font-size:9.5px;color:#2a3a50;max-width:135px;display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" title="'+(logEntry ? logEntry.reason||'' : '')+'">'+lastDec+'</span>');
+
+        /* ── Column 3: Risk State ── */
+        var consec   = safe.consecutiveLosses || 0;
+        var ccls     = consec >= 4 ? 'r' : consec >= 2 ? 'y' : 'g';
+        var ddcls    = maxDD > 150 ? 'r' : maxDD > 50 ? 'y' : 'g';
+        var expcls   = icExpPct >= 15 ? 'r' : icExpPct >= 10 ? 'y' : 'g';
+        var triggers = [];
+        if (safe.consecutiveLosses >= 5)      triggers.push(_r('CONSEC-FLOOR'));
+        else if (safe.consecutiveLosses >= 3) triggers.push(_y('CONSEC-CUT'));
+        if (safe.smokeAlarm)    triggers.push(_r('SMOKE-ALARM'));
+        if (safe.regimeDegraded) triggers.push(_r('REGIME-DEGRADED'));
+        if (safe.coolingDown)   triggers.push(_y('COOLING'));
+        var trigStr = triggers.length ? triggers.join(' ') : _g('None ✓');
+        var c3 = '<div class="lpm-coltitle">Risk State</div>';
+        c3 += _row('Consecutive losses', '<span class="lpm-'+ccls+'">'+consec+'</span> '+_dot(ccls));
+        c3 += _row('IC drawdown',     '<span class="lpm-'+ddcls+'">$'+_d(maxDD)+'</span>');
+        c3 += _row('IC exposure',     '<span class="lpm-'+expcls+'">'+_d(icExpPct,1)+'%</span> '+_dot(expcls));
+        c3 += _row('Safety triggers', trigStr);
+        c3 += _row('Regime',          safe.regimeDegraded ? _r('DEGRADED ⚠') : _g('Normal ✓'));
+        c3 += _row('Open IC trades',  _b(icOpen.length.toString()));
+
+        /* ── Health bar ── */
+        var icPnLStr  = (icPnL  >= 0 ? '+' : '') + '$' + Math.abs(icPnL).toFixed(2);
+        var giiPnLStr = (giiPnL >= 0 ? '+' : '') + '$' + Math.abs(giiPnL).toFixed(2);
+        var lastStr   = lastIC
+          ? lastIC.asset + ' ' + (lastIC.direction||'') + ' ' + (parseFloat(lastIC.pnl_usd||0) >= 0 ? '+' : '') + '$' + Math.abs(parseFloat(lastIC.pnl_usd||0)).toFixed(2)
+          : 'No trades yet';
+        var bar = [
+          _pill(icPnL  >= 0   ? 'g' : 'r', 'IC P&L: '  + icPnLStr),
+          _pill(giiPnL >= -50 ? 'y' : 'r', 'GII P&L: ' + giiPnLStr),
+          _pill(rotations === 0 ? 'g' : 'y', 'Rotation interference: ' + rotations),
+          _pill('n', 'Open trades: ' + allOpen.length),
+          _pill('b', 'Last IC: ' + lastStr),
+          _pill('n', 'Total IC trades: ' + icClosed.length),
+          _pill('n', 'Account: $' + bal.toFixed(0)),
+        ].join('');
+
+        var ts = new Date().toTimeString().substr(0, 8);
+        _el.innerHTML = [
+          '<div class="lpm-hdr" onclick="(function(){var b=document.getElementById(\'lpm-body\');b&&(b.style.display=b.style.display===\'none\'?\'\':\'none\')})()">',
+            '<span class="lpm-hdr-title">◈ LIVE PERFORMANCE MONITOR</span>',
+            '<div class="lpm-hdr-right"><span class="lpm-ts">Updated ' + ts + '</span><span class="lpm-toggle">▲ click to hide</span></div>',
+          '</div>',
+          '<div id="lpm-status" class="lpm-s-' + sys.cls + '">',
+            '<span style="font-size:10px;opacity:0.6">SYSTEM STATUS</span>',
+            '<strong>' + sys.label + '</strong>',
+          '</div>',
+          '<div id="lpm-body">',
+            '<div class="lpm-grid">',
+              '<div class="lpm-col">' + c1 + '</div>',
+              '<div class="lpm-col">' + c2 + '</div>',
+              '<div class="lpm-col">' + c3 + '</div>',
+            '</div>',
+            '<div class="lpm-bar">' + bar + '</div>',
+          '</div>',
+        ].join('');
+      }
+
+      _render();
+      setInterval(_render, _INTERVAL);
+      window._lpmRender = _render;   // expose for manual refresh: _lpmRender()
+    })();
+  }, 4000);
 </script>
 </body>
 </html>
