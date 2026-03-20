@@ -1,4 +1,4 @@
-/* GII Short-Term Scalper Agent — gii-scalper.js v11
+/* GII Short-Term Scalper Agent — gii-scalper.js v12
  *
  * BTC+ETH 5m/15m technical scalper with one-active-trade discipline.
  * Runs 24/7 — scans every 5 minutes around the clock.
@@ -724,6 +724,19 @@
         } else {
           _signals = _signals.filter(function (s) { return s.asset !== sym; });
           _status['note_' + sym] = 'No setup (L=' + longSetup.score.toFixed(2) + ' S=' + shortSetup.score.toFixed(2) + ')';
+          return;
+        }
+
+        // Correlation guard: BTC and ETH move together (~0.88 correlation).
+        // If another scalper asset already has an active trade in the SAME direction,
+        // suppress this entry — it adds concentrated correlated exposure, not diversification.
+        // Opposite-direction entries (e.g. BTC long + ETH short) are fine — they partially hedge.
+        var _corrBlock = SCALPER_ASSETS.some(function (otherSym) {
+          return otherSym !== sym && _activeScalps[otherSym] && _activeScalps[otherSym].bias === bestDir;
+        });
+        if (_corrBlock) {
+          _status['note_' + sym] = 'Corr-blocked: same-direction ' + bestDir.toUpperCase() + ' already active in another asset';
+          console.info('[GII SCALPER] ' + sym + ' ' + bestDir.toUpperCase() + ' suppressed — correlated position already open');
           return;
         }
 

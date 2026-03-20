@@ -1,4 +1,4 @@
-/* GII Session Scalper Agent — gii-scalper-session.js v3
+/* GII Session Scalper Agent — gii-scalper-session.js v4
  *
  * BTC+ETH scalper that ONLY runs during NY/London session (07:00–22:00 UTC).
  * Polls every 3 minutes (vs the 24/7 scalper's 5 min) to catch faster moves
@@ -687,6 +687,16 @@
         } else {
           _signals = _signals.filter(function (s) { return s.asset !== sym; });
           _status['note_' + sym] = 'No setup (L=' + longSetup.score.toFixed(2) + ' S=' + shortSetup.score.toFixed(2) + ')';
+          return;
+        }
+
+        // Correlation guard: suppress same-direction entries when another asset slot is active.
+        var _corrBlock = SCALPER_ASSETS.some(function (otherSym) {
+          return otherSym !== sym && _activeScalps[otherSym] && _activeScalps[otherSym].bias === bestDir;
+        });
+        if (_corrBlock) {
+          _status['note_' + sym] = 'Corr-blocked: same-direction ' + bestDir.toUpperCase() + ' already active in another asset';
+          console.info('[GII SCALPER-SESSION] ' + sym + ' ' + bestDir.toUpperCase() + ' suppressed — correlated position already open');
           return;
         }
 

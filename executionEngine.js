@@ -1390,9 +1390,12 @@
       var kelly = (W * R - (1 - W)) / R;
       var baseKelly = Math.max(0.01, (0.5 * R - 0.5) / R);  // BE kelly at 50% win rate
       if (kelly > 0) {
-        kellyMult = Math.max(0.5, Math.min(1.5, kelly * 0.5 / baseKelly));
+        kellyMult = Math.max(0.3, Math.min(1.5, kelly * 0.5 / baseKelly));
+        // Floor lowered 0.50→0.30: prior win rate now genuinely affects sizing.
+        // At W=0.36 → kellyMult≈0.35 (was 0.50 — prior change was a no-op at 0.50 floor).
+        // At W=0.55+ → kellyMult scales up naturally above 0.5. Responsive, not fixed.
       } else {
-        kellyMult = 0.5;   // negative EV → halve position size
+        kellyMult = 0.3;   // negative EV → reduce to 30% of base (was 0.5 — never actually penalised)
       }
     })();
 
@@ -1457,8 +1460,10 @@
 
     // Crypto volatility discount: BTC/ETH/SOL are 3-5× more volatile than equities/energy.
     // Wide stops (6-7%) mean larger notional positions — cap by halving the risk budget.
+    // EXCEPTION: scalper signals already have ATR-based tight stops + their own $15 cap —
+    // applying a second 50% haircut double-counts risk mitigation and halves trade size for no reason.
     var _cryptoAssets = { 'BTC': true, 'ETH': true, 'SOL': true, 'BNB': true, 'ADA': true };
-    if (_cryptoAssets[normaliseAsset(sig.asset)]) {
+    if (_cryptoAssets[normaliseAsset(sig.asset)] && !_isScalperSig) {
       var _beforeCrypto = riskAmt;
       riskAmt = riskAmt * 0.50;
       log('RISK', sig.asset + ' crypto size discount: $' + _beforeCrypto.toFixed(2) + ' → $' + riskAmt.toFixed(2) + ' (50% vol cap)', 'dim');
