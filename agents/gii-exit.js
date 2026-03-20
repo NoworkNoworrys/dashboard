@@ -574,6 +574,7 @@
     if (emergency && emergency.action === 'FORCE_CLOSE') {
       _log('FORCE_CLOSE', tradeId, asset, emergency.reason, { detail: emergency.detail });
       try { EE.forceCloseTrade(tradeId, 'GII-EXIT:' + emergency.reason); } catch (e) {}
+      if (_srcLower === 'ic' && window.ICRiskEngine) { try { ICRiskEngine.onICTradeClosed(); } catch (e) {} }
       _stats.closed++;
       return;
     }
@@ -595,6 +596,7 @@
       if (thesisResult.action === 'FORCE_CLOSE') {
         _log('FORCE_CLOSE', tradeId, asset, thesisResult.reason, { detail: thesisResult.detail });
         try { EE.forceCloseTrade(tradeId, 'GII-EXIT:' + thesisResult.reason); } catch (e) {}
+        if (_srcLower === 'ic' && window.ICRiskEngine) { try { ICRiskEngine.onICTradeClosed(); } catch (e) {} }
         _stats.closed++;
         return;
       }
@@ -615,6 +617,7 @@
       if (oppResult.action === 'FORCE_CLOSE') {
         _log('FORCE_CLOSE', tradeId, asset, oppResult.reason, { detail: oppResult.detail });
         try { EE.forceCloseTrade(tradeId, 'GII-EXIT:' + oppResult.reason); } catch (e) {}
+        if (_srcLower === 'ic' && window.ICRiskEngine) { try { ICRiskEngine.onICTradeClosed(); } catch (e) {} }
         _stats.closed++;
         return;
       }

@@ -1522,6 +1522,38 @@
       riskAmt = Math.max(0, remainingBudget);   // scale down rather than reject outright
     }
 
+    /* ── IC DYNAMIC RISK SCALING ────────────────────────────────────────────
+     * ICRiskEngine tracks rolling IC win rate / expectancy / TP-hit rate and
+     * adjusts the risk multiplier incrementally (0.25x–3.0x of base risk).
+     * Per-asset bonuses for TSLA and VXX are applied when those assets have
+     * independently demonstrated positive expectancy.
+     * Total IC portfolio exposure is hard-capped at 15 % of virtual_balance.
+     * ----------------------------------------------------------------------- */
+    var _sigSrc = (sig.source || _inferSource(sig.reason || '')).toLowerCase();
+    if (_sigSrc === 'ic' && window.ICRiskEngine) {
+      /* Exposure cap: reject if open IC notional already ≥ 15 % of account */
+      var _openICUSD = openTrades().filter(function (t) {
+        return (t.source || '').toLowerCase() === 'ic';
+      }).reduce(function (s, t) { return s + Math.abs(t.size_usd || 0); }, 0);
+
+      if (ICRiskEngine.isAtMaxICExposure(_cfg.virtual_balance, _openICUSD)) {
+        log('RISK', sig.asset + ' IC exposure cap: $' + _openICUSD.toFixed(2) +
+            ' open ≥ $' + (_cfg.virtual_balance * 0.15).toFixed(2) + ' cap — signal skipped', 'amber');
+        riskAmt = 0;
+      } else {
+        /* Dynamic multiplier based on rolling IC edge */
+        var _icMult = ICRiskEngine.getICRiskMultiplier(normaliseAsset(sig.asset));
+        if (_icMult !== 1.0) {
+          var _beforeIC = riskAmt;
+          /* Re-clamp to budget after scaling to preserve portfolio RoR guard */
+          riskAmt = Math.min(Math.max(0, remainingBudget), riskAmt * _icMult);
+          log('RISK', sig.asset + ' IC scale ' + _icMult.toFixed(2) + 'x: $' +
+              _beforeIC.toFixed(2) + ' → $' + riskAmt.toFixed(2), 'dim');
+        }
+      }
+    }
+    /* ─────────────────────────────────────────────────────────────────────── */
+
     var units    = (slDist > 0 && riskAmt > 0) ? riskAmt / slDist : 0;
     var sizeUsd  = units * entryPrice;
 

@@ -10631,6 +10631,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.GII_AGENT_SCALPER && typeof GII_AGENT_SCALPER.onTradeResult === 'function') GII_AGENT_SCALPER.onTradeResult(trade);
     if (window.GII_AGENT_SCALPER_SESSION && typeof GII_AGENT_SCALPER_SESSION.onTradeResult === 'function') GII_AGENT_SCALPER_SESSION.onTradeResult(trade);
     if (window.GII_SCRAPER_MANAGER && typeof GII_SCRAPER_MANAGER.onTradeResult === 'function') GII_SCRAPER_MANAGER.onTradeResult(trade);
+    /* IC Risk Engine — recalc rolling metrics whenever any IC trade closes (TP, SL, or gii-exit) */
+    if (window.ICRiskEngine && (trade.source || '').toLowerCase() === 'ic') {
+      try { ICRiskEngine.onICTradeClosed(); } catch (e) {}
+    }
 
     var kws = trade.matched_keywords;
     if (!kws || !kws.length) return;
@@ -13067,8 +13071,12 @@ function _modalKeyHandler(e) {
 <!-- Alpaca Broker adapter — loaded before EE so venue router is available -->
 <script src="agents/alpaca-broker.js?v=2"></script>
 
+<!-- IC Risk Engine — must load before executionEngine so ICRiskEngine is available
+     when the first IC signal is sized. Self-contained; reads localStorage directly. -->
+<script src="agents/ic-risk-engine.js?v=1"></script>
+
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=82"></script>
+<script src="executionEngine.js?v=83"></script>
 
 <!-- GII Core — loaded before agents so window.GII (defensiveAssets, riskAssets, etc.) is
      available when agent IIFEs execute. Agents all guard GII calls, so order is safe. -->
@@ -13116,7 +13124,7 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-risk.js?v=1"></script>
 <script src="agents/gii-manager.js?v=6"></script>
 <script src="agents/gii-entry.js?v=11"></script>
-<script src="agents/gii-exit.js?v=11"></script>
+<script src="agents/gii-exit.js?v=12"></script>
 <script src="agents/gii-portfolio.js?v=4"></script>
 <script src="agents/gii-routing.js?v=8"></script>
 <script src="gii-meta.js?v=2"></script>
@@ -13135,6 +13143,11 @@ function _modalKeyHandler(e) {
       if (el && window.EE) el.textContent = EE.listBackups().length;
     } catch(e) {}
   }, 1500);
+
+  // Initialise IC Risk Engine once all scripts and trade history are in place
+  setTimeout(function() {
+    try { if (window.ICRiskEngine) ICRiskEngine.init(); } catch(e) {}
+  }, 2000);
 </script>
 </body>
 </html>
