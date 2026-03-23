@@ -3075,7 +3075,9 @@
       equity.push({ ts: t.timestamp_close, bal: cumPnl });
     });
 
-    /* Max drawdown */
+    /* Max drawdown — expressed as % of account balance (not % of P&L peak,
+       which produces nonsensical values like -285% when peak P&L is tiny) */
+    var _ddBaseline = _cfg.virtual_balance || 1000;
     var maxDDPct = 0, maxDDUsd = 0, peak = 0, running = 0;
     sorted.forEach(function (t) {
       running += (t.pnl_usd || 0);
@@ -3083,7 +3085,7 @@
       var dd = peak - running;
       if (dd > maxDDUsd) {
         maxDDUsd = dd;
-        maxDDPct = peak > 0 ? dd / peak * 100 : 0;
+        maxDDPct = _ddBaseline > 0 ? dd / _ddBaseline * 100 : 0;
       }
     });
 
