@@ -504,14 +504,16 @@
       var isIC      = item.source === 'ic';
       var isGII     = !isScalper && !isIC;   // gii, gii-core, or untagged geo signals
 
-      /* Per-asset approved cooldown — blocks re-approval of same asset within
-         30 minutes of last approval. Prevents runaway escalation chains from
-         opening a new trade immediately after a trade closes on same asset. */
-      if ((now - (_lastApproved[sig.asset] || 0)) < APPROVED_COOLDOWN_MS) {
+      /* Per-asset approved cooldown — GII only. Blocks re-approval of same asset
+         within 30 minutes of last GII approval. Prevents runaway escalation chains
+         from re-firing immediately after a trade closes.
+         IC and scalper signals are exempt — they have their own edge tracking and
+         should not be throttled by a rule designed for GII loop prevention. */
+      if (isGII && (now - (_lastApproved[sig.asset] || 0)) < APPROVED_COOLDOWN_MS) {
         var _coolMinsLeft = Math.ceil((APPROVED_COOLDOWN_MS - (now - (_lastApproved[sig.asset] || 0))) / 60000);
         _stats.rejected++;
         _rejected.unshift({ asset: sig.asset, dir: sig.dir,
-          reason: 'approved-cooldown: ' + _coolMinsLeft + 'min remaining', ts: now });
+          reason: 'gii-approved-cooldown: ' + _coolMinsLeft + 'min remaining', ts: now });
         if (_rejected.length > 50) _rejected.pop();
         return;
       }

@@ -2154,12 +2154,14 @@
         var displayPrice = price || _priceCache[normaliseAsset(trade.asset)] || null;
         if (displayPrice) _livePrice[trade.trade_id] = displayPrice;
         if (!price) {
-          // Stale-price watchdog: if no fresh price AND cache is > 10 min old, force-close.
+          // Stale-price watchdog: if no fresh price AND cache is > 30 min old, force-close.
           // Prevents ghost trades accumulating funding costs during feed outages.
+          // Raised from 10→30 min: 10 min was too aggressive during feed blips or
+          // cold starts where the price backend needs time to warm up.
           var _cacheAge = _priceCacheTs[normaliseAsset(trade.asset)]
             ? (Date.now() - _priceCacheTs[normaliseAsset(trade.asset)])
             : (Date.now() - new Date(trade.timestamp_open || 0).getTime());
-          if (_cacheAge > 10 * 60 * 1000) {
+          if (_cacheAge > 30 * 60 * 1000) {
             var _fallback = _priceCache[normaliseAsset(trade.asset)] || trade.entry_price;
             log('TRADE', trade.asset + ' STALE-PRICE-TIMEOUT: no fresh price for ' +
                 Math.round(_cacheAge / 60000) + 'min — closing at last known $' +

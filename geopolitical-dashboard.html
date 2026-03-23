@@ -2179,6 +2179,26 @@
   .lpm-hdr-right { display:flex; gap:12px; align-items:center; }
   .lpm-ts     { color:#1a2436; font-size:10px; }
   .lpm-toggle { color:#2a3a50; font-size:10px; }
+  .lpm-reset-btn { background:#1a2436; border:1px solid #2a3a50; color:#4a6a8a; font-family:'Courier New',monospace; font-size:9px; padding:2px 7px; border-radius:3px; cursor:pointer; letter-spacing:0.5px; }
+  .lpm-reset-btn:hover { background:#243040; color:#6a9aba; border-color:#4a6a8a; }
+  /* ── Reset Modal ── */
+  #lpm-reset-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; }
+  #lpm-reset-modal.open { display:flex; }
+  #lpm-reset-box { background:#060b13; border:1px solid #2a3a50; border-radius:6px; padding:24px 28px; min-width:340px; font-family:'Courier New',monospace; color:#8aaac0; }
+  #lpm-reset-box h3 { margin:0 0 6px; color:#c0d0e0; font-size:12px; letter-spacing:1.5px; }
+  #lpm-reset-box .lpm-rm-sub { font-size:10px; color:#4a6a8a; margin-bottom:18px; }
+  #lpm-reset-box .lpm-rm-state { background:#0a1220; border:1px solid #1a2436; padding:10px 12px; border-radius:4px; font-size:10px; margin-bottom:18px; line-height:1.8; }
+  #lpm-reset-box .lpm-rm-state span { color:#c0d0e0; }
+  #lpm-reset-box .lpm-rm-bal { display:flex; align-items:center; gap:8px; margin-bottom:18px; font-size:10px; }
+  #lpm-reset-box .lpm-rm-bal input { background:#0a1220; border:1px solid #2a3a50; color:#c0d0e0; font-family:'Courier New',monospace; font-size:11px; padding:4px 8px; border-radius:3px; width:90px; }
+  #lpm-reset-box .lpm-rm-btns { display:flex; gap:10px; flex-wrap:wrap; }
+  .lpm-rm-btn { flex:1; padding:8px 12px; border:1px solid; border-radius:4px; font-family:'Courier New',monospace; font-size:10px; letter-spacing:0.5px; cursor:pointer; text-align:center; }
+  .lpm-rm-btn-soft { background:#0a1a10; border-color:#1a4a2a; color:#4a9a6a; }
+  .lpm-rm-btn-soft:hover { background:#0f2a18; color:#6aba8a; }
+  .lpm-rm-btn-full { background:#1a0a0a; border-color:#4a1a1a; color:#9a4a4a; }
+  .lpm-rm-btn-full:hover { background:#2a1010; color:#ba6a6a; }
+  .lpm-rm-btn-cancel { background:#0a0d14; border-color:#2a3a50; color:#4a6a8a; }
+  .lpm-rm-btn-cancel:hover { background:#141f30; color:#6a8aaa; }
   #lpm-status {
     padding:8px 14px; font-size:12px; font-weight:bold; letter-spacing:0.3px;
     display:flex; align-items:center; gap:10px; border-bottom:1px solid #141f30;
@@ -13140,7 +13160,7 @@ function _modalKeyHandler(e) {
 <script src="agents/ic-risk-engine.js?v=2"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=84"></script>
+<script src="executionEngine.js?v=86"></script>
 
 <!-- GII Core — loaded before agents so window.GII (defensiveAssets, riskAssets, etc.) is
      available when agent IIFEs execute. Agents all guard GII calls, so order is safe. -->
@@ -13187,7 +13207,7 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-deescalation.js?v=1"></script>
 <script src="agents/gii-risk.js?v=1"></script>
 <script src="agents/gii-manager.js?v=6"></script>
-<script src="agents/gii-entry.js?v=12"></script>
+<script src="agents/gii-entry.js?v=13"></script>
 <script src="agents/gii-exit.js?v=12"></script>
 <script src="agents/gii-portfolio.js?v=4"></script>
 <script src="agents/gii-routing.js?v=8"></script>
@@ -13404,9 +13424,13 @@ function _modalKeyHandler(e) {
 
         var ts = new Date().toTimeString().substr(0, 8);
         _el.innerHTML = [
-          '<div class="lpm-hdr" onclick="(function(){var b=document.getElementById(\'lpm-body\');b&&(b.style.display=b.style.display===\'none\'?\'\':\'none\')})()">',
+          '<div class="lpm-hdr" onclick="(function(e){if(e.target.closest(\'.lpm-reset-btn\'))return;var b=document.getElementById(\'lpm-body\');b&&(b.style.display=b.style.display===\'none\'?\'\':\'none\')})()">',
             '<span class="lpm-hdr-title">◈ LIVE PERFORMANCE MONITOR</span>',
-            '<div class="lpm-hdr-right"><span class="lpm-ts">Updated ' + ts + '</span><span class="lpm-toggle">▲ click to hide</span></div>',
+            '<div class="lpm-hdr-right">',
+              '<button class="lpm-reset-btn" onclick="event.stopPropagation();window._lpmShowReset()" title="Reset system state">⟳ RESET</button>',
+              '<span class="lpm-ts">Updated ' + ts + '</span>',
+              '<span class="lpm-toggle">▲ click to hide</span>',
+            '</div>',
           '</div>',
           '<div id="lpm-status" class="lpm-s-' + sys.cls + '">',
             '<span style="font-size:10px;opacity:0.6">SYSTEM STATUS</span>',
@@ -13428,6 +13452,102 @@ function _modalKeyHandler(e) {
       window._lpmRender = _render;   // expose for manual refresh: _lpmRender()
     })();
   }, 4000);
+
+  /* ── Reset Modal ─────────────────────────────────────────────────────────── */
+  (function () {
+    /* Inject modal HTML */
+    var modal = document.createElement('div');
+    modal.id = 'lpm-reset-modal';
+    modal.innerHTML = [
+      '<div id="lpm-reset-box">',
+        '<h3>⟳ SYSTEM RESET</h3>',
+        '<div class="lpm-rm-sub">Choose reset level. All code and safety rules stay in place.</div>',
+        '<div class="lpm-rm-state" id="lpm-rm-state">Loading...</div>',
+        '<div class="lpm-rm-bal">',
+          '<span>Starting balance: $</span>',
+          '<input type="number" id="lpm-rm-bal-input" value="1000" min="100" max="100000" step="100">',
+        '</div>',
+        '<div class="lpm-rm-btns">',
+          '<div class="lpm-rm-btn lpm-rm-btn-soft" onclick="window._lpmDoReset(\'soft\')">',
+            '✓ SOFT RESET<br><span style="font-size:9px;opacity:0.7">Clears trades + P&L<br>Keeps self-learning</span>',
+          '</div>',
+          '<div class="lpm-rm-btn lpm-rm-btn-full" onclick="window._lpmDoReset(\'full\')">',
+            '✗ FULL RESET<br><span style="font-size:9px;opacity:0.7">Clears everything<br>Wipes self-learning</span>',
+          '</div>',
+          '<div class="lpm-rm-btn lpm-rm-btn-cancel" onclick="window._lpmHideReset()">',
+            'CANCEL',
+          '</div>',
+        '</div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(modal);
+
+    /* Close on backdrop click */
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) window._lpmHideReset();
+    });
+
+    window._lpmShowReset = function () {
+      /* Populate current state */
+      var trades  = JSON.parse(localStorage.getItem('geodash_ee_trades_v1') || '[]');
+      var bal     = window.EE ? EE.getConfig().virtual_balance : '—';
+      var mult    = localStorage.getItem('ic_risk_mult') || '1';
+      var fbKeys  = Object.keys(JSON.parse(localStorage.getItem('gii_agent_feedback_v1') || '{}')).length;
+      var nudges  = Object.keys(JSON.parse(localStorage.getItem('geointel_kw_nudges_v1') || '{}')).length;
+      var state   = document.getElementById('lpm-rm-state');
+      if (state) state.innerHTML = [
+        'Trades: <span>' + trades.length + '</span> &nbsp;|&nbsp; ',
+        'Balance: <span>$' + (typeof bal === 'number' ? bal.toFixed(2) : bal) + '</span> &nbsp;|&nbsp; ',
+        'IC mult: <span>' + parseFloat(mult).toFixed(2) + 'x</span><br>',
+        'Self-learning: <span>' + fbKeys + ' agent entries, ' + nudges + ' keyword nudges</span>',
+      ].join('');
+      modal.classList.add('open');
+    };
+
+    window._lpmHideReset = function () {
+      modal.classList.remove('open');
+    };
+
+    window._lpmDoReset = function (type) {
+      var bal = parseFloat(document.getElementById('lpm-rm-bal-input').value) || 1000;
+      if (!confirm((type === 'full' ? 'FULL RESET: this will also wipe all self-learning data.' : 'SOFT RESET: trades and P&L will be cleared. Self-learning is preserved.') + '\n\nBalance will reset to $' + bal + '.\n\nProceed?')) return;
+
+      /* Step 1: clear localStorage PnL keys immediately so EE saves empty state on unload */
+      localStorage.setItem('geodash_ee_trades_v1', '[]');
+      localStorage.setItem('geodash_ee_siglog_v1', '[]');
+      localStorage.setItem('geodash_pnl_history_v1', '[]');
+      localStorage.setItem('geodash_hitrate_v1', '[]');
+      localStorage.removeItem('geodash_session_balance_v1');
+      localStorage.removeItem('geodash_session_start_v1');
+      localStorage.setItem('ic_risk_mult', '1');
+
+      if (type === 'full') {
+        localStorage.removeItem('gii_agent_feedback_v1');
+        localStorage.removeItem('gii_trade_map_v1');
+        localStorage.removeItem('geodash_learned_weights_v1');
+        localStorage.removeItem('geointel_kw_nudges_v1');
+        localStorage.removeItem('gii_brain_v1');
+        localStorage.removeItem('gii_scalper_feedback_v1');
+        localStorage.removeItem('gii_scalper_session_feedback_v1');
+        localStorage.removeItem('gii_scraper_mgr_feedback_v1');
+        localStorage.removeItem('gii_escalation_v1');
+      }
+
+      /* Step 2: use EE's own fullReset with the chosen balance */
+      try {
+        if (window.EE && typeof EE.fullReset === 'function') EE.fullReset(bal);
+      } catch (e) {
+        /* If fullReset triggers a reload that loses balance, set it back */
+        var cfg = JSON.parse(localStorage.getItem('geodash_ee_config_v2') || '{}');
+        cfg.virtual_balance = bal;
+        localStorage.setItem('geodash_ee_config_v2', JSON.stringify(cfg));
+        if (window.ICRiskEngine) ICRiskEngine.init();
+        if (typeof window._lpmRender === 'function') window._lpmRender();
+      }
+
+      window._lpmHideReset();
+    };
+  })();
 </script>
 </body>
 </html>
