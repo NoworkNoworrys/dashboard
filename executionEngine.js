@@ -1305,6 +1305,27 @@
     return 'ic';  // default: IC-sourced trade
   }
 
+  /* Capture market regime at the moment a trade is opened.
+     Reads from GII, GII_AGENT_MACRO, and __IC — all optional/safe. */
+  function _captureRegime() {
+    var r = { ts: new Date().toISOString() };
+    try {
+      if (window.GII && typeof GII.gti === 'function') {
+        var g = GII.gti();
+        if (g) { r.gti = +g.value.toFixed(1); r.gtiLevel = g.level; }
+      }
+      if (window.GII_AGENT_MACRO && typeof GII_AGENT_MACRO.status === 'function') {
+        var m = GII_AGENT_MACRO.status();
+        if (m) { r.riskMode = m.riskMode || 'NEUTRAL'; r.vix = m.vix || null; }
+      }
+      if (window.__IC && window.__IC.stats) {
+        var w = window.__IC.stats.warnings || 0;
+        r.threatLevel = w >= 5 ? 'CRITICAL' : w >= 3 ? 'HIGH' : w >= 1 ? 'MODERATE' : 'LOW';
+      }
+    } catch (e) {}
+    return r;
+  }
+
   /* Build a complete trade object from a signal + entry price */
   function buildTrade(sig, entryPrice) {
     var dir     = sig.dir === 'SHORT' ? 'SHORT' : 'LONG';
@@ -1644,7 +1665,9 @@
       // size_usd / virtual_balance in the UI to see the effective leverage.
       leverage:     sig.leverage || 1,
       // Original (pre-routing) asset name if gii-routing remapped it (e.g. GLD→XAU).
-      original_asset: sig.original_asset || null
+      original_asset: sig.original_asset || null,
+      // Regime snapshot: market conditions at trade open (GTI level, risk mode, VIX, threat).
+      regime: _captureRegime()
     };
   }
 

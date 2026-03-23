@@ -2244,6 +2244,23 @@
     .lpm-grid { grid-template-columns:1fr 1fr; }
     .lpm-col:nth-child(3) { grid-column:1/-1; border-top:1px solid #0c1520; border-right:none; }
   }
+  /* ── Session Summary Modal ──────────────────────────────────────────────── */
+  #lpm-sess-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center}
+  #lpm-sess-modal.open{display:flex}
+  #lpm-sess-box{background:#111;border:1px solid #333;border-radius:6px;padding:20px;width:520px;max-height:80vh;overflow-y:auto;color:#ccc;font-size:11px}
+  #lpm-sess-box h3{margin:0 0 10px;color:#fff;font-size:13px;letter-spacing:1px}
+  .lpm-ss-section{margin-bottom:12px;border-bottom:1px solid #222;padding-bottom:10px}
+  .lpm-ss-section:last-child{border-bottom:none;margin-bottom:0}
+  .lpm-ss-label{color:#666;text-transform:uppercase;font-size:9px;letter-spacing:1px;margin-bottom:4px}
+  .lpm-ss-row{display:flex;justify-content:space-between;margin:2px 0}
+  .lpm-ss-row span:first-child{color:#888}
+  .lpm-ss-row span:last-child{color:#eee;font-weight:bold}
+  .lpm-ss-close{margin-top:14px;text-align:center}
+  .lpm-ss-close-btn{background:#222;border:1px solid #444;color:#ccc;padding:6px 24px;cursor:pointer;border-radius:3px;font-size:11px;letter-spacing:1px}
+  .lpm-ss-close-btn:hover{background:#333}
+  .lpm-ss-regime-row{display:flex;justify-content:space-between;margin:2px 0;font-size:10px}
+  .lpm-ss-regime-row span:first-child{color:#888;min-width:100px}
+  .lpm-ss-regime-row span{color:#ccc}
   </style>
 
   <!-- ═══════════════════════════ LIVE PRICE TICKER ════════════════════════════════ -->
@@ -13160,7 +13177,7 @@ function _modalKeyHandler(e) {
 <script src="agents/ic-risk-engine.js?v=2"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=86"></script>
+<script src="executionEngine.js?v=87"></script>
 
 <!-- GII Core — loaded before agents so window.GII (defensiveAssets, riskAssets, etc.) is
      available when agent IIFEs execute. Agents all guard GII calls, so order is safe. -->
@@ -13427,6 +13444,7 @@ function _modalKeyHandler(e) {
           '<div class="lpm-hdr" onclick="(function(e){if(e.target.closest(\'.lpm-reset-btn\'))return;var b=document.getElementById(\'lpm-body\');b&&(b.style.display=b.style.display===\'none\'?\'\':\'none\')})()">',
             '<span class="lpm-hdr-title">◈ LIVE PERFORMANCE MONITOR</span>',
             '<div class="lpm-hdr-right">',
+              '<button class="lpm-reset-btn" onclick="event.stopPropagation();window._lpmShowSession()" title="Session summary" style="background:#1a2a1a;border-color:#2d5a2d;color:#4caf50">◈ SESSION</button>',
               '<button class="lpm-reset-btn" onclick="event.stopPropagation();window._lpmShowReset()" title="Reset system state">⟳ RESET</button>',
               '<span class="lpm-ts">Updated ' + ts + '</span>',
               '<span class="lpm-toggle">▲ click to hide</span>',
@@ -13546,6 +13564,166 @@ function _modalKeyHandler(e) {
       }
 
       window._lpmHideReset();
+    };
+  })();
+
+  /* ── Session Summary Modal ───────────────────────────────────────────────── */
+  (function () {
+    var modal = document.createElement('div');
+    modal.id = 'lpm-sess-modal';
+    modal.innerHTML = '<div id="lpm-sess-box"><div id="lpm-sess-content">Loading...</div><div class="lpm-ss-close"><button class="lpm-ss-close-btn" onclick="window._lpmHideSession()">CLOSE</button></div></div>';
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) window._lpmHideSession();
+    });
+
+    function _fmt(n) {
+      return (n >= 0 ? '+' : '') + (typeof n === 'number' ? n.toFixed(2) : n);
+    }
+    function _fmtTime(iso) {
+      if (!iso) return '—';
+      var d = new Date(iso);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    function _dur(ms) {
+      var h = Math.floor(ms / 3600000);
+      var m = Math.floor((ms % 3600000) / 60000);
+      return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+    }
+    function _color(n) {
+      return n > 0 ? '#4ade80' : n < 0 ? '#f87171' : '#ccc';
+    }
+
+    window._lpmShowSession = function () {
+      var now = Date.now();
+
+      /* ── Session start ── */
+      var sessStartIso = (window.EE && EE.getState && EE.getState().sessionStart)
+                       || localStorage.getItem('geodash_session_start_v1')
+                       || new Date().toISOString();
+      var sessStartMs  = new Date(sessStartIso).getTime();
+
+      /* ── Trades this session ── */
+      var allTrades = (window.EE && typeof EE.getAllTrades === 'function') ? EE.getAllTrades() : [];
+      var sessTrades = allTrades.filter(function (t) {
+        return new Date(t.timestamp_open).getTime() >= sessStartMs;
+      });
+      var closed = sessTrades.filter(function (t) { return t.status === 'CLOSED'; });
+      var open   = sessTrades.filter(function (t) { return t.status === 'OPEN'; });
+      var won    = closed.filter(function (t) { return (t.pnl_usd || 0) > 0; });
+      var lost   = closed.filter(function (t) { return (t.pnl_usd || 0) <= 0; });
+      var pnlSum = closed.reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
+      var winRate = closed.length > 0 ? Math.round(won.length / closed.length * 100) : 0;
+
+      var best = null, worst = null;
+      closed.forEach(function (t) {
+        if (!best  || (t.pnl_usd || 0) > (best.pnl_usd  || 0)) best  = t;
+        if (!worst || (t.pnl_usd || 0) < (worst.pnl_usd || 0)) worst = t;
+      });
+
+      /* ── Skip reasons from signal log ── */
+      var skipMap = {};
+      try {
+        var sigLog = JSON.parse(localStorage.getItem('geodash_ee_siglog_v1') || '[]');
+        sigLog.forEach(function (e) {
+          if (e.action === 'SKIPPED' && e.skip_reason && new Date(e.ts).getTime() >= sessStartMs) {
+            var k = e.skip_reason;
+            skipMap[k] = (skipMap[k] || 0) + 1;
+          }
+        });
+      } catch (ex) {}
+      /* Also include recentRejected from GII_AGENT_ENTRY */
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.status === 'function') {
+        var giiSt = GII_AGENT_ENTRY.status();
+        if (giiSt && giiSt.recentRejected) {
+          giiSt.recentRejected.forEach(function (r) {
+            if (r.ts >= sessStartMs) {
+              var k = 'GII: ' + (r.reason || 'rejected');
+              skipMap[k] = (skipMap[k] || 0) + 1;
+            }
+          });
+        }
+      }
+      var skipSorted = Object.keys(skipMap).sort(function (a, b) { return skipMap[b] - skipMap[a]; }).slice(0, 5);
+
+      /* ── Regime performance breakdown ── */
+      var regimeMap = {};
+      closed.forEach(function (t) {
+        var lvl = (t.regime && t.regime.gtiLevel) ? t.regime.gtiLevel : null;
+        if (!lvl) return;
+        if (!regimeMap[lvl]) regimeMap[lvl] = { total: 0, won: 0 };
+        regimeMap[lvl].total++;
+        if ((t.pnl_usd || 0) > 0) regimeMap[lvl].won++;
+      });
+      var regimeKeys = Object.keys(regimeMap);
+
+      /* ── Build HTML ── */
+      var h = [];
+
+      /* Header */
+      h.push('<h3>◈ SESSION SUMMARY</h3>');
+
+      /* Section: Session */
+      h.push('<div class="lpm-ss-section">');
+      h.push('<div class="lpm-ss-label">Session</div>');
+      h.push('<div class="lpm-ss-row"><span>Started</span><span>' + _fmtTime(sessStartIso) + ' (' + new Date(sessStartIso).toLocaleDateString() + ')</span></div>');
+      h.push('<div class="lpm-ss-row"><span>Duration</span><span>' + _dur(now - sessStartMs) + '</span></div>');
+      h.push('<div class="lpm-ss-row"><span>Current time</span><span>' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</span></div>');
+      h.push('</div>');
+
+      /* Section: Trades */
+      h.push('<div class="lpm-ss-section">');
+      h.push('<div class="lpm-ss-label">Trades</div>');
+      h.push('<div class="lpm-ss-row"><span>Total taken</span><span>' + sessTrades.length + '</span></div>');
+      h.push('<div class="lpm-ss-row"><span>Closed</span><span>' + closed.length + ' &nbsp; (' + won.length + 'W / ' + lost.length + 'L)</span></div>');
+      h.push('<div class="lpm-ss-row"><span>Still open</span><span>' + open.length + '</span></div>');
+      h.push('<div class="lpm-ss-row"><span>Win rate</span><span style="color:' + (winRate >= 50 ? '#4ade80' : '#f87171') + '">' + winRate + '%</span></div>');
+      h.push('</div>');
+
+      /* Section: P&L */
+      h.push('<div class="lpm-ss-section">');
+      h.push('<div class="lpm-ss-label">P&amp;L</div>');
+      h.push('<div class="lpm-ss-row"><span>Session total</span><span style="color:' + _color(pnlSum) + '">' + _fmt(pnlSum) + '</span></div>');
+      if (best)  h.push('<div class="lpm-ss-row"><span>Best trade</span><span style="color:#4ade80">' + best.asset  + ' ' + _fmt(best.pnl_usd)  + '</span></div>');
+      if (worst) h.push('<div class="lpm-ss-row"><span>Worst trade</span><span style="color:#f87171">' + worst.asset + ' ' + _fmt(worst.pnl_usd) + '</span></div>');
+      if (!best && !worst) h.push('<div class="lpm-ss-row"><span>No closed trades yet</span><span>—</span></div>');
+      h.push('</div>');
+
+      /* Section: Skip / Rejection reasons */
+      h.push('<div class="lpm-ss-section">');
+      h.push('<div class="lpm-ss-label">Top skip reasons</div>');
+      if (skipSorted.length === 0) {
+        h.push('<div class="lpm-ss-row"><span>No skips recorded this session</span><span>—</span></div>');
+      } else {
+        skipSorted.forEach(function (k) {
+          h.push('<div class="lpm-ss-row"><span style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + k + '">' + k + '</span><span style="flex-shrink:0;margin-left:8px">×' + skipMap[k] + '</span></div>');
+        });
+      }
+      h.push('</div>');
+
+      /* Section: Regime breakdown (only if any regime data present) */
+      if (regimeKeys.length > 0) {
+        h.push('<div class="lpm-ss-section">');
+        h.push('<div class="lpm-ss-label">Regime performance (GTI level)</div>');
+        h.push('<div class="lpm-ss-regime-row" style="color:#555;font-size:9px"><span>Level</span><span>Trades</span><span>Win rate</span></div>');
+        var order = ['NORMAL','MODERATE','HIGH','EXTREME'];
+        order.forEach(function (lvl) {
+          if (!regimeMap[lvl]) return;
+          var d = regimeMap[lvl];
+          var wr = Math.round(d.won / d.total * 100);
+          var col = wr >= 60 ? '#4ade80' : wr >= 40 ? '#fbbf24' : '#f87171';
+          h.push('<div class="lpm-ss-regime-row"><span>' + lvl + '</span><span>' + d.total + '</span><span style="color:' + col + '">' + wr + '%</span></div>');
+        });
+        h.push('</div>');
+      }
+
+      document.getElementById('lpm-sess-content').innerHTML = h.join('');
+      modal.classList.add('open');
+    };
+
+    window._lpmHideSession = function () {
+      modal.classList.remove('open');
     };
   })();
 </script>
