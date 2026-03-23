@@ -10,6 +10,7 @@
   var CYCLE_INTERVAL   = 62000;  // 62s between cycles
   var GTI_HISTORY_MAX  = 60;     // 60 data points for chart
   var FEEDBACK_KEY     = 'gii_agent_feedback_v1';
+  var TRADE_MAP_KEY    = 'gii_trade_map_v1';   // persists attribution across page reloads
   var MAX_VOL_BOOST    = 2.0;
 
   // Base prior rates by region type
@@ -79,10 +80,25 @@
       var raw = localStorage.getItem(FEEDBACK_KEY);
       _feedback = raw ? JSON.parse(raw) : {};
     } catch (e) { _feedback = {}; }
+    /* Also restore trade attribution map so feedback works across page reloads.
+       Without this, any trade that opens in one session and closes after a reload
+       finds an empty _giiTradeMap and records no feedback. */
+    try {
+      var rawMap = localStorage.getItem(TRADE_MAP_KEY);
+      if (rawMap) {
+        var parsed = JSON.parse(rawMap);
+        /* Merge with in-memory map (don't overwrite entries written this session) */
+        Object.keys(parsed).forEach(function (k) {
+          if (!_giiTradeMap[k]) _giiTradeMap[k] = parsed[k];
+        });
+      }
+    } catch (e) {}
   }
 
   function _saveFeedback() {
     try { localStorage.setItem(FEEDBACK_KEY, JSON.stringify(_feedback)); } catch (e) {}
+    /* Save trade map alongside feedback so attribution survives reloads */
+    try { localStorage.setItem(TRADE_MAP_KEY, JSON.stringify(_giiTradeMap)); } catch (e) {}
   }
 
   // ── agent collection ───────────────────────────────────────────────────────
@@ -616,6 +632,8 @@
         var ak = sig.asset + '_' + (sig.dir === 'SHORT' ? 'short' : 'long');
         if (agentContrib[ak] && agentContrib[ak].length) _giiTradeMap[ak] = agentContrib[ak].slice();
       });
+      // Persist immediately so attribution survives any page reload before the trade closes
+      try { localStorage.setItem(TRADE_MAP_KEY, JSON.stringify(_giiTradeMap)); } catch (e) {}
 
       try {
         /* Route through entry agent (confluence check) if available */
