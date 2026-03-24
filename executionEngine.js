@@ -97,7 +97,13 @@
     'WHT':'agri',     'CORN':'agri',    'SOYB':'agri',
     'DAL':'airlines', 'UAL':'airlines',
     'LIT':'battery',  'COPX':'metals',  'XME':'metals',
-    'JPY':'forex',    'CHF':'forex',    'NOK':'forex',    'GBP':'forex',
+    /* Forex — via TickTrader broker */
+    'EURUSD':'forex', 'GBPUSD':'forex', 'USDJPY':'forex', 'USDCHF':'forex',
+    'AUDUSD':'forex', 'USDCAD':'forex', 'NZDUSD':'forex',
+    'GBPJPY':'forex', 'EURJPY':'forex', 'EURGBP':'forex',
+    'EURCAD':'forex', 'EURCHF':'forex', 'AUDJPY':'forex', 'CHFJPY':'forex',
+    'EUR':'forex',    'JPY':'forex',    'CHF':'forex',    'NOK':'forex',
+    'GBP':'forex',    'AUD':'forex',    'CAD':'forex',    'NZD':'forex',
     'INDA':'em'
   };
 
@@ -921,7 +927,18 @@
       'NASDAQ':       'QQQ',   'NASDAQ 100':   'QQQ',   'NASDAQ100':    'QQQ',
       'DOW JONES':    'DIA',   'DOW':          'DIA',
       'BITCOIN':      'BTC',   'ETHEREUM':     'ETH',
-      'JAPANESE YEN': 'JPY',   'SWISS FRANC':  'CHF'
+      'JAPANESE YEN': 'JPY',   'SWISS FRANC':  'CHF',
+      /* Forex pairs — slash/space variants → canonical 6-char EE name */
+      'EUR/USD': 'EURUSD',  'EUR USD': 'EURUSD',
+      'GBP/USD': 'GBPUSD',  'GBP USD': 'GBPUSD',
+      'USD/JPY': 'USDJPY',  'USD JPY': 'USDJPY',
+      'USD/CHF': 'USDCHF',  'USD CHF': 'USDCHF',
+      'AUD/USD': 'AUDUSD',  'AUD USD': 'AUDUSD',
+      'USD/CAD': 'USDCAD',  'USD CAD': 'USDCAD',
+      'NZD/USD': 'NZDUSD',  'NZD USD': 'NZDUSD',
+      'GBP/JPY': 'GBPJPY',  'EUR/JPY': 'EURJPY',
+      'EUR/GBP': 'EURGBP',  'EUR/CAD': 'EURCAD',
+      'EUR/CHF': 'EURCHF',  'AUD/JPY': 'AUDJPY'
     };
     var up = String(asset || '').toUpperCase().trim();
     if (MULTI_WORD_ALIASES[up]) return MULTI_WORD_ALIASES[up];
@@ -1728,6 +1745,20 @@
         });
     }
 
+    // ── Fire TickTrader order if this trade is routed there ───────────────
+    if (trade.venue === 'TICKTRADER' && window.TTBroker && TTBroker.isConnected()) {
+      TTBroker.placeOrder(trade.asset, trade.size_usd, trade.direction, trade)
+        .then(function (order) {
+          trade.broker_order_id = order.id;
+          trade.broker_status   = order.status;
+          saveTrades();
+          log('TT', trade.asset + ' order placed: ' + order.id + ' (' + order.status + ')', 'cyan');
+        })
+        .catch(function (e) {
+          log('TT', '⚠ Order failed for ' + trade.asset + ': ' + e.message, 'amber');
+        });
+    }
+
     // Auto-capture in Hit Rate Tracker if available
     if (window.HRS && typeof HRS.capture === 'function') {
       HRS.capture({
@@ -1911,6 +1942,13 @@
       });
     }
 
+    // ── Close TickTrader position if routed there ─────────────────────────
+    if (trade.venue === 'TICKTRADER' && window.TTBroker && TTBroker.isConnected()) {
+      TTBroker.closePosition(trade.asset, trade.broker_order_id).catch(function (e) {
+        log('TT', '⚠ Close position failed for ' + trade.asset + ': ' + e.message, 'amber');
+      });
+    }
+
     saveTrades();
     // Async push updated trade to SQLite (fire-and-forget)
     _apiPatchTrade(trade.trade_id, {
@@ -2051,18 +2089,20 @@
         return;
       }
 
-      // ── Venue router: HL → Alpaca → flag ────────────────────────────────────
+      // ── Venue router: HL → Alpaca → TickTrader → flag ───────────────────────
       // Runs before the enabled check so every signal is routed or captured.
-      // Priority: HL spot/perp first (lowest cost + fastest execution), then
-      // Alpaca for US stocks/ETFs not on HL, else flag for future integration.
+      // Priority: HL perps first (lowest cost), then Alpaca (US equities),
+      // then TickTrader (forex majors), else flag for future integration.
       var _asset = normaliseAsset(sig.asset);
       var _venue;
       if (window.HLFeed && HLFeed.covers(_asset)) {
         _venue = 'HL';
       } else if (window.AlpacaBroker && AlpacaBroker.covers(_asset)) {
         _venue = 'ALPACA';
+      } else if (window.TTBroker && TTBroker.covers(_asset)) {
+        _venue = 'TICKTRADER';
       } else {
-        _flagTrade(sig, 'No venue — not on Hyperliquid or Alpaca. Add broker for this asset.');
+        _flagTrade(sig, 'No venue — not on Hyperliquid, Alpaca, or TickTrader. Add broker for this asset.');
         _logSignal(sig, 'SKIPPED', 'No venue: ' + sig.asset);
         return;
       }

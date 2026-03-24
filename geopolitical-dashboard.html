@@ -5270,6 +5270,12 @@
           <div class="ee-broker-assets">US stocks &amp; ETFs &middot; Commission-free</div>
           <div style="font-size:7px;color:var(--dim);margin-bottom:4px">Loading&hellip;</div>
         </div>
+        <div id="ttBrokerCard" class="ee-broker-card">
+          <!-- Rendered by TTBroker.renderCard() on load -->
+          <div class="ee-broker-name">TickTrader</div>
+          <div class="ee-broker-assets">Forex majors &middot; Any TickTrader broker</div>
+          <div style="font-size:7px;color:var(--dim);margin-bottom:4px">Loading&hellip;</div>
+        </div>
         <div class="ee-broker-card">
           <div class="ee-broker-name">Binance / Polymarket</div>
           <div class="ee-broker-assets">Crypto + prediction markets &middot; Coming soon</div>
@@ -13168,6 +13174,9 @@ function _modalKeyHandler(e) {
 <script src="agents/uw-intelligence.js?v=4"></script>
 <!-- Polymarket Integration — prediction market consensus → IC pipeline (paper trading only) -->
 <script src="polymarket.js?v=15"></script>
+
+<!-- TickTrader Broker adapter — forex majors via any TickTrader-powered broker -->
+<script src="agents/ticktrader-broker.js?v=1"></script>
 
 <!-- Alpaca Broker adapter — loaded before EE so venue router is available -->
 <script src="agents/alpaca-broker.js?v=2"></script>

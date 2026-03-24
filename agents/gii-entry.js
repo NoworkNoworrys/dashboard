@@ -83,8 +83,23 @@
     'XAU':   { stopPct: 2.0, tpRatio: 2.5 },
     'SLV':   { stopPct: 2.5, tpRatio: 2.5 },
     'TLT':   { stopPct: 1.5, tpRatio: 2.5 },
-    'JPY':   { stopPct: 1.5, tpRatio: 2.5 },
-    'CHF':   { stopPct: 1.5, tpRatio: 2.5 },
+    /* Forex majors — tight stops, forex moves in small % increments */
+    'EURUSD': { stopPct: 0.5, tpRatio: 2.5 },
+    'GBPUSD': { stopPct: 0.6, tpRatio: 2.5 },
+    'USDJPY': { stopPct: 0.5, tpRatio: 2.5 },
+    'USDCHF': { stopPct: 0.5, tpRatio: 2.5 },
+    'AUDUSD': { stopPct: 0.6, tpRatio: 2.5 },
+    'USDCAD': { stopPct: 0.5, tpRatio: 2.5 },
+    'NZDUSD': { stopPct: 0.6, tpRatio: 2.5 },
+    'GBPJPY': { stopPct: 0.7, tpRatio: 2.5 },
+    'EURJPY': { stopPct: 0.6, tpRatio: 2.5 },
+    'EURGBP': { stopPct: 0.5, tpRatio: 2.5 },
+    'EUR':    { stopPct: 0.5, tpRatio: 2.5 },
+    'GBP':    { stopPct: 0.6, tpRatio: 2.5 },
+    'JPY':    { stopPct: 0.5, tpRatio: 2.5 },
+    'CHF':    { stopPct: 0.5, tpRatio: 2.5 },
+    'AUD':    { stopPct: 0.6, tpRatio: 2.5 },
+    'CAD':    { stopPct: 0.5, tpRatio: 2.5 },
     'VIX':    { stopPct: 8.0, tpRatio: 2.0 },  /* VIX is extremely volatile */
     'VXX':    { stopPct: 6.0, tpRatio: 2.0 },  /* VXX ETF — same signal, lower raw vol than VIX index */
     'SILVER': { stopPct: 2.5, tpRatio: 2.5 },  /* v54: was missing — fell through to 3% default */
