@@ -2075,6 +2075,20 @@
     _lastSignals = sigs;                 // always cache — re-scan loop needs these
 
     sigs.forEach(function (sig) {
+      // ── Field normalisation ─────────────────────────────────────────────────────
+      // New signal agents (technicals, crypto-signals, correlation, momentum, etc.)
+      // send { bias, confidence (0-1 float), reasoning } instead of { dir, conf (0-100), reason }.
+      // market-observer sends direction as lowercase 'long'/'short'.
+      // Normalise here so ALL agents work without modifying every agent file.
+      if (sig.bias      !== undefined && sig.dir  === undefined) sig.dir  = sig.bias;
+      if (sig.direction !== undefined && sig.dir  === undefined) sig.dir  = sig.direction;
+      if (sig.dir) sig.dir = sig.dir.toUpperCase();   // 'long' → 'LONG', 'short' → 'SHORT'
+      if (sig.confidence !== undefined && sig.conf === undefined) {
+        sig.conf = sig.confidence <= 1 ? Math.round(sig.confidence * 100) : sig.confidence;
+      }
+      if (sig.reasoning !== undefined && sig.reason === undefined) sig.reason = sig.reasoning;
+      // ───────────────────────────────────────────────────────────────────────────
+
       // Asset remap: replace untradeable index/spot assets with their tradeable proxies.
       // Mutates a shallow copy so the original signal object is not modified.
       if (sig.asset && ASSET_REMAP[normaliseAsset(sig.asset)]) {

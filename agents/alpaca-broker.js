@@ -150,9 +150,9 @@
         '<div class="ee-broker-assets">US stocks &amp; ETFs &middot; ' +
           Object.keys(ALPACA_ASSETS).length + ' assets covered</div>' +
         '<div style="font-size:8px;color:var(--dim);margin-bottom:4px">' +
-          'Equity: <b style="color:var(--bright)">$' + (_cfg.equity ? _cfg.equity.toFixed(2) : '—') + '</b>' +
+          'Equity: <b style="color:var(--bright)">$' + (_cfg.equity !== null && _cfg.equity !== undefined ? _cfg.equity.toFixed(2) : '—') + '</b>' +
           ' &nbsp; Buying power: <b style="color:var(--bright)">$' +
-          (_cfg.buyingPow ? _cfg.buyingPow.toFixed(2) : '—') + '</b>' +
+          (_cfg.buyingPow !== null && _cfg.buyingPow !== undefined ? _cfg.buyingPow.toFixed(2) : '—') + '</b>' +
         '</div>' +
         '<button onclick="AlpacaBroker.disconnect();AlpacaBroker.renderCard()" ' +
           'style="font-size:8px;width:100%;padding:3px 0;border:1px solid #ff4444;' +
@@ -342,7 +342,7 @@
         assetCount: Object.keys(ALPACA_ASSETS).length,
         note: _cfg.connected
           ? (_cfg.paper ? 'Paper' : 'Live') + ' · equity $' +
-            (_cfg.equity ? _cfg.equity.toFixed(0) : '—') + ' · ' +
+            (_cfg.equity !== null && _cfg.equity !== undefined ? _cfg.equity.toFixed(0) : '—') + ' · ' +
             Object.keys(ALPACA_ASSETS).length + ' assets'
           : 'Not connected'
       };
