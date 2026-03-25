@@ -456,6 +456,7 @@
   var _closedSessionOnly    = false; // UI toggle: show only this-session closed trades
   var _sessionStartBalance  = null;  // balance at session start — for daily loss limit
   var _lossStreak           = { long: 0, short: 0 };  // v61: per-direction streak — long losses don't penalise short sizing
+  var _fillLatencies        = [];   // rolling last-20 signal-to-fill latencies (ms) for Alpaca orders
   var _winStreak            = { long: 0, short: 0 };  // symmetric to _lossStreak — 3 consecutive wins → +15% size
   var _lastPriceTs          = {};  // trade_id → ms of last successful price fetch (stale-price watchdog)
   var _peakEquity           = null;  // highest virtual_balance since session start — drawdown-from-peak guard
@@ -1851,6 +1852,7 @@
     // Store raw (pre-slippage) price for audit display
     trade.raw_entry_price    = +entryPrice.toFixed(6);
     trade.entry_slippage_pct = +((adjustedEntry / entryPrice - 1) * 100).toFixed(4);
+    trade.signal_ts          = sig._signalTs || null;  // for fill-latency measurement
 
     // Reality check 3 — liquidity: block if position would move the market
     if (!_checkLiquidity(sig.asset, trade.size_usd)) return;
@@ -1889,11 +1891,23 @@
           trade.broker_status     = 'FILLED';
           trade.broker_fill_price = fillPrice;
           if (fillPrice > 0) trade.entry_price = fillPrice;
+          // Signal-to-fill latency tracking
+          if (trade.signal_ts) {
+            var _latMs = Date.now() - trade.signal_ts;
+            trade.fill_latency_ms = _latMs;
+            _fillLatencies.push(_latMs);
+            if (_fillLatencies.length > 20) _fillLatencies.shift();
+            var _avgLat = Math.round(_fillLatencies.reduce(function(a,b){return a+b;},0) / _fillLatencies.length);
+            log('ALPACA', trade.asset + ' fill latency: ' + (_latMs/1000).toFixed(1) + 's' +
+              ' (avg ' + (_avgLat/1000).toFixed(1) + 's over last ' + _fillLatencies.length + ' fills)', 'dim');
+            if (_latMs > 10000) log('ALPACA', '⚠ Slow fill: ' + trade.asset + ' took ' + (_latMs/1000).toFixed(0) + 's — check feed/broker latency', 'amber');
+          }
           saveTrades();
           _apiPatchTrade(trade.trade_id, {
             broker_status: 'FILLED',
             broker_fill_price: fillPrice,
-            entry_price: trade.entry_price
+            entry_price: trade.entry_price,
+            fill_latency_ms: trade.fill_latency_ms || null
           });
           log('ALPACA', trade.asset + ' FILLED @ $' + fillPrice.toFixed(4) +
             ' (order ' + order.id + ')', 'green');
@@ -2279,6 +2293,7 @@
     _lastSignals = sigs;                 // always cache — re-scan loop needs these
 
     sigs.forEach(function (sig) {
+      sig._signalTs = sig._signalTs || Date.now(); // stamp entry time for fill-latency tracking
       // ── Field normalisation ─────────────────────────────────────────────────────
       // New signal agents (technicals, crypto-signals, correlation, momentum, etc.)
       // send { bias, confidence (0-1 float), reasoning } instead of { dir, conf (0-100), reason }.
@@ -2399,6 +2414,48 @@
         openTrade(sig, price);
       });
     });
+  }
+
+  /* ── Alpaca position reconciliation ─────────────────────────────────────────
+     Compares EE's in-memory OPEN Alpaca trades against actual Alpaca positions.
+     • EE open + Alpaca has position   → all good
+     • EE open + Alpaca no position    → closed externally (manual, margin, API) → close in EE
+     • Alpaca position + no EE trade   → orphan (opened outside EE) → log warning
+     Runs every 5 minutes and also exposed as EE.reconcileAlpaca() for manual use. */
+  function _reconcileAlpacaPositions() {
+    if (!window.AlpacaBroker || !AlpacaBroker.isConnected()) return;
+    AlpacaBroker.getPositions()
+      .then(function (positions) {
+        var alpacaSymbols = new Set(
+          (positions || []).map(function (p) { return (p.symbol || '').toUpperCase(); })
+        );
+        var eeAlpacaTrades = openTrades().filter(function (t) {
+          return t.venue === 'ALPACA' && t.broker_status === 'FILLED';
+        });
+
+        // Trades EE thinks are open but Alpaca no longer has
+        eeAlpacaTrades.forEach(function (trade) {
+          if (!alpacaSymbols.has(trade.asset.toUpperCase())) {
+            var closeAt = _livePrice[trade.trade_id] ||
+                          _priceCache[normaliseAsset(trade.asset)] ||
+                          trade.entry_price;
+            log('ALPACA', trade.asset + ' position missing from Alpaca — closed externally. Closing in EE at $' +
+              (closeAt || 0).toFixed(4), 'amber');
+            closeTrade(trade.trade_id, closeAt || trade.entry_price, 'EXTERNALLY_CLOSED');
+          }
+        });
+
+        // Positions in Alpaca not tracked by EE
+        (positions || []).forEach(function (pos) {
+          var sym = (pos.symbol || '').toUpperCase();
+          var eeMatch = eeAlpacaTrades.some(function (t) { return t.asset.toUpperCase() === sym; });
+          if (!eeMatch) {
+            log('ALPACA', '⚠ Orphan Alpaca position: ' + sym +
+              ' (not in EE trades) — manually opened or from a prior session', 'amber');
+          }
+        });
+      })
+      .catch(function () { /* silent — Alpaca may be temporarily unavailable */ });
   }
 
   /* ══════════════════════════════════════════════════════════════════════════════
@@ -4415,6 +4472,26 @@
     /* ── Future broker integration (stubs) ── */
     connectBroker: connectBroker,
 
+    /* ── Risk gate — exposed for testing and external use ── */
+    canExecute: canExecute,
+
+    /* ── Manual Alpaca position reconciliation ── */
+    reconcileAlpaca: _reconcileAlpacaPositions,
+
+    /* ── Fill latency stats ── */
+    fillLatencyStats: function () {
+      if (!_fillLatencies.length) return { count: 0, avgMs: null, maxMs: null, minMs: null };
+      var avg = Math.round(_fillLatencies.reduce(function(a,b){return a+b;},0) / _fillLatencies.length);
+      return {
+        count: _fillLatencies.length,
+        avgMs: avg,
+        avgS:  +(avg / 1000).toFixed(2),
+        maxMs: Math.max.apply(null, _fillLatencies),
+        minMs: Math.min.apply(null, _fillLatencies),
+        samples: _fillLatencies.slice()
+      };
+    },
+
     /* ── Data access for external scripts / debugging ── */
     getOpenTrades:  function () { return openTrades().slice(); },
     getAllTrades:    function () { return _trades.slice(); },
@@ -4693,6 +4770,12 @@
       window._eeMonitorInterval = setInterval(monitorTrades, 15000);  // guarded — prevents double-firing if script loaded twice
     }
     _startBinanceWS();                  // BTC fallback feed — yields to HL when live
+
+    // Alpaca position reconciliation — every 5 minutes (guarded against double-start)
+    if (!window._eeReconcileInterval) {
+      window._eeReconcileInterval = setInterval(_reconcileAlpacaPositions, 5 * 60 * 1000);
+      setTimeout(_reconcileAlpacaPositions, 15000); // first run 15s after load (let fills settle)
+    }
 
     /* Re-scan loop: every 5 minutes re-process the last IC signal batch.
        Only re-evaluates signals for assets that have no open trade AND whose

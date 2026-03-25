@@ -13345,7 +13345,9 @@ function _modalKeyHandler(e) {
 <script src="agents/ic-risk-engine.js?v=2"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=100"></script>
+<script src="executionEngine.js?v=101"></script>
+<!-- Smoke tests — EETests.run() in console to validate core EE behaviour -->
+<script src="tests/ee-smoke-tests.js?v=1"></script>
 
 <!-- GII Core — loaded before agents so window.GII (defensiveAssets, riskAssets, etc.) is
      available when agent IIFEs execute. Agents all guard GII calls, so order is safe. -->
