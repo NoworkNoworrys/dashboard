@@ -1,0 +1,21 @@
+# API keys and secrets
+backend/.env
+backend/uw_config.json
+
+# Databases
+*.db
+
+# Backups
+backups/
+
+# Claude internal
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# macOS
+.DS_Store

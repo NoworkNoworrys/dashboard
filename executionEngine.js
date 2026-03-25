@@ -31,16 +31,9 @@
   /* ── SQLite API ─────────────────────────────────────────────────────────────
      Primary persistence: GeoIntel backend on port 8765.
      Falls back to localStorage silently if the backend isn't running.         */
-  // API base: reads from localStorage first (set via the Backend URL field in config),
-  // then falls back to window.GEO_API_BASE (set via script tag), then localhost.
+  // API base: fixed to local backend. Do not change this to a remote URL.
   var _BACKEND_URL_KEY = 'geodash_backend_url_v1';
-  var _API_BASE = (function () {
-    try {
-      var saved = localStorage.getItem(_BACKEND_URL_KEY);
-      if (saved && saved.length > 4) return saved.replace(/\/$/, '');
-    } catch (e) {}
-    return (typeof window !== 'undefined' && window.GEO_API_BASE) || 'https://geo-dashboard-2okm.onrender.com';
-  })();
+  var _API_BASE = 'http://localhost:8765';
   var _apiOnline    = false;   // set true after first successful /api/status ping
   var _backendChecked = false; // set true after first ping attempt resolves (ok or fail)
 
@@ -48,7 +41,7 @@
   var DEFAULTS = {
     mode:                  'SIMULATION', // 'SIMULATION' | 'LIVE'
     enabled:               true,         // auto-execution always on by default
-    min_confidence:        70,           // minimum IC confidence % to auto-execute — raised from 65 (audit: low-conf trades not profitable)
+    min_confidence:        65,           // minimum IC confidence % to auto-execute
     virtual_balance:       1000,         // starting virtual balance (USD)
     risk_per_trade_pct:    2,            // % of balance risked per trade — v61: reduced from 3% to limit concurrent exposure
     stop_loss_pct:         1.5,          // % distance from entry — tighter than original 3%, better capital preservation
@@ -621,8 +614,8 @@
       }
       // audit-v2 migration: disable crude trailing stop — gii-exit progressive trail owns this now
       _cfg.trailing_stop_enabled = false;
-      // audit migration: raise min_confidence from legacy 65 to 70
-      if (_cfg.min_confidence < 70) {
+      // threshold floored at 50 to prevent accidental misconfiguration
+      if (_cfg.min_confidence < 50) {
         _cfg.min_confidence = DEFAULTS.min_confidence;
       }
     } catch (e) { _cfg = Object.assign({}, DEFAULTS); }
@@ -637,19 +630,8 @@
   function loadTrades() {
     try {
       var raw = localStorage.getItem(TRADES_KEY);
-      // Migration: check legacy key names so version bumps don't silently orphan history
-      if (!raw) {
-        var legacyKeys = ['geodash_ee_trades', 'geodash_ee_trades_v0'];
-        for (var i = 0; i < legacyKeys.length; i++) {
-          var legacyRaw = localStorage.getItem(legacyKeys[i]);
-          if (legacyRaw) {
-            raw = legacyRaw;
-            localStorage.setItem(TRADES_KEY, raw);
-            localStorage.removeItem(legacyKeys[i]);
-            break;
-          }
-        }
-      }
+      // Legacy migration intentionally removed — DB is the sole source of truth.
+      // Old keys (geodash_ee_trades, geodash_ee_trades_v0) are ignored.
       if (raw) {
         var parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) throw new Error('trades not array');
@@ -792,36 +774,14 @@
       .then(function (data) {
         var dbTrades = data.trades || [];
 
-        // Build lookup of trade_ids already in DB
-        var inDb = {};
-        dbTrades.forEach(function (t) { inDb[t.trade_id] = true; });
-
-        // Migrate any localStorage trades not yet in DB (one-time)
-        var toMigrate = _trades.filter(function (t) { return !inDb[t.trade_id]; });
-        if (toMigrate.length) {
-          _apiFetch('/api/trades', { method: 'POST', body: JSON.stringify(toMigrate) })
-            .then(function () {
-              log('SYSTEM', 'Migrated ' + toMigrate.length + ' trade(s) from localStorage → SQLite', 'dim');
-            })
-            .catch(function () {});
-        }
-
-        // ID-based merge: union of DB + local, DB wins for same trade_id.
-        // This prevents a count-based comparison from silently discarding trades that
-        // exist locally but not yet in the DB (e.g. opened while backend was offline).
-        var merged = {};
-        _trades.forEach(function (t) { if (t.trade_id) merged[t.trade_id] = t; });
-        dbTrades.forEach(function (t) { if (t.trade_id) merged[t.trade_id] = t; }); // DB wins
-        var mergedArr = Object.keys(merged).map(function (id) { return merged[id]; });
-        mergedArr.sort(function (a, b) {
+        // DB is the sole source of truth — use it directly, no localStorage merge.
+        dbTrades.sort(function (a, b) {
           return new Date(b.timestamp_open) - new Date(a.timestamp_open);
         });
-        _trades = mergedArr;
-        saveTrades();   // keep localStorage in sync
+        _trades = dbTrades;
+        saveTrades();   // mirror to localStorage as offline fallback only
         renderUI();
-        log('SYSTEM',
-          'SQLite backend online — ' + dbTrades.length + ' DB + ' + toMigrate.length + ' migrated → ' + _trades.length + ' total',
-          'green');
+        log('SYSTEM', 'SQLite backend online — ' + dbTrades.length + ' trade(s) loaded from DB', 'green');
       })
       .catch(function (err) {
         _apiOnline = false;
@@ -4319,9 +4279,9 @@
       if (!input) return;
       var url = input.value.trim().replace(/\/$/, '');
       if (!url) {
-        // Clear saved URL — revert to Render default
+        // Clear saved URL — revert to local backend
         try { localStorage.removeItem(_BACKEND_URL_KEY); } catch (e) {}
-        _API_BASE = 'https://geo-dashboard-2okm.onrender.com';
+        _API_BASE = 'http://localhost:8765';
         _apiOnline = false;
         _backendChecked = false;
         input.style.borderColor = 'var(--border)';

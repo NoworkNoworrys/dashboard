@@ -25,10 +25,19 @@ def fetch_reliefweb() -> List[Dict]:
     Uses simple GET — no bracket-syntax fields filter to avoid encoding issues.
     """
     try:
-        r = requests.get(
-            RELIEFWEB_URL,
-            params={'appname': 'geodash', 'limit': 20, 'sort[]': 'date.created:desc'},
-            timeout=12,
+        r = requests.post(
+            RELIEFWEB_URL + '?appname=geodash&slim=1',
+            json={
+                'limit': 20,
+                'sort': ['date.created:desc'],
+                'fields': {'include': ['title', 'body-html', 'source']},
+            },
+            headers={
+                'Content-Type': 'application/json',
+                'User-Agent': 'GeoDashboard/1.0 (research; non-commercial)',
+                'Accept': 'application/json',
+            },
+            timeout=15,
         )
         r.raise_for_status()
         data = r.json().get('data', [])

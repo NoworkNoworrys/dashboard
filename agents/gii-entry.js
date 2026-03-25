@@ -41,7 +41,10 @@
      GII signals restricted to this list. IC signals have no asset restriction. */
   var GII_ALLOWED_ASSETS = {
     'TSLA': true, 'VXX': true, 'LMT': true, 'RTX': true,
-    'NVDA': true, 'BTC': true, 'ETH': true, 'XAR': true, 'SMH': true
+    'NVDA': true, 'BTC': true, 'ETH': true, 'XAR': true, 'SMH': true,
+    /* Safe-haven / macro assets — re-enabled now OANDA CFD prices available */
+    'GLD':  true, 'XAU': true, 'SLV': true,
+    'WTI':  true, 'BRENT': true, 'GAS': true,
   };
 
   /* Minimum number of distinct agent categories that must agree */

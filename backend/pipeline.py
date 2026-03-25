@@ -15,17 +15,50 @@ from keyword_detector import dedupe_key
 from uw_store import get_uw_store
 
 # Import ingest modules (all are synchronous; we wrap them in run_in_executor)
-from ingest.gdelt      import fetch_gdelt
-from ingest.rss_feeds  import fetch_rss
-from ingest.reddit     import fetch_reddit
-from ingest.reliefweb  import fetch_reliefweb
-from ingest.market_data import fetch_market_prices
+from ingest.gdelt        import fetch_gdelt
+from ingest.rss_feeds    import fetch_rss
+from ingest.reddit       import fetch_reddit
+from ingest.reliefweb    import fetch_reliefweb
+from ingest.acled        import fetch_acled
+from ingest.ucdp         import fetch_ucdp
+from ingest.newsapi      import fetch_newsapi
+from ingest.eventregistry import fetch_eventregistry
+from ingest.twitter      import fetch_twitter
+from ingest.sentinel     import fetch_sentinel
+from ingest.maritime_ais import fetch_maritime_ais
+from ingest.market_data  import fetch_market_prices
 from ingest.unusual_whales import (
     fetch_flow_alerts, fetch_darkpool, fetch_congress_trades,
     fetch_market_tide, fetch_iv_ranks,
 )
-from ingest.worldbank  import fetch_worldbank
-from ingest.imf        import fetch_imf
+from ingest.worldbank        import fetch_worldbank
+from ingest.imf              import fetch_imf
+from ingest.oecd             import fetch_oecd
+from ingest.fred             import fetch_fred
+from ingest.eia              import fetch_eia
+from ingest.bis              import fetch_bis
+from ingest.eurostat         import fetch_eurostat
+from ingest.un_comtrade      import fetch_un_comtrade
+from ingest.sanctions        import fetch_sanctions
+from ingest.who              import fetch_who
+from ingest.nasa_firms       import fetch_nasa_firms
+from ingest.metaculus        import fetch_metaculus
+from ingest.wikipedia_spikes import fetch_wikipedia_spikes
+from ingest.google_trends    import fetch_google_trends
+from ingest.fao              import fetch_fao
+from ingest.unhcr            import fetch_unhcr
+from ingest.ecb              import fetch_ecb
+from ingest.fews             import fetch_fews
+from ingest.ocha             import fetch_ocha
+from ingest.manifold         import fetch_manifold
+from ingest.iaea             import fetch_iaea
+from ingest.otx              import fetch_otx
+from ingest.propublica       import fetch_propublica
+from ingest.gfw              import fetch_gfw
+from ingest.usgs             import fetch_usgs
+from ingest.opensky          import fetch_opensky
+from ingest.gdacs            import fetch_gdacs
+from ingest.icg              import fetch_icg
 # ── Runtime key overrides (set via dashboard without restart) ─────────────────
 _uw_key_override:  str = ''
 
@@ -50,7 +83,7 @@ def get_uw_feed_status() -> dict:
     return {k: dict(v) for k, v in _uw_feed_status.items()}
 
 # Shared thread pool for synchronous network calls
-_executor = ThreadPoolExecutor(max_workers=8)
+_executor = ThreadPoolExecutor(max_workers=24)
 
 # UW state — track last poll times and flow alert watermark
 _uw_last_flow_ts    = 0   # ms — only fetch alerts newer than this
@@ -66,13 +99,33 @@ _broadcast_market = None
 # Cycle counter — used to throttle expensive / rate-limited sources
 _cycle_n = 0
 
+# Per-source status tracking — updated each cycle
+import time as _time
+_source_status: dict = {}
+
+def _update_source(name: str, count: int, error: str = ''):
+    _source_status[name] = {
+        'last_ok':    int(_time.time() * 1000) if not error else _source_status.get(name, {}).get('last_ok', 0),
+        'last_run':   int(_time.time() * 1000),
+        'count':      count,
+        'error':      error,
+    }
+
+def get_source_status() -> dict:
+    return dict(_source_status)
+
 # GDELT adaptive backoff — incremented on 429, decremented each skipped cycle.
 # When > 0, GDELT is skipped even on its scheduled cycle.
 _gdelt_backoff = 0
 
-# Macro refresh tracking — World Bank + IMF fetched once at startup then every 6h
-_macro_last_fetch = 0        # Unix timestamp of last successful macro fetch
-_MACRO_REFRESH_SECS = 6 * 3600
+# Macro refresh tracking — World Bank + IMF + OECD + UCDP fetched once at startup then every 6h
+_macro_last_fetch    = 0
+_MACRO_REFRESH_SECS  = 6 * 3600
+
+# Google Trends refresh — every 30 cycles (~30 min) to avoid rate limits
+_gtrends_last_cycle  = 0
+# OpenSky refresh — every 5 cycles (~5 min) to stay within anonymous rate limits
+_opensky_last_cycle  = 0
 
 # Rolling price-change history for correlation computation (last 30 cycles)
 _price_history: deque = deque(maxlen=30)
@@ -116,20 +169,50 @@ async def _ingest_events(run_gdelt: bool = True) -> List[Dict]:
         _run_sync(fetch_rss),
         _run_sync(fetch_reddit),
         _run_sync(fetch_reliefweb),
+        _run_sync(fetch_acled),
+        _run_sync(fetch_newsapi),
+        _run_sync(fetch_eventregistry),
+        _run_sync(fetch_twitter),
+        _run_sync(fetch_sentinel),
+        _run_sync(fetch_maritime_ais),
+        _run_sync(fetch_who),
+        _run_sync(fetch_nasa_firms),
+        _run_sync(fetch_metaculus),
+        _run_sync(fetch_wikipedia_spikes),
+        _run_sync(fetch_sanctions),
+        _run_sync(fetch_unhcr),
+        _run_sync(fetch_fews),
+        _run_sync(fetch_ocha),
+        _run_sync(fetch_manifold),
+        _run_sync(fetch_iaea),
+        _run_sync(fetch_otx),
+        _run_sync(fetch_propublica),
+        _run_sync(fetch_gfw),
+        _run_sync(fetch_usgs),
+        _run_sync(fetch_gdacs),
+        _run_sync(fetch_icg),
     ]
     if run_gdelt:
         tasks.append(_run_sync(fetch_gdelt))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
     events = []
-    names  = ['RSS', 'Reddit', 'ReliefWeb'] + (['GDELT'] if run_gdelt else [])
+    names  = [
+        'RSS', 'Reddit', 'ReliefWeb', 'ACLED', 'NewsAPI',
+        'EventRegistry', 'Twitter', 'Sentinel', 'MaritimeAIS',
+        'WHO', 'NASA-FIRMS', 'Metaculus', 'Wikipedia', 'Sanctions',
+        'UNHCR', 'FEWS-NET', 'OCHA', 'Manifold', 'IAEA', 'OTX', 'ProPublica', 'GFW',
+        'USGS', 'GDACS', 'ICG',
+    ] + (['GDELT'] if run_gdelt else [])
     for name, r in zip(names, results):
         if isinstance(r, Exception):
             print(f'[PIPELINE] {name} raised: {r}')
+            _update_source(name, 0, str(r)[:120])
             if name == 'GDELT' and '429' in str(r):
                 _gdelt_backoff = 4  # skip next 4 scheduled GDELT cycles
                 print(f'[PIPELINE] GDELT 429 — backoff set to 4 cycles')
         elif isinstance(r, list):
+            _update_source(name, len(r))
             events.extend(r)
     return events
 
@@ -153,16 +236,28 @@ async def _ingest_macro() -> None:
     if now - _macro_last_fetch < _MACRO_REFRESH_SECS and _macro_last_fetch > 0:
         return   # not due yet
 
-    print('[PIPELINE] macro refresh starting (WorldBank + IMF)…')
-    wb_result, imf_result = await asyncio.gather(
+    print('[PIPELINE] macro refresh starting…')
+    results = await asyncio.gather(
         _run_sync(fetch_worldbank),
         _run_sync(fetch_imf),
+        _run_sync(fetch_oecd),
+        _run_sync(fetch_ucdp),
+        _run_sync(fetch_fred),
+        _run_sync(fetch_eia),
+        _run_sync(fetch_bis),
+        _run_sync(fetch_eurostat),
+        _run_sync(fetch_un_comtrade),
+        _run_sync(fetch_fao),
+        _run_sync(fetch_ecb),
         return_exceptions=True,
     )
-    if isinstance(wb_result, Exception):
-        print(f'[PIPELINE] WorldBank raised: {wb_result}')
-    if isinstance(imf_result, Exception):
-        print(f'[PIPELINE] IMF raised: {imf_result}')
+    names = ['WorldBank', 'IMF', 'OECD', 'UCDP', 'FRED', 'EIA', 'BIS', 'Eurostat', 'Comtrade', 'FAO', 'ECB']
+    for name, result in zip(names, results):
+        if isinstance(result, Exception):
+            print(f'[PIPELINE] {name} raised: {result}')
+            _update_source(name, 0, str(result)[:120])
+        elif isinstance(result, (list, dict)):
+            _update_source(name, len(result) if isinstance(result, list) else len(result))
     _macro_last_fetch = time.time()
     print('[PIPELINE] macro refresh complete')
 
@@ -320,6 +415,17 @@ async def _pipeline_cycle():
 
     # GDELT is rate-limited to ~12 req/hour — only call every 5 cycles (~5 min)
     run_gdelt = (_cycle_n % 5 == 1)
+
+    # Google Trends — throttled to every 30 cycles (~30 min) to avoid 429s
+    global _gtrends_last_cycle, _opensky_last_cycle
+    if _cycle_n - _gtrends_last_cycle >= 30 or _gtrends_last_cycle == 0:
+        _gtrends_last_cycle = _cycle_n
+        asyncio.create_task(_run_sync(fetch_google_trends))
+
+    # OpenSky — throttled to every 5 cycles (~5 min) to stay within rate limits
+    if _cycle_n - _opensky_last_cycle >= 5 or _opensky_last_cycle == 0:
+        _opensky_last_cycle = _cycle_n
+        asyncio.create_task(_run_sync(fetch_opensky))
     print(f'[PIPELINE] cycle {_cycle_n} starting… (GDELT: {"yes" if run_gdelt else "skip"})')
 
     # Run news ingestion, market data, and UW concurrently

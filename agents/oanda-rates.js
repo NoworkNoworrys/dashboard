@@ -250,16 +250,30 @@
     try { localStorage.setItem(CFG_KEY, JSON.stringify(_cfg)); } catch(e) {}
   }
 
-  // Restore saved config on page load
+  // Restore saved config on page load — re-verify token before polling
   try {
     var saved = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
-    if (saved.token) {
+    if (saved.token && saved.accountId) {
       _cfg = Object.assign(_cfg, saved);
-      if (_cfg.connected && _cfg.token && _cfg.accountId) {
-        // Resume polling — don't re-authenticate, just start polling
-        _interval = setInterval(_poll, POLL_MS);
-        _poll();
-      }
+      _cfg.connected = false; // assume disconnected until verified
+      // Re-verify token is still valid before resuming
+      fetch(_baseUrl() + '/v3/accounts', { headers: _headers() })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function() {
+          _cfg.connected = true;
+          if (_interval) clearInterval(_interval);
+          _interval = setInterval(_poll, POLL_MS);
+          _poll();
+          _renderCard();
+        })
+        .catch(function(e) {
+          _cfg.connected = false;
+          _errMsg = 'Token check failed — re-enter token: ' + (e.message || '');
+          _renderCard();
+        });
     }
   } catch(e) {}
 

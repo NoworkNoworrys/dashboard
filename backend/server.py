@@ -25,6 +25,13 @@ from uw_store import get_uw_store
 import trades_store
 from ingest.worldbank import get_cache as get_wb_cache
 from ingest.imf       import get_cache as get_imf_cache
+from ingest.bis       import get_cache as get_bis_cache
+from ingest.oecd      import get_cache as get_oecd_cache
+from ingest.eurostat  import get_cache as get_eurostat_cache
+from ingest.eia       import get_cache as get_eia_cache
+from ingest.fao       import get_cache as get_fao_cache
+from ingest.ocha      import get_cache as get_ocha_cache
+from ingest.icg       import _seen_ids as _icg_seen  # just to confirm import works
 
 # ── UW runtime key (set via POST /api/uw/key, persisted to uw_config.json) ───
 _UW_CONFIG_FILE  = os.path.join(os.path.dirname(__file__), 'uw_config.json')
@@ -285,6 +292,13 @@ async def api_status():
         'events':  count,
         'ts':      int(time.time() * 1000),
     })
+
+
+@app.get('/api/sources')
+async def api_sources():
+    """Per-source feed status — last run, event count, error if any."""
+    from pipeline import get_source_status
+    return JSONResponse(content=get_source_status())
 
 
 @app.get('/api/regime')
@@ -600,6 +614,37 @@ async def api_imf():
     return JSONResponse(content=get_imf_cache())
 
 
+@app.get('/api/bis')
+async def api_bis():
+    """BIS credit-to-GDP gap data. High gap = elevated financial crisis risk."""
+    return JSONResponse(content=get_bis_cache())
+
+@app.get('/api/oecd')
+async def api_oecd():
+    """OECD macro indicators (unemployment, CPI, GDP growth) for member countries."""
+    return JSONResponse(content=get_oecd_cache())
+
+@app.get('/api/eurostat')
+async def api_eurostat():
+    """Eurostat EU economic indicators (HICP inflation, unemployment, industrial production)."""
+    return JSONResponse(content=get_eurostat_cache())
+
+@app.get('/api/eia')
+async def api_eia():
+    """EIA energy data (crude stocks, natgas storage, production, prices)."""
+    return JSONResponse(content=get_eia_cache())
+
+@app.get('/api/fao')
+async def api_fao():
+    """FAO/World Bank food price indicators (CPI, food production index)."""
+    return JSONResponse(content=get_fao_cache())
+
+@app.get('/api/ocha')
+async def api_ocha():
+    """OCHA FTS humanitarian funding data."""
+    return JSONResponse(content=get_ocha_cache())
+
+
 # ── Trades API ────────────────────────────────────────────────────────────────
 
 @app.get('/api/trades')
@@ -674,6 +719,22 @@ async def trades_backup():
     """Trigger an immediate backup to /backups/."""
     path, n = await asyncio.get_event_loop().run_in_executor(None, trades_store.do_backup)
     return JSONResponse(content={'ok': True, 'path': path, 'count': n})
+
+
+# ── Static asset fallback ─────────────────────────────────────────────────────
+# MUST be last — serves JS/CSS from project root so the dashboard works at
+# http://localhost:8765/ as well as http://localhost:8080/
+from fastapi import HTTPException as _HTTPException
+
+@app.get('/{filename:path}')
+async def serve_asset(filename: str):
+    """Serve any static file from the project root (JS, CSS, etc.)."""
+    if not filename or '..' in filename:
+        raise _HTTPException(status_code=404)
+    path = os.path.join(_PROJECT_ROOT, filename)
+    if os.path.isfile(path):
+        return FileResponse(path)
+    raise _HTTPException(status_code=404)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

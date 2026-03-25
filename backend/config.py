@@ -4,6 +4,16 @@ All tunable constants in one place.
 """
 import os
 
+# Load .env file if present (so you don't need to set env vars manually)
+_env_path = os.path.join(os.path.dirname(__file__), '.env')
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _v = _line.split('=', 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 # ── Server ──────────────────────────────────────────────────────────────────
 HOST            = '0.0.0.0'
 PORT            = int(os.getenv('PORT', 8765))   # Render/cloud sets $PORT; local default 8765
@@ -15,8 +25,23 @@ SSE_KEEPALIVE   = 25          # seconds between SSE heartbeats
 DB_PATH         = os.path.join(os.path.dirname(__file__), 'events.db')
 
 # ── Optional API keys (set via environment variables) ───────────────────────
-ALPHA_VANTAGE_KEY = os.getenv('AV_KEY', '')          # free key from alphavantage.co
-NEWS_API_KEY      = os.getenv('NEWS_API_KEY', '')    # newsapi.org (optional)
+ALPHA_VANTAGE_KEY    = os.getenv('AV_KEY', '')              # alphavantage.co
+NEWS_API_KEY         = os.getenv('NEWS_API_KEY', '')        # newsapi.org
+FRED_KEY             = os.getenv('FRED_KEY', '')            # fred.stlouisfed.org (free)
+ACLED_EMAIL          = os.getenv('ACLED_EMAIL', '')         # your myACLED login email
+ACLED_PASSWORD       = os.getenv('ACLED_PASSWORD', '')      # kept for reference (OAuth deprecated)
+ACLED_KEY            = os.getenv('ACLED_KEY', '')           # API key from acleddata.com/account
+EVENTREGISTRY_KEY    = os.getenv('EVENTREGISTRY_KEY', '')   # eventregistry.org (free tier)
+TWITTER_BEARER       = os.getenv('TWITTER_BEARER', '')      # developer.twitter.com (free basic)
+SENTINEL_CLIENT_ID   = os.getenv('SENTINEL_CLIENT_ID', '')  # dataspace.copernicus.eu (free)
+SENTINEL_CLIENT_SEC  = os.getenv('SENTINEL_CLIENT_SEC', '') # dataspace.copernicus.eu (free)
+PLANET_API_KEY       = os.getenv('PLANET_API_KEY', '')      # insights.planet.com (trial)
+AIS_API_KEY          = os.getenv('AIS_API_KEY', '')         # aisstream.io (free)
+OTX_KEY              = os.getenv('OTX_KEY', '')             # otx.alienvault.com (free)
+PROPUBLICA_KEY       = os.getenv('PROPUBLICA_KEY', '')      # propublica.org/datastore (free)
+GFW_KEY              = os.getenv('GFW_KEY', '')             # globalforestwatch.org (free)
+NASA_FIRMS_KEY       = os.getenv('NASA_FIRMS_KEY', '')      # firms.modaps.eosdis.nasa.gov (free, register at firms.modaps.eosdis.nasa.gov/api/)
+EIA_KEY              = os.getenv('EIA_KEY', '')             # eia.gov/opendata (free)
 
 # UW key: loaded from uw_config.json (browser-entered) first, then env var.
 # This lets the key be set via the dashboard without a backend restart.
@@ -67,6 +92,17 @@ RSS_FEEDS = [
     ('https://thediplomat.com/feed/',                              'DIPLOMAT'),
     ('https://www.scmp.com/rss/91/feed',                          'SCMP'),
     ('https://www.dawn.com/feeds/home',                            'DAWN'),
+    # ── Government press releases ─────────────────────────────────────────
+    ('https://www.whitehouse.gov/feed/',                           'WHITEHOUSE'),
+    ('https://www.state.gov/press-releases/feed/',                 'USDOS'),
+    ('https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945&max=10', 'PENTAGON'),
+    ('https://home.treasury.gov/news/press-releases.rss',          'USTRE'),
+    ('https://www.gov.uk/search/news-and-communications.atom',     'UKGOV'),
+    ('https://www.consilium.europa.eu/en/feed/',                   'EUCOUNCIL'),
+    ('https://www.eeas.europa.eu/eeas/eeas-news_en/feed',          'EEAS'),
+    ('https://www.mofa.go.jp/rss/news.xml',                        'JPMOFA'),
+    # ── Regulatory & treaty notices ───────────────────────────────────────
+    ('https://www.federalregister.gov/documents/search.rss?conditions%5Bterm%5D=national+security+sanctions+defense', 'FEDREG'),
 ]
 
 # ── Reddit ───────────────────────────────────────────────────────────────────

@@ -46,6 +46,17 @@ _TREASURY_URL = (
 _STOOQ_BASE = 'https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv'
 
 
+
+# ── Caches — Stooq is rate-limited (~200 req/day per IP) so refresh every 10 min
+_stooq_cache:    Dict[str, Dict[str, Any]] = {}
+_stooq_last_ts:  float = 0.0
+_STOOQ_TTL_SECS: float = 600.0   # 10 minutes
+
+_crypto_cache:   Dict[str, Dict[str, Any]] = {}
+_crypto_last_ts: float = 0.0
+_CRYPTO_TTL_SECS: float = 120.0  # 2 minutes (CoinGecko free tier = 30 req/min)
+
+
 def fetch_market_prices() -> Dict[str, Dict[str, Any]]:
     """
     Returns a dict keyed by our internal ticker symbols, e.g.:
@@ -57,10 +68,35 @@ def fetch_market_prices() -> Dict[str, Dict[str, Any]]:
     }
     """
     prices: Dict[str, Dict[str, Any]] = {}
-    prices.update(_fetch_crypto())
-    prices.update(_fetch_stooq())
+    prices.update(_fetch_crypto_cached())
+    prices.update(_fetch_stooq_cached())
     prices.update(_fetch_us10y())
     return prices
+
+
+# ── Cached wrappers ───────────────────────────────────────────────────────────
+
+def _fetch_crypto_cached() -> Dict[str, Dict[str, Any]]:
+    global _crypto_cache, _crypto_last_ts
+    if _crypto_cache and (datetime.datetime.now().timestamp() - _crypto_last_ts) < _CRYPTO_TTL_SECS:
+        return _crypto_cache
+    result = _fetch_crypto()
+    if result:
+        _crypto_cache   = result
+        _crypto_last_ts = datetime.datetime.now().timestamp()
+    return result or _crypto_cache
+
+
+def _fetch_stooq_cached() -> Dict[str, Dict[str, Any]]:
+    global _stooq_cache, _stooq_last_ts
+    if _stooq_cache and (datetime.datetime.now().timestamp() - _stooq_last_ts) < _STOOQ_TTL_SECS:
+        print(f'[MARKET] Stooq: serving cache ({len(_stooq_cache)} tickers)')
+        return _stooq_cache
+    result = _fetch_stooq()
+    if result:
+        _stooq_cache   = result
+        _stooq_last_ts = datetime.datetime.now().timestamp()
+    return result or _stooq_cache
 
 
 # ── CoinGecko (BTC, ETH) ─────────────────────────────────────────────────────

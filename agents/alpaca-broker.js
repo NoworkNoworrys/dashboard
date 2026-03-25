@@ -71,10 +71,18 @@
     'XAR':   { sector: 'defense', name: 'SPDR Aerospace & Defense' },
     'GDX':   { sector: 'mining',  name: 'VanEck Gold Miners' },
     'SMH':   { sector: 'semis',   name: 'VanEck Semiconductors' },
+    'SOXX':  { sector: 'semis',   name: 'iShares Semiconductor ETF' },
     'FXI':   { sector: 'china',   name: 'iShares China ETF' },
     'EEM':   { sector: 'em',      name: 'iShares Emerging Markets' },
     'IWM':   { sector: 'equity',  name: 'Russell 2000 ETF' },
-    'DIA':   { sector: 'equity',  name: 'Dow Jones ETF' }
+    'DIA':   { sector: 'equity',  name: 'Dow Jones ETF' },
+    /* ── Commodity / Thematic ETFs (no-venue signals) ────────────────── */
+    'WEAT':  { sector: 'agri',    name: 'Teucrium Wheat Fund' },
+    'WHT':   { sector: 'agri',    name: 'Wheat ETF (WEAT alias)' },
+    'CORN':  { sector: 'agri',    name: 'Teucrium Corn Fund' },
+    'INDA':  { sector: 'em',      name: 'iShares India ETF' },
+    'LIT':   { sector: 'energy',  name: 'Global X Lithium ETF' },
+    'XME':   { sector: 'mining',  name: 'SPDR Metals & Mining ETF' }
     /* Note: SPY, QQQ, GLD, SLV, AAPL, TSLA, META, MSFT, AMZN, GOOGL, HOOD
              are all on HL spot tokens → HL handles those, NOT Alpaca.    */
   };
@@ -344,6 +352,14 @@
 
   _loadCfg();
   window.AlpacaBroker = AlpacaBroker;
+
+  // Auto-reconnect on startup if credentials are saved
+  if (_cfg.apiKey && _cfg.apiSecret) {
+    setTimeout(function () {
+      AlpacaBroker.connect(_cfg.apiKey, _cfg.apiSecret, _cfg.paper)
+        .catch(function (e) { console.warn('[Alpaca] auto-reconnect failed:', e.message); });
+    }, 4000);  // 4s delay — let DOM settle before making auth requests
+  }
 
   // Render card once DOM is ready
   if (document.readyState === 'loading') {

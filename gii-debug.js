@@ -50,7 +50,12 @@
     { key: 'GII_ROUTING',                label: 'routing ⬡'       },
     { key: 'GII_SCRAPER_MANAGER',        label: 'scraper-mgr ⬡'   },
     { key: 'UWIntel',                    label: 'uw-intel ⬡'      },
-    { key: 'AlpacaBroker',               label: 'alpaca ⬡'        }
+    { key: 'AlpacaBroker',               label: 'alpaca ⬡'        },
+    { key: 'GII_AGENT_SATINTEL',         label: 'satintel'        },
+    { key: 'GII_AGENT_MACROSTRESS',      label: 'macrostress'     },
+    { key: 'GII_AGENT_CRISISRANK',       label: 'crisisrank'      },
+    { key: 'GII_AGENT_FORECAST',         label: 'forecast'        },
+    { key: 'GII_INTEL_MASTER',           label: 'intel-master ✦'  }
   ];
 
   // ── activity log ──────────────────────────────────────────────────────────

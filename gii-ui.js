@@ -189,6 +189,24 @@
   function _pct(v) { return (v * 100).toFixed(0) + '%'; }
   function _esc(s) { return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+  // ── trade DB cache (fetched from /api/trades every 30s) ───────────────────
+  var _tradeCache = { open: null, closed: null, total: null, lastFetch: 0 };
+  var _API_BASE   = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+                    ? 'http://localhost:8765' : '';
+
+  function _refreshTradeCache() {
+    fetch(_API_BASE + '/api/trades')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !Array.isArray(d.trades)) return;
+        var open   = d.trades.filter(function (t) { return (t.status || '').toUpperCase() === 'OPEN'; }).length;
+        var closed = d.trades.filter(function (t) { return (t.status || '').toUpperCase() === 'CLOSED'; }).length;
+        _tradeCache = { open: open, closed: closed, total: d.count, lastFetch: Date.now() };
+        markDirty();
+      })
+      .catch(function () {});
+  }
+
   // ── agent registry — single source of truth for health / status panels ────
   // Keep in sync with KNOWN_AGENTS in gii-debug.js and AGENTS in gii-core.js.
   // ✦ = coordination layer  ⚑ = opposition agent  ⬡ = infrastructure
@@ -224,7 +242,12 @@
     { name: 'routing ⬡',        global: 'GII_ROUTING'              },
     { name: 'scraper-mgr ⬡',   global: 'GII_SCRAPER_MANAGER'      },
     { name: 'uw-intel ⬡',       global: 'UWIntel'                  },
-    { name: 'alpaca ⬡',         global: 'AlpacaBroker'             }
+    { name: 'alpaca ⬡',         global: 'AlpacaBroker'             },
+    { name: 'satintel',         global: 'GII_AGENT_SATINTEL'       },
+    { name: 'macrostress',      global: 'GII_AGENT_MACROSTRESS'    },
+    { name: 'crisisrank',       global: 'GII_AGENT_CRISISRANK'     },
+    { name: 'forecast',         global: 'GII_AGENT_FORECAST'       },
+    { name: 'intel-master ✦',   global: 'GII_INTEL_MASTER'         },
   ];
 
   // ── dirty flag — set by GII core after each cycle ─────────────────────────
@@ -901,6 +924,18 @@
       html += '</div>';
     }
 
+    /* Trade DB summary row */
+    if (_tradeCache.total !== null) {
+      html += '<div style="display:flex;gap:16px;border-top:1px solid rgba(255,255,255,0.07);padding-top:8px;margin-top:6px">';
+      html += '<div style="font-size:10px">' +
+              '<span style="color:rgba(255,255,255,0.4)">TRADES DB</span> ' +
+              '<span style="color:var(--green)">' + _tradeCache.open + ' open</span> · ' +
+              '<span style="color:rgba(255,255,255,0.55)">' + _tradeCache.closed + ' closed</span> · ' +
+              '<span style="color:rgba(255,255,255,0.3)">' + _tradeCache.total + ' total</span>' +
+              '</div>';
+      html += '</div>';
+    }
+
     html += '</div>';
     return html;
   }
@@ -909,6 +944,8 @@
     setTimeout(function () {
       _injectStyles();
       _buildWrap();
+      _refreshTradeCache();
+      setInterval(_refreshTradeCache, 30000);
       // Initial render after GII core has had time to run one cycle
       setTimeout(render, 8000);
       setInterval(render, RENDER_INTERVAL);
