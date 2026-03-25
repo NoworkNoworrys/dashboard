@@ -5472,6 +5472,63 @@
 
     </div><!-- /ee-analytics -->
 
+    <!-- ── Signal Source Performance ───────────────────────────────── -->
+    <div class="ee-analytics" id="eeSourcePerf" style="margin-top:10px">
+      <div class="ee-an-header">
+        ◈ Signal Source Performance
+        <span>Win rate &amp; P&amp;L by signal origin</span>
+        <button onclick="_renderSourcePerf()" style="margin-left:auto;background:none;border:1px solid var(--dim);color:var(--dim);font-size:9px;padding:3px 8px;cursor:pointer;border-radius:3px;font-family:inherit;letter-spacing:1px">REFRESH</button>
+      </div>
+      <div id="eeSourcePerfTable" style="padding:8px 12px;font-size:10px">
+        <span style="color:var(--dim)">Loading...</span>
+      </div>
+    </div>
+
+    <script>
+    function _renderSourcePerf() {
+      var el = document.getElementById('eeSourcePerfTable');
+      if (!el || !window.EE) return;
+      var trades = EE.getAllTrades().filter(function(t){ return t.status === 'CLOSED'; });
+      if (!trades.length) { el.innerHTML = '<span style="color:var(--dim)">No closed trades yet</span>'; return; }
+
+      var bySource = {};
+      trades.forEach(function(t) {
+        var src = (t.source || t.signalSource || 'unknown').toLowerCase().replace('market-obs','market-obs').substring(0,18);
+        if (!bySource[src]) bySource[src] = { wins:0, losses:0, pnl:0, count:0 };
+        var pnl = parseFloat(t.pnl || t.net_pnl || 0);
+        bySource[src].count++;
+        bySource[src].pnl += pnl;
+        if (pnl > 0) bySource[src].wins++;
+        else bySource[src].losses++;
+      });
+
+      var rows = Object.keys(bySource).sort(function(a,b){ return bySource[b].pnl - bySource[a].pnl; });
+      var html = '<table style="width:100%;border-collapse:collapse">' +
+        '<thead><tr style="color:var(--amber);font-size:9px;letter-spacing:0.8px">' +
+        '<th style="text-align:left;padding:4px 8px">SOURCE</th>' +
+        '<th style="text-align:center;padding:4px 8px">TRADES</th>' +
+        '<th style="text-align:center;padding:4px 8px">WIN%</th>' +
+        '<th style="text-align:right;padding:4px 8px">P&amp;L</th></tr></thead><tbody>';
+
+      rows.forEach(function(src) {
+        var s = bySource[src];
+        var wr = s.count ? Math.round((s.wins / s.count) * 100) : 0;
+        var pnlCol = s.pnl >= 0 ? 'var(--green,#00e676)' : 'var(--red,#ff1744)';
+        var wrCol  = wr >= 50 ? 'var(--green,#00e676)' : wr >= 35 ? 'var(--amber,#ffc107)' : 'var(--red,#ff1744)';
+        html += '<tr style="border-bottom:1px solid var(--border)">' +
+          '<td style="padding:5px 8px;color:var(--text)">' + src + '</td>' +
+          '<td style="text-align:center;padding:5px 8px;color:var(--dim)">' + s.count + '</td>' +
+          '<td style="text-align:center;padding:5px 8px;color:' + wrCol + '">' + wr + '%</td>' +
+          '<td style="text-align:right;padding:5px 8px;color:' + pnlCol + '">' + (s.pnl >= 0 ? '+' : '') + '$' + s.pnl.toFixed(2) + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    }
+    setTimeout(_renderSourcePerf, 3000);
+    setInterval(_renderSourcePerf, 60000);
+    </script>
+
     <!-- ── Signal History Log ──────────────────────────────────────── -->
     <div class="ee-siglog-wrap" id="eeSiglogWrap">
 
@@ -13288,7 +13345,7 @@ function _modalKeyHandler(e) {
 <script src="agents/ic-risk-engine.js?v=2"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=88"></script>
+<script src="executionEngine.js?v=89"></script>
 
 <!-- GII Core — loaded before agents so window.GII (defensiveAssets, riskAssets, etc.) is
      available when agent IIFEs execute. Agents all guard GII calls, so order is safe. -->

@@ -1489,7 +1489,16 @@
     // Wide stops (6-7%) mean larger notional positions — cap by halving the risk budget.
     // EXCEPTION: scalper signals already have ATR-based tight stops + their own $15 cap —
     // applying a second 50% haircut double-counts risk mitigation and halves trade size for no reason.
-    var _cryptoAssets = { 'BTC': true, 'ETH': true, 'SOL': true, 'BNB': true, 'ADA': true };
+    var _cryptoAssets = {
+      'BTC':true,'ETH':true,'SOL':true,'BNB':true,'ADA':true,
+      'DOGE':true,'AVAX':true,'DOT':true,'LINK':true,'LTC':true,
+      'UNI':true,'AAVE':true,'INJ':true,'SUI':true,'APT':true,
+      'TIA':true,'TON':true,'NEAR':true,'ARB':true,'OP':true,
+      'ATOM':true,'HYPE':true,'WIF':true,'PEPE':true,'BONK':true,
+      'TAO':true,'RENDER':true,'FET':true,'IMX':true,'HBAR':true,
+      'ICP':true,'ETC':true,'BCH':true,'SEI':true,'RUNE':true,
+      'ONDO':true,'JUP':true,'MKR':true,'XRP':true
+    };
     if (_cryptoAssets[normaliseAsset(sig.asset)] && !_isScalperSig) {
       var _beforeCrypto = riskAmt;
       riskAmt = riskAmt * 0.50;

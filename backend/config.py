@@ -94,15 +94,13 @@ RSS_FEEDS = [
     ('https://www.dawn.com/feeds/home',                            'DAWN'),
     # ── Government press releases ─────────────────────────────────────────
     ('https://www.whitehouse.gov/feed/',                           'WHITEHOUSE'),
-    ('https://www.state.gov/press-releases/feed/',                 'USDOS'),
-    ('https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945&max=10', 'PENTAGON'),
-    ('https://home.treasury.gov/news/press-releases.rss',          'USTRE'),
     ('https://www.gov.uk/search/news-and-communications.atom',     'UKGOV'),
-    ('https://www.consilium.europa.eu/en/feed/',                   'EUCOUNCIL'),
-    ('https://www.eeas.europa.eu/eeas/eeas-news_en/feed',          'EEAS'),
-    ('https://www.mofa.go.jp/rss/news.xml',                        'JPMOFA'),
-    # ── Regulatory & treaty notices ───────────────────────────────────────
-    ('https://www.federalregister.gov/documents/search.rss?conditions%5Bterm%5D=national+security+sanctions+defense', 'FEDREG'),
+    # ── International news (replacing dead gov feeds) ─────────────────────
+    ('https://news.un.org/feed/subscribe/en/news/all/rss.xml',    'UNNEWS'),
+    ('https://foreignpolicy.com/feed/',                            'FP'),
+    ('https://rss.dw.com/xml/rss-en-world',                       'DW'),
+    ('https://feeds.bbci.co.uk/news/world/rss.xml',               'BBC'),
+    ('https://www.aljazeera.com/xml/rss/all.xml',                 'ALJAZEERA'),
 ]
 
 # ── Reddit ───────────────────────────────────────────────────────────────────

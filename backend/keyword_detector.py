@@ -299,6 +299,36 @@ def extract_keywords(text: str) -> List[str]:
     return [kw for kw in SEV if kw in tl]
 
 
+# ── Sentiment scoring ─────────────────────────────────────────────────────────
+_BEARISH_WORDS = (
+    'attack', 'strike', 'invasion', 'invaded', 'bomb', 'missile', 'war',
+    'conflict', 'crisis', 'sanction', 'coup', 'collapse', 'explosion',
+    'assassin', 'death', 'killed', 'casualties', 'escalat', 'threat',
+    'blockade', 'siege', 'offensive', 'incursion', 'hostage', 'terror',
+    'shutdown', 'default', 'panic', 'turmoil', 'unrest', 'riot',
+)
+_BULLISH_WORDS = (
+    'ceasefire', 'peace', 'agreement', 'deal', 'accord', 'treaty',
+    'negotiat', 'cooperat', 'resolut', 'withdraw', 'truce',
+    'reconstruction', 'aid', 'support', 'stabiliz', 'recovery',
+    'diplomatic', 'summit', 'talks', 'dialogue',
+)
+
+def score_sentiment(title: str, desc: str = '') -> float:
+    """
+    Return a sentiment score between -1.0 (strongly bearish/risk-off)
+    and +1.0 (strongly bullish/risk-on) for a geopolitical event.
+    Negative = conflict/instability = typically bullish for gold/USD, bearish equities.
+    """
+    text = (title + ' ' + desc).lower()
+    bear = sum(1 for w in _BEARISH_WORDS if w in text)
+    bull = sum(1 for w in _BULLISH_WORDS if w in text)
+    total = bear + bull
+    if total == 0:
+        return 0.0
+    return round((bull - bear) / total, 3)
+
+
 def score_event(
     title: str,
     desc: str = '',
@@ -387,7 +417,8 @@ def build_event(
         'region':   extract_region(text),
         'keywords': extract_keywords(text),
         'assets':   extract_assets(text),
-        'signal':   score_event(title, desc, src_count, social_v),
-        'srcCount': src_count,
-        'socialV':  round(social_v, 3),
+        'signal':    score_event(title, desc, src_count, social_v),
+        'srcCount':  src_count,
+        'socialV':   round(social_v, 3),
+        'sentiment': score_sentiment(title, desc),
     }
