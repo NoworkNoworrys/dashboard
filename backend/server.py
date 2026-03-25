@@ -65,7 +65,7 @@ app.add_middleware(
     allow_origins=[
         'null',                                         # file:// pages (Chrome/Firefox)
         'http://localhost',
-        'http://localhost:3008',                        # Claude preview server
+        # 'http://localhost:3008',                      # removed — no preview servers on this project
         'http://localhost:8080',                        # user's main dashboard link
         'http://localhost:8765',
         'http://127.0.0.1',

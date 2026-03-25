@@ -15,7 +15,7 @@ if os.path.exists(_env_path):
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 # ── Server ──────────────────────────────────────────────────────────────────
-HOST            = '0.0.0.0'
+HOST            = '127.0.0.1'   # localhost only — prevents network exposure of trade data
 PORT            = int(os.getenv('PORT', 8765))   # Render/cloud sets $PORT; local default 8765
 CYCLE_SECONDS   = 60          # pipeline polling interval
 MAX_EVENTS_DB   = 5000        # SQLite rows to keep
@@ -95,12 +95,8 @@ RSS_FEEDS = [
     # ── Government press releases ─────────────────────────────────────────
     ('https://www.whitehouse.gov/feed/',                           'WHITEHOUSE'),
     ('https://www.gov.uk/search/news-and-communications.atom',     'UKGOV'),
-    # ── International news (replacing dead gov feeds) ─────────────────────
+    # ── International organisations ───────────────────────────────────────
     ('https://news.un.org/feed/subscribe/en/news/all/rss.xml',    'UNNEWS'),
-    ('https://foreignpolicy.com/feed/',                            'FP'),
-    ('https://rss.dw.com/xml/rss-en-world',                       'DW'),
-    ('https://feeds.bbci.co.uk/news/world/rss.xml',               'BBC'),
-    ('https://www.aljazeera.com/xml/rss/all.xml',                 'ALJAZEERA'),
 ]
 
 # ── Reddit ───────────────────────────────────────────────────────────────────

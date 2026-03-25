@@ -37,9 +37,11 @@ CREATE TABLE IF NOT EXISTS trades (
     region          TEXT,
     reason          TEXT,
     broker          TEXT DEFAULT 'SIMULATION',
-    broker_order_id TEXT,
-    broker_status   TEXT,
-    extra           TEXT
+    broker_order_id   TEXT,
+    broker_status     TEXT,
+    broker_fill_price REAL,
+    broker_error      TEXT,
+    extra             TEXT
 )
 """
 
@@ -49,10 +51,19 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_db():
-    """Create trades table if it doesn't exist."""
+    """Create trades table if it doesn't exist, and migrate any missing columns."""
     with _lock:
         with _get_conn() as conn:
             conn.execute(_CREATE_TABLE)
+            # Migrate: add columns that didn't exist in older DB files
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
+            migrations = [
+                ("broker_fill_price", "REAL"),
+                ("broker_error",      "TEXT"),
+            ]
+            for col, col_type in migrations:
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {col_type}")
             conn.commit()
 
 
@@ -62,13 +73,13 @@ _COLS = [
     'asset', 'direction', 'confidence', 'entry_price', 'stop_loss',
     'take_profit', 'close_price', 'units', 'size_usd', 'mode',
     'status', 'pnl_pct', 'pnl_usd', 'close_reason', 'region',
-    'reason', 'broker', 'broker_order_id', 'broker_status',
+    'reason', 'broker', 'broker_order_id', 'broker_status', 'broker_fill_price', 'broker_error',
 ]
 
 _PATCH_ALLOWED = {
     'status', 'close_price', 'timestamp_close', 'pnl_pct', 'pnl_usd',
-    'close_reason', 'broker_order_id', 'broker_status', 'confidence',
-    'stop_loss', 'take_profit',
+    'close_reason', 'broker_order_id', 'broker_status', 'broker_fill_price',
+    'confidence', 'stop_loss', 'take_profit', 'entry_price', 'broker_error',
 }
 
 

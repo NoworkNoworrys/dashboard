@@ -756,9 +756,12 @@
     if (!_apiOnline) return;
     _apiFetch('/api/trades', { method: 'POST', body: JSON.stringify(trade) })
       .catch(function (e) {
-        _apiOnline = false;
-        log('SYSTEM', '⚠ Backend sync failed — trade ' + trade.id + ' not saved to DB. '
+        log('SYSTEM', '⚠ Backend sync failed — trade ' + trade.trade_id + ' not saved to DB. '
           + 'Backend may be down. (' + (e && e.message ? e.message : 'network error') + ')', 'warn');
+        // Don't permanently disable — schedule a re-check in 30s so transient errors self-heal
+        setTimeout(function () {
+          _apiFetch('/api/status').then(function (r) { if (r.ok) _apiOnline = true; }).catch(function () {});
+        }, 30000);
       });
   }
 
@@ -769,10 +772,55 @@
       method: 'PATCH',
       body:   JSON.stringify(updates)
     }).catch(function (e) {
-      _apiOnline = false;
       log('SYSTEM', '⚠ Backend sync failed — could not update trade ' + tradeId + '. '
         + 'Backend may be down. (' + (e && e.message ? e.message : 'network error') + ')', 'warn');
+      setTimeout(function () {
+        _apiFetch('/api/status').then(function (r) { if (r.ok) _apiOnline = true; }).catch(function () {});
+      }, 30000);
     });
+  }
+
+  /* ── Resume Alpaca fill polling for trades that survived a page reload ───────
+     If the page reloads while an Alpaca order is mid-flight (PENDING_FILL),
+     the poll loop is lost. This re-attaches the callbacks so the trade still
+     lands as FILLED (or gets closed on timeout/cancel) after reload.           */
+  function _resumeAlpacaPolling(trade) {
+    if (!window.AlpacaBroker || !AlpacaBroker.isConnected()) return;
+    AlpacaBroker.resumeOrderPoll(
+      trade.broker_order_id,
+      /* onFill */ function (fillPrice, order) {
+        trade.broker_status     = 'FILLED';
+        trade.broker_fill_price = fillPrice;
+        if (fillPrice > 0) trade.entry_price = fillPrice;
+        saveTrades();
+        _apiPatchTrade(trade.trade_id, {
+          broker_status: 'FILLED',
+          broker_fill_price: fillPrice,
+          entry_price: trade.entry_price
+        });
+        log('ALPACA', trade.asset + ' FILLED @ $' + fillPrice.toFixed(4) +
+          ' (resumed poll, order ' + order.id + ')', 'green');
+        renderUI();
+      },
+      /* onFail */ function (reason) {
+        trade.broker_status   = 'REJECTED';
+        trade.broker_error    = 'Order ' + reason + ' (detected on reload)';
+        trade.status          = 'CLOSED';
+        trade.close_reason    = 'BROKER_REJECTED';
+        trade.timestamp_close = new Date().toISOString();
+        _cfg.virtual_balance += (trade.open_commission || 0);
+        saveTrades();
+        saveCfg();
+        _apiPatchTrade(trade.trade_id, {
+          status: 'CLOSED', close_reason: 'BROKER_REJECTED',
+          broker_error: trade.broker_error, timestamp_close: trade.timestamp_close
+        });
+        log('ALPACA', '⚠ Order ' + reason + ' for ' + trade.asset +
+          ' (detected on reload) — trade closed, commission refunded.', 'red');
+        renderUI();
+      }
+    );
+    log('ALPACA', 'Resumed fill poll for ' + trade.asset + ' order ' + trade.broker_order_id, 'dim');
   }
 
   /* ── API startup: check online, load DB trades, migrate localStorage ──────── */
@@ -796,14 +844,48 @@
       .then(function (data) {
         var dbTrades = data.trades || [];
 
-        // DB is the sole source of truth — use it directly, no localStorage merge.
+        // Rescue any OPEN trades from localStorage that aren't in the DB.
+        // These are trades that were opened while the backend was offline and
+        // never synced. Without this merge they'd be silently lost on reload.
+        var lsTrades = [];
+        try {
+          var _lsRaw = localStorage.getItem(TRADES_KEY);
+          lsTrades = _lsRaw ? JSON.parse(_lsRaw) : [];
+          if (!Array.isArray(lsTrades)) lsTrades = Object.values(lsTrades);
+        } catch(e) {}
+        var _dbIds = new Set(dbTrades.map(function(t) { return t.trade_id; }));
+        var _lsOnlyOpen = lsTrades.filter(function(t) {
+          return t.status === 'OPEN' && t.trade_id && !_dbIds.has(t.trade_id);
+        });
+        if (_lsOnlyOpen.length) {
+          log('SYSTEM', _lsOnlyOpen.length + ' open trade(s) rescued from localStorage — syncing to DB', 'amber');
+          _lsOnlyOpen.forEach(function(t) { _apiPostTrade(t); });
+        }
+
         dbTrades.sort(function (a, b) {
           return new Date(b.timestamp_open) - new Date(a.timestamp_open);
         });
-        _trades = dbTrades;
-        saveTrades();   // mirror to localStorage as offline fallback only
+        _trades = dbTrades.concat(_lsOnlyOpen);
+
+        // Resume fill polling for any Alpaca trades stuck in PENDING_FILL
+        // (e.g. page was reloaded while an order was mid-flight)
+        var _pendingFill = _trades.filter(function (t) {
+          return t.status === 'OPEN' &&
+                 t.broker_status === 'PENDING_FILL' &&
+                 t.broker_order_id &&
+                 t.venue === 'ALPACA';
+        });
+        if (_pendingFill.length) {
+          // Delay slightly so AlpacaBroker has time to auto-reconnect first
+          setTimeout(function () {
+            _pendingFill.forEach(function (t) { _resumeAlpacaPolling(t); });
+          }, 6000);
+        }
+
+        saveTrades();
         renderUI();
-        log('SYSTEM', 'SQLite backend online — ' + dbTrades.length + ' trade(s) loaded from DB', 'green');
+        log('SYSTEM', 'SQLite backend online — ' + dbTrades.length + ' trade(s) loaded from DB' +
+          (_lsOnlyOpen.length ? ', ' + _lsOnlyOpen.length + ' rescued from localStorage' : ''), 'green');
       })
       .catch(function (err) {
         _apiOnline = false;
@@ -1188,8 +1270,8 @@
     // Source corroboration: require at least 2 independent data sources for non-scalper signals.
     // Single-source signals (srcCount=1) have high false-positive rate — audit found no win-rate benefit.
     var _isSrcScalper = sig.reason && (sig.reason.indexOf('SCALPER') === 0 || sig.reason.indexOf('GII:') === 0);
-    if (!_isSrcScalper && sig.srcCount !== undefined && sig.srcCount < 2)
-      return { ok: false, reason: 'srcCount ' + sig.srcCount + ' < 2 — single-source signal not confirmed' };
+    if (!_isSrcScalper && (sig.srcCount === undefined || sig.srcCount < 2))
+      return { ok: false, reason: 'srcCount ' + (sig.srcCount === undefined ? 'missing' : sig.srcCount) + ' — signal not corroborated by 2+ sources' };
 
     var open = openTrades();
 
@@ -1262,8 +1344,9 @@
       return { ok: false, reason: 'Max exposure ' + _cfg.max_exposure_pct + '% reached' };
 
     // Session daily loss limit (configurable, replaces hard-coded 10% check)
-    if (_sessionStartBalance && _cfg.daily_loss_limit_pct > 0) {
-      var sessionLossPct = (_cfg.virtual_balance - _sessionStartBalance) / _sessionStartBalance * 100;
+    var _effectiveStart = _sessionStartBalance || _cfg.virtual_balance;
+    if (_effectiveStart && _cfg.daily_loss_limit_pct > 0) {
+      var sessionLossPct = (_cfg.virtual_balance - _effectiveStart) / _effectiveStart * 100;
       if (sessionLossPct < -_cfg.daily_loss_limit_pct) {
         return { ok: false, reason: 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached — execution paused' };
       }
@@ -1299,7 +1382,10 @@
       // Convert to US Eastern Time (UTC-5 standard, UTC-4 daylight saving).
       // Simple approximation: ET = UTC - 5h (adjust for DST where needed).
       var _utcH = _now.getUTCHours(), _utcM = _now.getUTCMinutes();
-      var _etMins = (_utcH * 60 + _utcM + 1440 - 300) % 1440;  // minutes since midnight ET (EST offset)
+      // DST approximation: EDT (UTC-4) runs Mar–Nov, EST (UTC-5) Nov–Mar
+      var _mo = _now.getUTCMonth(); // 0=Jan
+      var _etOffset = (_mo >= 2 && _mo <= 10) ? 240 : 300; // EDT=240min, EST=300min
+      var _etMins = (_utcH * 60 + _utcM + 1440 - _etOffset) % 1440;
       var _openStart = 9 * 60 + 30, _openEnd = 10 * 60;         // 09:30–10:00
       var _closeStart = 15 * 60 + 30, _closeEnd = 16 * 60;      // 15:30–16:00
       if ((_etMins >= _openStart && _etMins < _openEnd) ||
@@ -1388,6 +1474,10 @@
     var stopOnWrongSide = (dir === 'LONG' && stopLoss >= entryPrice) ||
                           (dir === 'SHORT' && stopLoss <= entryPrice);
     if (stopOnWrongSide || rawSlDist > maxSlDist) {
+      log('RISK', '⚠ SL sanity override for ' + sig.asset + ' ' + dir +
+        ' — signal SL ' + (stopLoss ? stopLoss.toFixed(6) : 'none') +
+        ' was ' + (stopOnWrongSide ? 'wrong side of entry' : 'too wide (>' + (maxSlDist*100/entryPrice).toFixed(1) + '%)') +
+        ' — recalculated using cfg stop_loss_pct', 'warn');
       slDist_ = entryPrice * (_cfg.stop_loss_pct / 100);
       tpDist_ = slDist_ * sigTpRatio;
       stopLoss   = dir === 'LONG' ? entryPrice - slDist_ : entryPrice + slDist_;
@@ -1780,19 +1870,70 @@
     // ── Fire Alpaca order if this trade is routed to Alpaca ──────────────
     if (trade.venue === 'ALPACA' && window.AlpacaBroker && AlpacaBroker.isConnected()) {
       var _alpSide = trade.direction === 'LONG' ? 'buy' : 'sell';
-      AlpacaBroker.placeOrder(trade.asset, null, _alpSide, { notional: trade.size_usd })
-        .then(function (order) {
-          trade.broker_order_id = order.id;
-          trade.broker_status   = order.status;
+      var _MIN_ALPACA_NOTIONAL = 5; // Alpaca minimum order size
+      if (trade.size_usd < _MIN_ALPACA_NOTIONAL) {
+        log('ALPACA', trade.asset + ' order skipped — size $' + trade.size_usd.toFixed(2) +
+          ' below Alpaca $' + _MIN_ALPACA_NOTIONAL + ' minimum', 'amber');
+        trade.broker_status = 'SKIPPED_MIN_SIZE';
+        saveTrades();
+      } else
+      AlpacaBroker.placeOrderWithConfirmation(
+        trade.asset, null, _alpSide, { notional: trade.size_usd },
+        /* onFill */ function (fillPrice, order) {
+          trade.broker_status     = 'FILLED';
+          trade.broker_fill_price = fillPrice;
+          if (fillPrice > 0) trade.entry_price = fillPrice;
           saveTrades();
-          log('ALPACA', trade.asset + ' order placed: ' + order.id + ' (' + order.status + ')', 'cyan');
-        })
-        .catch(function (e) {
-          trade.broker_status = 'REJECTED';
-          trade.broker_error  = e.message || 'unknown error';
+          _apiPatchTrade(trade.trade_id, {
+            broker_status: 'FILLED',
+            broker_fill_price: fillPrice,
+            entry_price: trade.entry_price
+          });
+          log('ALPACA', trade.asset + ' FILLED @ $' + fillPrice.toFixed(4) +
+            ' (order ' + order.id + ')', 'green');
+          renderUI();
+        },
+        /* onFail */ function (reason) {
+          trade.broker_status   = 'REJECTED';
+          trade.broker_error    = 'Order ' + reason;
+          trade.status          = 'CLOSED';
+          trade.close_reason    = 'BROKER_REJECTED';
+          trade.timestamp_close = new Date().toISOString();
+          _cfg.virtual_balance += (trade.open_commission || 0);
           saveTrades();
-          log('ALPACA', '⚠ Order REJECTED for ' + trade.asset + ': ' + (e.message || 'unknown error'), 'amber');
+          saveCfg();
+          _apiPatchTrade(trade.trade_id, {
+            status: 'CLOSED', close_reason: 'BROKER_REJECTED',
+            broker_error: trade.broker_error, timestamp_close: trade.timestamp_close
+          });
+          log('ALPACA', '⚠ Order ' + reason + ' for ' + trade.asset +
+            ' — trade closed, commission refunded.', 'red');
+          renderUI();
+        }
+      ).then(function (order) {
+        if (!order) return; // catch path already handled
+        trade.broker_order_id = order.id;
+        trade.broker_status   = 'PENDING_FILL';
+        saveTrades();
+        log('ALPACA', trade.asset + ' order submitted: ' + order.id + ' — awaiting fill confirmation (30s max)', 'cyan');
+      }).catch(function (e) {
+        // placeOrderWithConfirmation itself threw (network/auth error before order was created)
+        trade.broker_status   = 'REJECTED';
+        trade.broker_error    = e.message || 'unknown error';
+        trade.status          = 'CLOSED';
+        trade.close_reason    = 'BROKER_REJECTED';
+        trade.timestamp_close = new Date().toISOString();
+        _cfg.virtual_balance += (trade.open_commission || 0);
+        saveTrades();
+        saveCfg();
+        _apiPatchTrade(trade.trade_id, {
+          status: 'CLOSED', close_reason: 'BROKER_REJECTED',
+          broker_error: trade.broker_error, timestamp_close: trade.timestamp_close
         });
+        log('ALPACA', '⚠ Order REJECTED for ' + trade.asset +
+          ' — trade closed, commission refunded. Reason: ' + trade.broker_error, 'red');
+        renderUI();
+      });
     }
 
     // ── Fire TickTrader order if this trade is routed there ───────────────
@@ -1805,7 +1946,20 @@
           log('TT', trade.asset + ' order placed: ' + order.id + ' (' + order.status + ')', 'cyan');
         })
         .catch(function (e) {
-          log('TT', '⚠ Order failed for ' + trade.asset + ': ' + e.message, 'amber');
+          trade.broker_status   = 'REJECTED';
+          trade.broker_error    = e.message || 'unknown error';
+          trade.status          = 'CLOSED';
+          trade.close_reason    = 'BROKER_REJECTED';
+          trade.timestamp_close = new Date().toISOString();
+          _cfg.virtual_balance += (trade.open_commission || 0);
+          saveTrades();
+          saveCfg();
+          _apiPatchTrade(trade.trade_id, {
+            status: 'CLOSED', close_reason: 'BROKER_REJECTED',
+            broker_error: trade.broker_error, timestamp_close: trade.timestamp_close
+          });
+          log('TT', '⚠ Order REJECTED for ' + trade.asset + ' — trade closed, commission refunded. Reason: ' + trade.broker_error, 'red');
+          renderUI();
         });
     }
 
@@ -2099,8 +2253,23 @@
     return { ok: true };
   }
 
+  // Rate limiter state for runaway signal protection
+  var _sigRateWindow = 0;   // start of current 10s window
+  var _sigRateCount  = 0;   // signals processed in current window
+  var _SIG_RATE_LIMIT = 50; // max signals per 10s before throttling
+
   function onSignals(sigs) {
     if (!sigs || !sigs.length) return;
+
+    // Circuit breaker: if an agent goes haywire and floods >50 signals/10s, throttle it.
+    var _now = Date.now();
+    if (_now - _sigRateWindow > 10000) { _sigRateWindow = _now; _sigRateCount = 0; }
+    _sigRateCount += sigs.length;
+    if (_sigRateCount > _SIG_RATE_LIMIT) {
+      log('SYSTEM', '⚠ Signal rate limit hit (' + _sigRateCount + '/10s) — batch dropped to protect execution engine', 'warn');
+      return;
+    }
+
     _lastSignals = sigs;                 // always cache — re-scan loop needs these
 
     sigs.forEach(function (sig) {
@@ -2231,9 +2400,11 @@
      ══════════════════════════════════════════════════════════════════════════════ */
 
   function monitorTrades() {
+    window._eeLastMonitor = Date.now(); // heartbeat — visible via EE.status() for watchdog checks
     // Daily loss limit check: if session P&L hits the limit, disable auto-execution
-    if (_sessionStartBalance && _cfg.daily_loss_limit_pct > 0 && _cfg.enabled) {
-      var sessionLossPct = (_cfg.virtual_balance - _sessionStartBalance) / _sessionStartBalance * 100;
+    var _monEffectiveStart = _sessionStartBalance || _cfg.virtual_balance;
+    if (_monEffectiveStart && _cfg.daily_loss_limit_pct > 0 && _cfg.enabled) {
+      var sessionLossPct = (_cfg.virtual_balance - _monEffectiveStart) / _monEffectiveStart * 100;
       if (sessionLossPct < -_cfg.daily_loss_limit_pct) {
         _cfg.enabled = false;
         saveCfg();
@@ -2294,6 +2465,10 @@
     });
 
     openTrades().forEach(function (trade) {
+      // Skip trades awaiting broker fill confirmation — no price has been
+      // locked in yet, so SL/TP/funding checks would fire against the wrong price.
+      if (trade.broker_status === 'PENDING_FILL') return;
+
       fetchPrice(trade.asset, function (price) {
         // Use cached price as display fallback so unrealised P&L always renders
         var displayPrice = price || _priceCache[normaliseAsset(trade.asset)] || null;
@@ -3920,6 +4095,20 @@
     /* ── Called by renderTrades() hook each cycle ── */
     onSignals: onSignals,
 
+    /* ── One-time sync: push all in-memory trades to backend DB ── */
+    syncAllTradesToBackend: function () {
+      if (!_apiOnline) { log('SYSTEM', '⚠ Backend offline — cannot sync trades', 'warn'); return; }
+      var all = Array.isArray(_trades) ? _trades : Object.values(_trades);
+      if (!all.length) { log('SYSTEM', 'No trades in memory to sync', 'amber'); return; }
+      log('SYSTEM', 'Syncing ' + all.length + ' trades to backend (POST = upsert, safe to re-run)…', 'amber');
+      var ok = 0, fail = 0;
+      all.forEach(function (t) {
+        _apiFetch('/api/trades', { method: 'POST', body: JSON.stringify(t) })
+          .then(function () { ok++; if (ok + fail === all.length) log('SYSTEM', '✓ Sync complete — ' + ok + ' trades pushed to backend', 'green'); })
+          .catch(function () { fail++; if (ok + fail === all.length) log('SYSTEM', '⚠ Sync done — ' + ok + ' ok, ' + fail + ' failed', 'warn'); });
+      });
+    },
+
     /* ── Risk Simulator: called by slider oninput events ── */
     updateSim: function () { renderSim(); },
 
@@ -4466,8 +4655,10 @@
     }
     saveCfg();
 
-    // Autosave safety net — belt-and-suspenders every 7 s
-    setInterval(function () { saveTrades(); saveCfg(); }, 7000);
+    // Autosave safety net — belt-and-suspenders every 7 s (guarded against double-load)
+    if (!window._eeSaveInterval) {
+      window._eeSaveInterval = setInterval(function () { saveTrades(); saveCfg(); }, 7000);
+    }
 
     // Record starting balance for P&L timeline
     _recordPnlSnapshot('load', 0);
@@ -4475,7 +4666,9 @@
     // First monitor at 9s: HL-Feed connects at 6s + ~1-2s for WS handshake and first
     // allMids message. Waiting until 9s ensures the first stop/TP check has real prices.
     setTimeout(monitorTrades, 9000);
-    setInterval(monitorTrades, 15000);  // every 15s (was 30s) — tighter TP/SL for scalper trades
+    if (!window._eeMonitorInterval) {
+      window._eeMonitorInterval = setInterval(monitorTrades, 15000);  // guarded — prevents double-firing if script loaded twice
+    }
     _startBinanceWS();                  // BTC fallback feed — yields to HL when live
 
     /* Re-scan loop: every 5 minutes re-process the last IC signal batch.

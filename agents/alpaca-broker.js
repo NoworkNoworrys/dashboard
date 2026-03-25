@@ -187,6 +187,50 @@
     }
   }
 
+  /* ── Fill confirmation loop ──────────────────────────────────────────
+     Polls GET /v2/orders/{orderId} every 3s after a placeOrder() call.
+     • filled              → onFill(fillPrice, order)
+     • cancelled/expired/rejected → onFail(reason)
+     • timeout (30s)       → cancel order → onFail('timeout')
+     Network errors keep retrying until the 30s wall clock expires.     */
+  function _pollOrderFill(orderId, onFill, onFail) {
+    var POLL_MS    = 3000;
+    var TIMEOUT_MS = 30000;
+    var _started   = Date.now();
+
+    function _check() {
+      if (Date.now() - _started >= TIMEOUT_MS) {
+        // Cancel the dangling order, then surface the failure to EE
+        fetch(_baseUrl() + '/v2/orders/' + orderId, { method: 'DELETE', headers: _headers() })
+          .catch(function () {});
+        onFail('timeout');
+        return;
+      }
+      fetch(_baseUrl() + '/v2/orders/' + orderId, { headers: _headers() })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.status);
+          return res.json();
+        })
+        .then(function (order) {
+          var st = (order.status || '').toLowerCase();
+          if (st === 'filled') {
+            onFill(parseFloat(order.filled_avg_price || 0), order);
+          } else if (st === 'cancelled' || st === 'expired' || st === 'rejected') {
+            onFail(st);
+          } else {
+            // pending_new, new, accepted, partially_filled — keep polling
+            setTimeout(_check, POLL_MS);
+          }
+        })
+        .catch(function () {
+          // Transient network error — keep polling until timeout
+          setTimeout(_check, POLL_MS);
+        });
+    }
+
+    setTimeout(_check, POLL_MS);
+  }
+
   /* ── Public API ──────────────────────────────────────────────────────── */
   var AlpacaBroker = {
     name:    'ALPACA',
@@ -301,6 +345,27 @@
       return _api('/v2/orders', { method: 'POST', body: JSON.stringify(body) });
     },
 
+    /* Place a market order and confirm fill via polling.
+       onFill(fillPrice, order) called when status === 'filled'.
+       onFail(reason)           called on cancel / reject / timeout.
+       Returns the initial order object (id available immediately).      */
+    placeOrderWithConfirmation: async function (symbol, qty, side, opts, onFill, onFail) {
+      var body = {
+        symbol:        symbol.toUpperCase(),
+        side:          side,
+        type:          'market',
+        time_in_force: 'day'
+      };
+      if (opts && opts.notional) {
+        body.notional = String(parseFloat(opts.notional).toFixed(2));
+      } else {
+        body.qty = String(Math.abs(parseFloat(qty)));
+      }
+      var order = await _api('/v2/orders', { method: 'POST', body: JSON.stringify(body) });
+      _pollOrderFill(order.id, onFill, onFail);
+      return order;
+    },
+
     /* Close entire position */
     closePosition: async function (symbol) {
       var url = _baseUrl() + '/v2/positions/' + symbol.toUpperCase();
@@ -347,7 +412,14 @@
           : 'Not connected'
       };
     },
-    signals: function () { return []; }   /* Alpaca is execution-only, no trading signals */
+    signals: function () { return []; },   /* Alpaca is execution-only, no trading signals */
+
+    /* Resume a fill poll for an order that was placed before a page reload.
+       Call this on startup for any trade stuck at broker_status='PENDING_FILL'. */
+    resumeOrderPoll: function (orderId, onFill, onFail) {
+      if (!orderId) return;
+      _pollOrderFill(orderId, onFill, onFail);
+    }
   };
 
   _loadCfg();
