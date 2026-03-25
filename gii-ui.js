@@ -255,6 +255,8 @@
     { name: 'correlation ◎',     global: 'GII_AGENT_CORRELATION'      },
     { name: 'momentum ◎',        global: 'GII_AGENT_MOMENTUM'         },
     { name: 'onchain ◎',         global: 'GII_AGENT_ONCHAIN'          },
+    { name: 'event-momentum ◎',  global: 'GII_AGENT_EVENT_MOMENTUM'   },
+    { name: 'macro-cross ◎',     global: 'GII_AGENT_MACRO_CROSS'      },
   ];
 
   // ── dirty flag — set by GII core after each cycle ─────────────────────────

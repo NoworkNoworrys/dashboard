@@ -1545,6 +1545,30 @@
           ': $' + _bfCorr.toFixed(2) + ' → $' + riskAmt.toFixed(2), 'amber');
     }
 
+    // Regime-aware sizing: trend markets get more size, choppy markets get less.
+    // Uses BTC as a broad market regime indicator (available on HL).
+    // Trending = 1h and 4h returns aligned and > threshold. Choppy = conflicting.
+    (function() {
+      if (!window.GII_AGENT_MOMENTUM) return;
+      try {
+        var mSt = GII_AGENT_MOMENTUM.status();
+        if (!mSt || !mSt.assetsTracked) return;
+        // Momentum agent exposes a regime hint via its last scan
+        var sigs = GII_AGENT_MOMENTUM.signals ? GII_AGENT_MOMENTUM.signals() : [];
+        var assetHasMomentum = sigs.some(function(s) {
+          return s.asset === normaliseAsset(sig.asset) && s.bias === (sig.dir || sig.bias);
+        });
+        var regimeMult = assetHasMomentum ? 1.20 : 0.90;
+        if (regimeMult !== 1.0) {
+          var _bfRegime = riskAmt;
+          riskAmt = riskAmt * regimeMult;
+          log('RISK', sig.asset + ' regime ×' + regimeMult +
+              ' (momentum ' + (assetHasMomentum ? 'aligned' : 'absent') + ')' +
+              ': $' + _bfRegime.toFixed(2) + ' → $' + riskAmt.toFixed(2), 'dim');
+        }
+      } catch(e) {}
+    })();
+
     var slDist   = Math.abs(entryPrice - stopLoss);
 
     // Risk-of-ruin guard: scale down so total max drawdown stays ≤ 20% of balance

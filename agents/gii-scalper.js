@@ -26,7 +26,11 @@
   var POLL_INTERVAL_MS  = 5 * 60 * 1000;     // 5 minutes
   var INIT_DELAY_MS     = 16500;              // after gii-technicals (11.5s) + buffer
   var GTI_GATE          = 65;                 // skip scalping when GTI >= this
-  var SCALPER_ASSETS   = ['BTC', 'ETH'];  // Assets scanned each poll cycle
+  var SCALPER_ASSETS   = [                // Assets scanned each poll cycle
+    'BTC', 'ETH', 'SOL', 'XRP', 'DOGE',
+    'AVAX', 'BNB', 'ADA', 'LINK', 'DOT',
+    'LTC', 'ATOM', 'NEAR', 'ARB', 'OP'
+  ];
   var SCALP_TIMEOUT_MS  = 2 * 60 * 60 * 1000; // auto-expire active scalp after 2h
   var MIN_CONF          = 0.60;               // minimum conf to emit (Grade B floor)
   var CC_BASE           = 'https://min-api.cryptocompare.com/data/v2/';
