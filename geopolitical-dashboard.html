@@ -1924,6 +1924,31 @@
     .hr-no-signals { padding:30px; text-align:center; color:var(--dim); font-size:11px; }
 
     /* ══════════════════════════════════════════════════════════════════════════
+       Market Observer · Accent: #38bdf8 (sky blue)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .mo-wrap        { margin-bottom:24px; background:var(--bg1); border:1px solid var(--border); border-radius:8px; padding:16px; }
+    .mo-header      { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .mo-title       { font-size:13px; font-weight:700; color:#38bdf8; letter-spacing:0.3px; }
+    .mo-subtitle    { font-size:10px; color:var(--dim); margin-top:2px; }
+    .mo-ts          { font-size:9px; color:var(--dim); margin-left:6px; }
+    .mo-meta        { display:flex; justify-content:space-between; font-size:9px; color:var(--dim); margin-bottom:8px; padding:4px 0; border-bottom:1px solid var(--border); }
+    .mo-table-header{ display:grid; grid-template-columns:100px 90px 110px 1fr 60px 80px; gap:6px; font-size:9px; font-weight:700; color:var(--dim); text-transform:uppercase; letter-spacing:0.8px; padding:4px 6px; border-bottom:1px solid var(--border); margin-bottom:4px; }
+    .mo-row         { display:grid; grid-template-columns:100px 90px 110px 1fr 60px 80px; gap:6px; font-size:10px; padding:5px 6px; border-radius:4px; align-items:center; }
+    .mo-row:hover   { background:var(--bg3); }
+    .mo-asset       { font-weight:700; color:var(--bright); }
+    .mo-hints       { display:flex; flex-wrap:wrap; gap:3px; }
+    .mo-hint        { font-size:8px; background:rgba(56,189,248,0.12); color:#38bdf8; border-radius:3px; padding:1px 5px; }
+    .mo-score       { font-weight:700; font-size:11px; }
+    .mo-tier        { font-size:8px; font-weight:400; opacity:0.8; }
+    .mo-tag         { font-size:8px; border-radius:3px; padding:1px 4px; margin-left:3px; vertical-align:middle; }
+    .mo-tag-gii     { background:rgba(74,222,128,0.2); color:#4ade80; }
+    .mo-tag-conflict{ background:rgba(248,113,113,0.2); color:#f87171; }
+    .mo-tag-ee      { background:rgba(255,149,0,0.2); color:#ff9500; }
+    @media (max-width:700px) {
+      .mo-table-header,.mo-row { grid-template-columns:80px 80px 80px 1fr 50px 60px; }
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
        EE — Execution Engine · Accent: #ff9500 (orange)
        ══════════════════════════════════════════════════════════════════════════ */
     .ee-wrap { margin-bottom: 24px; }
@@ -5045,6 +5070,25 @@
     </div>
 
   </div><!-- /hr-wrap -->
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════════
+       MARKET OBSERVER — Observation-First Parallel Scanner
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <div class="mo-wrap" id="moWrap">
+    <div class="mo-header">
+      <div>
+        <div class="mo-title">&#128269; Market Observer <span id="mo-timestamp" style="font-size:9px;color:var(--dim);font-weight:400;margin-left:8px"></span></div>
+        <div class="mo-subtitle">Price-action scanner &middot; runs alongside geopolitical system &middot; Active/Strong observations auto-forward to Execution Engine</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span id="mo-badge-assets" style="font-size:9px;background:rgba(56,189,248,0.15);color:#38bdf8;border-radius:4px;padding:2px 7px">0 assets</span>
+        <span id="mo-badge-ee" style="font-size:9px;background:rgba(255,149,0,0.15);color:#ff9500;border-radius:4px;padding:2px 7px">0 EE signals</span>
+      </div>
+    </div>
+    <div id="mo-content">
+      <div class="ee-placeholder">Market Observer initialising — first scan in ~15 seconds&hellip;</div>
+    </div>
+  </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════════════
        EXECUTION ENGINE — Signal-Driven Trade Automation
@@ -13230,7 +13274,7 @@ function _modalKeyHandler(e) {
 <script src="polymarket.js?v=15"></script>
 
 <!-- TickTrader Broker adapter — forex majors via any TickTrader-powered broker -->
-<script src="agents/ticktrader-broker.js?v=1"></script>
+<script src="agents/ticktrader-broker.js?v=2"></script>
 
 <!-- Alpaca Broker adapter — loaded before EE so venue router is available -->
 <script src="agents/alpaca-broker.js?v=3"></script>
@@ -13244,7 +13288,7 @@ function _modalKeyHandler(e) {
 <script src="agents/ic-risk-engine.js?v=2"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=87"></script>
+<script src="executionEngine.js?v=88"></script>
 
 <!-- GII Core — loaded before agents so window.GII (defensiveAssets, riskAssets, etc.) is
      available when agent IIFEs execute. Agents all guard GII calls, so order is safe. -->
@@ -13300,15 +13344,34 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-entry.js?v=14"></script>
 <script src="agents/gii-exit.js?v=12"></script>
 <script src="agents/gii-portfolio.js?v=4"></script>
-<script src="agents/gii-routing.js?v=9"></script>
+<script src="agents/gii-routing.js?v=10"></script>
 <script src="gii-meta.js?v=2"></script>
-<script src="gii-ui.js?v=13"></script>
+<script src="gii-ui.js?v=14"></script>
 <script src="gii-debug.js?v=5"></script>
 <script src="gii-gatekeeper.js?v=3"></script>
 
 <!-- HL-Feed — Hyperliquid real-time price WebSocket (GAS/NatGas, Gold, Silver, crypto, equities) -->
 <!-- Loaded last so EE.injectPrice() is available when the WS opens 6 s post-load.       -->
-<script src="hl-feed.js?v=6"></script>
+<!-- Market Observer — observation-first parallel scanner. Must load after hl-feed.js -->
+<script src="agents/market-observer.js?v=1"></script>
+<script src="agents/technicals-agent.js?v=2"></script>
+<script src="agents/macro-events-agent.js?v=2"></script>
+<script src="agents/crypto-signals-agent.js?v=2"></script>
+<script src="agents/correlation-agent.js?v=2"></script>
+<script src="agents/momentum-agent.js?v=2"></script>
+<script src="agents/onchain-signals-agent.js?v=1"></script>
+<script>
+  // Keep Market Observer header badges in sync
+  setInterval(function () {
+    if (!window.GII_AGENT_MARKET_OBSERVER) return;
+    var st = GII_AGENT_MARKET_OBSERVER.status();
+    var ba = document.getElementById('mo-badge-assets');
+    var be = document.getElementById('mo-badge-ee');
+    if (ba) ba.textContent = (st.assetsTracked || 0) + ' assets';
+    if (be) be.textContent = (st.eeSignalsTotal || 0) + ' EE signals';
+  }, 5000);
+</script>
+<script src="hl-feed.js?v=7"></script>
 <script>
   // Update EE backup count display after all scripts have loaded
   setTimeout(function() {

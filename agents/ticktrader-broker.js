@@ -379,7 +379,8 @@
   };
 
   _loadCfg();
-  window.TTBroker = TTBroker;
+  window.TTBroker          = TTBroker;
+  window.TickTraderBroker  = TTBroker;  // alias for agent status panel
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _renderCard);

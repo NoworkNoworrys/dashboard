@@ -58,11 +58,60 @@
     'XRP':      ['XRP'],
     'BNB':      ['BNB'],
     'ADA':      ['ADA'],
+    'DOGE':     ['DOGE'],
+    'AVAX':     ['AVAX'],
+    'DOT':      ['DOT'],
+    'LINK':     ['LINK'],
+    'LTC':      ['LTC'],
+    'UNI':      ['UNI'],
+    'AAVE':     ['AAVE'],
+    'INJ':      ['INJ'],
+    'SUI':      ['SUI'],
+    'APT':      ['APT'],
+    'TIA':      ['TIA'],
+    'TON':      ['TON'],
+    'NEAR':     ['NEAR'],
+    'FIL':      ['FIL'],
+    'ARB':      ['ARB'],
+    'OP':       ['OP'],
+    'ATOM':     ['ATOM'],
+    'HYPE':     ['HYPE'],
+    'WIF':      ['WIF'],
+    'PEPE':     ['kPEPE', 'PEPE'],
+    'BONK':     ['kBONK', 'BONK'],
+    'FLOKI':    ['kFLOKI', 'FLOKI'],
+    'SHIB':     ['kSHIB', 'SHIB'],
+    'TAO':      ['TAO'],
+    'RENDER':   ['RENDER'],
+    'FET':      ['FET'],
+    'IMX':      ['IMX'],
+    'SAND':     ['SAND'],
+    'ALGO':     ['ALGO'],
+    'XLM':      ['XLM'],
+    'HBAR':     ['HBAR'],
+    'ICP':      ['ICP'],
+    'ETC':      ['ETC'],
+    'BCH':      ['BCH'],
+    'TRX':      ['TRX'],
+    'SEI':      ['SEI'],
+    'RUNE':     ['RUNE'],
+    'ONDO':     ['ONDO'],
+    'PENDLE':   ['PENDLE'],
+    'JUP':      ['JUP'],
+    'ENS':      ['ENS'],
+    'MKR':      ['MKR'],
+    'COMP':     ['COMP'],
+    'SNX':      ['SNX'],
+    'LDO':      ['LDO'],
+    'ZRO':      ['ZRO'],
+    'BLUR':     ['BLUR'],
+    'GMX':      ['GMX'],
 
     /* Commodity perps — confirmed live on HL (Mar 2026)
        NOTE: WTI and BRENTOIL crude perps were DELISTED from HL.
        Only natural gas remains. HL allMids key = 'GAS' (not 'NATGAS'). */
     'GAS':      ['GAS', 'NATGAS'],        // Natural gas perp (allMids key = 'GAS')
+    'PAXG':     ['PAXG'],                 // PAX Gold — gold-backed token on HL
 
     /* Spot equity/ETF tokens — @N pair-index, full USD price (Mar 2026 spotMeta)
        Prices ~10-20% of real stock price on some tokens due to oracle/synthetic
@@ -115,9 +164,28 @@
     'META':    'equity',  'QQQ':     'equity',
     'MSFT':    'equity',
     'SLV':     'precious','SILVER':  'precious','XAG': 'precious',
-    'GLD':     'precious', // Gold ETF spot token
+    'GLD':     'precious',
+    'PAXG':    'precious',
     /* Energy commodity perps (only GAS/NATGAS remain on HL — WTI/BRENT delisted) */
-    'GAS':     'energy',  'NATGAS': 'energy'
+    'GAS':     'energy',  'NATGAS': 'energy',
+    /* Extended crypto perps */
+    'DOGE':    'crypto',  'AVAX':   'crypto',  'DOT':    'crypto',
+    'LINK':    'crypto',  'LTC':    'crypto',  'UNI':    'crypto',
+    'AAVE':    'crypto',  'INJ':    'crypto',  'SUI':    'crypto',
+    'APT':     'crypto',  'TIA':    'crypto',  'TON':    'crypto',
+    'NEAR':    'crypto',  'FIL':    'crypto',  'ARB':    'crypto',
+    'OP':      'crypto',  'ATOM':   'crypto',  'HYPE':   'crypto',
+    'WIF':     'crypto',  'PEPE':   'crypto',  'BONK':   'crypto',
+    'FLOKI':   'crypto',  'SHIB':   'crypto',  'TAO':    'crypto',
+    'RENDER':  'crypto',  'FET':    'crypto',  'IMX':    'crypto',
+    'SAND':    'crypto',  'ALGO':   'crypto',  'XLM':    'crypto',
+    'HBAR':    'crypto',  'ICP':    'crypto',  'ETC':    'crypto',
+    'BCH':     'crypto',  'TRX':    'crypto',  'SEI':    'crypto',
+    'RUNE':    'crypto',  'ONDO':   'crypto',  'PENDLE': 'crypto',
+    'JUP':     'crypto',  'ENS':    'crypto',  'MKR':    'crypto',
+    'COMP':    'crypto',  'SNX':    'crypto',  'LDO':    'crypto',
+    'ZRO':     'crypto',  'BLUR':   'crypto',  'GMX':    'crypto',
+    'kPEPE':   'crypto',  'kBONK':  'crypto',  'kFLOKI': 'crypto', 'kSHIB': 'crypto'
   };
 
   /* ── Build static coverage set and reverse-map at init ─────────────────────

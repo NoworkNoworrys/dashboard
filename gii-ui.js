@@ -248,6 +248,13 @@
     { name: 'crisisrank',       global: 'GII_AGENT_CRISISRANK'     },
     { name: 'forecast',         global: 'GII_AGENT_FORECAST'       },
     { name: 'intel-master ✦',   global: 'GII_INTEL_MASTER'         },
+    { name: 'market-observer ◎', global: 'GII_AGENT_MARKET_OBSERVER'  },
+    { name: 'technicals ◎',      global: 'GII_AGENT_TECHNICALS'       },
+    { name: 'macro-events ◎',    global: 'GII_AGENT_MACRO_EVENTS'     },
+    { name: 'crypto-signals ◎',  global: 'GII_AGENT_CRYPTO_SIGNALS'   },
+    { name: 'correlation ◎',     global: 'GII_AGENT_CORRELATION'      },
+    { name: 'momentum ◎',        global: 'GII_AGENT_MOMENTUM'         },
+    { name: 'onchain ◎',         global: 'GII_AGENT_ONCHAIN'          },
   ];
 
   // ── dirty flag — set by GII core after each cycle ─────────────────────────

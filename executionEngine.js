@@ -41,14 +41,14 @@
   var DEFAULTS = {
     mode:                  'SIMULATION', // 'SIMULATION' | 'LIVE'
     enabled:               true,         // auto-execution always on by default
-    min_confidence:        65,           // minimum IC confidence % to auto-execute
+    min_confidence:        60,           // minimum IC confidence % to auto-execute
     virtual_balance:       1000,         // starting virtual balance (USD)
     risk_per_trade_pct:    2,            // % of balance risked per trade — v61: reduced from 3% to limit concurrent exposure
     stop_loss_pct:         1.5,          // % distance from entry — tighter than original 3%, better capital preservation
     take_profit_ratio:     2.5,          // R:R multiplier — improved from 2:1, more profit per win
-    max_open_trades:       5,            // audit: lowered 8→5 — only hold highest-conviction ideas, reduces correlation risk
-    max_per_region:        2,            // audit: lowered 3→2 — tighter regional concentration cap
-    max_per_sector:        2,            // max open trades per asset sector
+    max_open_trades:       8,            // raised to allow more concurrent positions
+    max_per_region:        3,            // raised to allow more regional exposure
+    max_per_sector:        3,            // max open trades per asset sector
     max_exposure_pct:      30,           // max % of balance in open positions
     cooldown_ms:           120000,       // 2 min cooldown between same-asset signals
     broker:                'SIMULATION', // future: 'BINANCE' | 'ALPACA' | 'POLYMARKET'
@@ -604,14 +604,10 @@
       if (_cfg.daily_loss_limit_pct > 10 || _cfg.daily_loss_limit_pct < 1) {
         _cfg.daily_loss_limit_pct = DEFAULTS.daily_loss_limit_pct;
       }
-      // audit-v2 migration: max_open_trades 8→5 (only hold highest-conviction ideas)
-      if (_cfg.max_open_trades > 5) {
-        _cfg.max_open_trades = DEFAULTS.max_open_trades;
-      }
-      // audit-v2 migration: max_per_region 3→2 (tighter regional concentration cap)
-      if (_cfg.max_per_region > 2) {
-        _cfg.max_per_region = DEFAULTS.max_per_region;
-      }
+      // floor guards — prevent accidental misconfiguration
+      if (_cfg.max_open_trades < 1)  _cfg.max_open_trades = DEFAULTS.max_open_trades;
+      if (_cfg.max_per_region  < 1)  _cfg.max_per_region  = DEFAULTS.max_per_region;
+      if (_cfg.max_per_sector  < 1)  _cfg.max_per_sector  = DEFAULTS.max_per_sector;
       // audit-v2 migration: disable crude trailing stop — gii-exit progressive trail owns this now
       _cfg.trailing_stop_enabled = false;
       // threshold floored at 50 to prevent accidental misconfiguration
