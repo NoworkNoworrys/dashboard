@@ -87,10 +87,11 @@
     var s = 0;
     var notes = [];
 
-    /* ─ VIX level ─ */
-    if (vix >= 35)      { s += 40; notes.push('VIX extreme (' + vix.toFixed(1) + ')'); }
-    else if (vix >= 28) { s += 30; notes.push('VIX very high (' + vix.toFixed(1) + ')'); }
-    else if (vix >= 22) { s += 18; notes.push('VIX elevated (' + vix.toFixed(1) + ')'); }
+    /* ─ VIX level — high VIX alone forces RISK_OFF immediately ─ */
+    if (vix >= 60)      { s += 80; notes.push('VIX crisis level (' + vix.toFixed(1) + ')'); }
+    else if (vix >= 40) { s += 65; notes.push('VIX extreme (' + vix.toFixed(1) + ')'); }
+    else if (vix >= 30) { s += 45; notes.push('VIX very high (' + vix.toFixed(1) + ')'); }
+    else if (vix >= 22) { s += 25; notes.push('VIX elevated (' + vix.toFixed(1) + ')'); }
     else if (vix >= 17) { s +=  8; notes.push('VIX slightly elevated (' + vix.toFixed(1) + ')'); }
     else if (vix < 13)  { s -= 10; notes.push('VIX very low (' + vix.toFixed(1) + ')'); }
 
