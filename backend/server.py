@@ -31,6 +31,7 @@ from ingest.eurostat  import get_cache as get_eurostat_cache
 from ingest.eia       import get_cache as get_eia_cache
 from ingest.fao       import get_cache as get_fao_cache
 from ingest.ocha      import get_cache as get_ocha_cache
+from ingest.cot       import get_cache as get_cot_cache
 from ingest.icg       import _seen_ids as _icg_seen  # just to confirm import works
 
 # ── UW runtime key (set via POST /api/uw/key, persisted to uw_config.json) ───
@@ -643,6 +644,11 @@ async def api_fao():
 async def api_ocha():
     """OCHA FTS humanitarian funding data."""
     return JSONResponse(content=get_ocha_cache())
+
+@app.get('/api/cot')
+async def api_cot():
+    """CFTC Commitments of Traders — weekly speculative positioning for key futures markets."""
+    return JSONResponse(content=get_cot_cache())
 
 
 # ── Trades API ────────────────────────────────────────────────────────────────

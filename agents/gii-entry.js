@@ -198,6 +198,20 @@
     var region = sig.region || 'GLOBAL';
     var isScalper = item.source === 'scalper' || item.source === 'scalper-session';
 
+    /* ── Economic calendar gate ───────────────────────────────────────────
+       Block all new entries when a high-impact macro event is imminent.
+       Returns early so the signal is re-queued and processed after the event. */
+    if (window.ECON_CALENDAR) {
+      try {
+        if (ECON_CALENDAR.shouldBlock()) {
+          var _imm = ECON_CALENDAR.imminent();
+          console.log('[GII-ENTRY] Blocked — high-impact event imminent: ' +
+                      (_imm ? _imm.country + ' ' + _imm.title : '?'));
+          return null;   // null = discard/re-queue
+        }
+      } catch (e) {}
+    }
+
     var score      = 0;
     var categories = {};   // track distinct categories for min-category check
     var agentsFor  = [];
@@ -253,6 +267,75 @@
         agentsAgainst.push(name.replace('GII_AGENT_', '').toLowerCase());
       }
     });
+
+    /* ── CATEGORY: COT Positioning ──────────────────────────── */
+    if (window.COT_SIGNALS) {
+      try {
+        var cotSigs = COT_SIGNALS.signals();
+        var cotMatch = cotSigs.filter(function (s) { return s.asset === asset; })[0];
+        if (cotMatch) {
+          /* COT is contrarian: if COT says 'long' (shorts overcrowded) and trade is LONG → agree */
+          var cotBias = cotMatch.bias;
+          var tradeIsLong = dir === 'LONG';
+          if ((cotBias === 'long' && tradeIsLong) || (cotBias === 'short' && !tradeIsLong)) {
+            var cotW = cotMatch.confidence * 2.0;
+            score += cotW;
+            categories.positioning = true;
+            agentsFor.push('cot(' + cotMatch.cotData.positioning + ')');
+          } else if ((cotBias === 'short' && tradeIsLong) || (cotBias === 'long' && !tradeIsLong)) {
+            score -= cotMatch.confidence * 1.5;
+            agentsAgainst.push('cot(' + cotMatch.cotData.positioning + ')');
+          }
+        }
+      } catch (e) {}
+    }
+
+    /* ── CATEGORY: Funding Rate (crypto perp crowding) ──────── */
+    if (window.FUNDING_RATES) {
+      try {
+        var frSigs   = FUNDING_RATES.signals();
+        var frMatch  = frSigs.filter(function (s) { return s.asset === asset; })[0];
+        if (frMatch) {
+          var frBias = frMatch.bias;
+          var tradeDir = dir === 'LONG';
+          if ((frBias === 'long' && tradeDir) || (frBias === 'short' && !tradeDir)) {
+            /* Funding agrees with our direction — crowding supports the move */
+            var frW = frMatch.confidence * 1.5;
+            score += frW;
+            categories.funding = true;
+            agentsFor.push('funding(' + (frMatch.fundingRate > 0 ? '+' : '') +
+                           (frMatch.fundingRate * 100).toFixed(3) + '%/8h)');
+          } else if ((frBias === 'short' && tradeDir) || (frBias === 'long' && !tradeDir)) {
+            /* Funding opposes direction — headwind */
+            score -= frMatch.confidence * 1.0;
+            agentsAgainst.push('funding-headwind');
+          }
+        }
+      } catch (e) {}
+    }
+
+    /* ── CATEGORY: Economic Event surprise ──────────────────── */
+    if (window.ECON_CALENDAR && typeof ECON_CALENDAR.signals === 'function') {
+      try {
+        var econSigs  = ECON_CALENDAR.signals();
+        var econMatch = econSigs.filter(function (s) { return s.asset === asset; })[0];
+        if (econMatch) {
+          var econBias = econMatch.bias;
+          var econDir  = dir === 'LONG';
+          if ((econBias === 'long' && econDir) || (econBias === 'short' && !econDir)) {
+            /* Event surprise confirms our direction — high-conviction catalyst */
+            var econW = econMatch.confidence * 2.0;
+            score += econW;
+            categories.econ_event = true;
+            agentsFor.push('econ(' + econMatch.eventTitle.split(' ').slice(0, 3).join(' ') + ')');
+          } else if ((econBias === 'short' && econDir) || (econBias === 'long' && !econDir)) {
+            /* Event surprise opposes direction — meaningful headwind */
+            score -= econMatch.confidence * 1.5;
+            agentsAgainst.push('econ-headwind(' + econMatch.eventTitle.split(' ').slice(0, 2).join(' ') + ')');
+          }
+        }
+      } catch (e) {}
+    }
 
     /* ── CATEGORY: Macro / Regime ────────────────────────────── */
     if (window.GII_AGENT_MACRO) {
@@ -776,7 +859,11 @@
         confluenceScore: result.score,
         source:          item.source,
         stopPct:         sig.stopPct  || dynStopPct,   /* IV-adjusted stop % — EE overrides flat % */
-        tpRatio:         sig.tpRatio  || volStop.tpRatio    /* per-asset R:R  — EE overrides flat 2.0 */
+        tpRatio:         sig.tpRatio  || volStop.tpRatio,   /* per-asset R:R  — EE overrides flat 2.0 */
+        /* srcCount: if the original signal lacks it, derive from how many agents agreed.
+           GII-entry requires MIN_CATEGORIES=3 to approve — any approved signal already
+           has multi-source corroboration even if the raw IC signal had srcCount=1. */
+        srcCount:        sig.srcCount !== undefined ? sig.srcCount : result.agentsFor.length
       });
 
       /* Boost confidence by confluence (up to +5 points), capped at 88.
@@ -787,6 +874,23 @@
          Smaller boost + lower cap preserves meaningful differentiation. */
       var confBoost = Math.min(5, Math.floor(result.score * 0.4));
       enriched.conf = Math.min(88, (sig.conf || 50) + confBoost);
+
+      /* Economic calendar confidence penalty: if a high-impact event is within
+         2 hours (but not yet blocking), apply a 15% confidence haircut.
+         The confMultiplier returns 0.85 in warn window, 1.0 when clear. */
+      if (window.ECON_CALENDAR) {
+        try {
+          var _calMult = ECON_CALENDAR.confMultiplier();
+          if (_calMult < 1.0 && _calMult > 0) {
+            var _preCalConf = enriched.conf;
+            enriched.conf = Math.max(40, Math.round(enriched.conf * _calMult));
+            var _imEvt = ECON_CALENDAR.upcoming(2)[0];
+            console.log('[GII-ENTRY] Calendar penalty ×' + _calMult + ' on ' + sig.asset +
+              ': conf ' + _preCalConf + '→' + enriched.conf +
+              (_imEvt ? ' (' + _imEvt.country + ' ' + _imEvt.title + ' upcoming)' : ''));
+          }
+        } catch (e) {}
+      }
 
       /* Apply signal age decay: older queued signals get a confidence haircut.
          Floor: never reduce below 40% (preserves signal even at max age). */

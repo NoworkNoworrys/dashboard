@@ -48,7 +48,7 @@
     take_profit_ratio:     2.5,          // R:R multiplier — improved from 2:1, more profit per win
     max_open_trades:       8,            // raised to allow more concurrent positions
     max_per_region:        5,            // raised — most signals are GLOBAL region so 3 fills up fast
-    max_per_sector:        3,            // max open trades per asset sector
+    max_per_sector:        5,            // max open trades per asset sector
     max_exposure_pct:      30,           // max % of balance in open positions
     cooldown_ms:           120000,       // 2 min cooldown between same-asset signals
     broker:                'SIMULATION', // future: 'BINANCE' | 'ALPACA' | 'POLYMARKET'
@@ -276,10 +276,34 @@
     ['DAL',  'UAL'],                     // airlines
   ];
 
-  /* Returns the correlation group containing `asset`, or null */
+  /* Returns the correlation group containing `asset`, or null.
+     Checks static CORR_GROUPS first, then the dynamic matrix from the
+     correlation agent (updated every 5 min from live price history). */
   function _getCorrGroup(asset) {
+    var decorrM = window._dynamicDecorrMatrix;
+
+    /* 1. Static group lookup — but filter out peers that have dynamically
+          decorrelated (Pearson < 0.30 over recent price history).
+          This lets BTC/ETH trade independently on days they genuinely diverge. */
     for (var i = 0; i < CORR_GROUPS.length; i++) {
-      if (CORR_GROUPS[i].indexOf(asset) !== -1) return CORR_GROUPS[i];
+      if (CORR_GROUPS[i].indexOf(asset) !== -1) {
+        if (decorrM && decorrM[asset]) {
+          var filtered = CORR_GROUPS[i].filter(function (peer) {
+            return peer === asset || !decorrM[asset][peer];
+          });
+          return filtered.length > 1 ? filtered : null;
+        }
+        return CORR_GROUPS[i];
+      }
+    }
+    /* 2. Dynamic group lookup — assets not in static groups may still be
+          correlated at runtime (e.g. XRP/ETH during a crypto-wide move) */
+    var dynMatrix = window._dynamicCorrMatrix;
+    if (dynMatrix && dynMatrix[asset]) {
+      var dynPeers = Object.keys(dynMatrix[asset]);
+      if (dynPeers.length) {
+        return [asset].concat(dynPeers);   // synthetic group
+      }
     }
     return null;
   }
@@ -464,6 +488,7 @@
   var _wsConnected          = false; // Binance WebSocket status
   var _wsBtcWs              = null;  // WebSocket instance (BTC real-time)
   var _backendPrices        = {};   // symbol → price, populated by _pollBackendPrices() every 25 s (H4)
+  var _stalePriceSymbols    = [];   // symbols with stale:true from backend (e.g. futures roll period)
   var _backendPriceInterval = null; // stored so a second _apiInit call can't create a duplicate interval
   var _sessionStart  = null; // ISO timestamp — set on init, reset on analyticsReset/fullReset
   var _priceFeedHealth = {}; // source → { ok: bool, lastOk: ms, lastFail: ms }
@@ -912,12 +937,25 @@
     _apiFetch('/api/market', controller ? { signal: controller.signal } : {})
       .then(function (r) { clearTimeout(tid); return r.json(); })
       .then(function (data) {
+        var staleNow = [];
         Object.keys(data).forEach(function (sym) {
           var entry = data[sym];
           if (entry && typeof entry.price === 'number' && entry.price > 0) {
             _backendPrices[sym] = entry.price;
+            if (entry.stale) staleNow.push(sym);
           }
         });
+        _stalePriceSymbols = staleNow;
+        /* Update stale-price badge in EE header */
+        var _staleBadge = document.getElementById('eeStaleDataBadge');
+        if (_staleBadge) {
+          if (staleNow.length) {
+            _staleBadge.textContent = 'STALE: ' + staleNow.join(', ');
+            _staleBadge.style.display = '';
+          } else {
+            _staleBadge.style.display = 'none';
+          }
+        }
       })
       .catch(function () { clearTimeout(tid); });   // silent — fetchPrice falls through to other sources
 
@@ -1264,6 +1302,18 @@
 
     if (sig.dir === 'WATCH')
       return { ok: false, reason: 'WATCH signals are excluded from execution' };
+
+    // Economic calendar gate: block all new trades within 30 min of a high-impact event
+    if (window.ECON_CALENDAR) {
+      try {
+        if (ECON_CALENDAR.shouldBlock()) {
+          var _calEvt = ECON_CALENDAR.imminent();
+          return { ok: false, reason: 'High-impact event imminent: ' +
+            (_calEvt ? _calEvt.country + ' ' + _calEvt.title : 'economic release') +
+            ' — new trades blocked within 30 min of release' };
+        }
+      } catch (e) {}
+    }
 
     if (sig.conf < _cfg.min_confidence)
       return { ok: false, reason: 'Conf ' + sig.conf + '% < threshold ' + _cfg.min_confidence + '%' };
@@ -2022,6 +2072,62 @@
     return trade;
   }
 
+  /* ── Causal Win-Rate Attribution ──────────────────────────────────────────
+     Records market conditions at trade close so we can answer:
+     "In which macro regimes / VIX ranges / confidence bands do we actually win?"
+     Stored in localStorage under 'geodash_attribution_v1' (max 500 records).
+     Accessible via EE.attributionStats() for console analysis.           */
+
+  var _ATTR_KEY = 'geodash_attribution_v1';
+  var _ATTR_MAX = 500;
+
+  function _recordTradeAttribution(trade) {
+    try {
+      /* Snapshot current market conditions */
+      var regime = window.MacroRegime ? MacroRegime.current() : {};
+      var opts   = window.OptionsMarket ? OptionsMarket.current() : {};
+      var velTop = window.SentimentVelocity
+        ? (SentimentVelocity.allStats()[0] || {})
+        : {};
+
+      var holdMs  = trade.timestamp_close && trade.timestamp_open
+        ? new Date(trade.timestamp_close) - new Date(trade.timestamp_open)
+        : null;
+
+      var record = {
+        trade_id:      trade.trade_id,
+        asset:         trade.asset,
+        direction:     trade.direction,
+        region:        trade.region || 'GLOBAL',
+        confidence:    trade.confidence,
+        source:        trade.source || 'ic',
+        confluence:    trade.confluenceScore || null,
+        pnl_pct:       trade.pnl_pct,
+        pnl_usd:       trade.pnl_usd,
+        win:           trade.pnl_usd > 0,
+        close_reason:  trade.close_reason,
+        hold_min:      holdMs !== null ? Math.round(holdMs / 60000) : null,
+        ts:            Date.now(),
+        /* Conditions at close */
+        regime:        regime.regime  || 'UNKNOWN',
+        regime_score:  regime.score   || null,
+        vix:           regime.vix     || null,
+        dxy:           regime.dxy     || null,
+        vix_ts:        opts.tsSignal  || null,
+        pcr:           opts.pcr       || null,
+        vel_region:    velTop.region  || null,
+        vel_accel:     velTop.acceleration || null,
+        matched_kws:   (trade.matchedKeywords || []).slice(0, 5),
+      };
+
+      var stored = [];
+      try { stored = JSON.parse(localStorage.getItem(_ATTR_KEY) || '[]'); } catch(e) {}
+      stored.unshift(record);
+      if (stored.length > _ATTR_MAX) stored.length = _ATTR_MAX;
+      localStorage.setItem(_ATTR_KEY, JSON.stringify(stored));
+    } catch (e) { /* attribution is non-critical */ }
+  }
+
   /* Close a trade: compute P&L, update balance, sync HRS, log */
   function closeTrade(tradeId, closePrice, reason) {
     var trade = _trades.find(function (t) { return t.trade_id === tradeId; });
@@ -2181,6 +2287,10 @@
     }
 
     saveTrades();
+
+    /* ── Causal attribution: record conditions at close for win-rate analysis ── */
+    _recordTradeAttribution(trade);
+
     // Async push updated trade to SQLite (fire-and-forget)
     _apiPatchTrade(trade.trade_id, {
       status:          trade.status,
@@ -2987,8 +3097,43 @@
     set('eeBadgeBalance', '$' + _num(_cfg.virtual_balance));
     set('eeBadgeOpen',    open.length + ' OPEN');
     set('eeBadgePnl',     (totPnl >= 0 ? '+$' : '-$') + _num(Math.abs(totPnl)) + ' P&L');
-    set('eeBadgeRate',    rate !== null ? rate + '% WIN' : '— WIN');
+    set('eeBadgeRate',    rate !== null ? rate + '% WIN (' + closed.length + ')' : '— WIN');
     set('eeOpenCount',    open.length);
+
+    /* Attribution tooltip on win-rate badge — regime + confidence breakdown */
+    var _rateBadge = document.getElementById('eeBadgeRate');
+    if (_rateBadge && closed.length >= 3) {
+      try {
+        var _attrRec = JSON.parse(localStorage.getItem(_ATTR_KEY) || '[]');
+        if (_attrRec.length >= 3) {
+          /* By regime */
+          var _byReg = {};
+          _attrRec.forEach(function (r) {
+            var rg = r.regime || 'UNKNOWN';
+            if (!_byReg[rg]) _byReg[rg] = { t: 0, w: 0 };
+            _byReg[rg].t++;
+            if (r.win) _byReg[rg].w++;
+          });
+          var _regLines = Object.keys(_byReg).map(function (k) {
+            var b = _byReg[k];
+            return k + ': ' + Math.round(b.w / b.t * 100) + '% (' + b.t + ')';
+          });
+          /* By confidence band */
+          var _byConf = { 'hi(85+)': {t:0,w:0}, 'mid(70-84)': {t:0,w:0}, 'lo(<70)': {t:0,w:0} };
+          _attrRec.forEach(function (r) {
+            var c = r.confidence || 0;
+            var band = c >= 85 ? 'hi(85+)' : c >= 70 ? 'mid(70-84)' : 'lo(<70)';
+            _byConf[band].t++; if (r.win) _byConf[band].w++;
+          });
+          var _confLines = Object.keys(_byConf).map(function (k) {
+            var b = _byConf[k];
+            return b.t ? k + ': ' + Math.round(b.w / b.t * 100) + '% (' + b.t + ')' : null;
+          }).filter(Boolean);
+          _rateBadge.title = 'By regime:\n' + _regLines.join('\n') +
+                             '\n\nBy confidence:\n' + _confLines.join('\n');
+        }
+      } catch(e) {}
+    }
 
     // Data safety banner: show until there are closed trades on record
     var banner = document.getElementById('eeDataSafetyBanner');
@@ -4496,6 +4641,57 @@
         maxMs: Math.max.apply(null, _fillLatencies),
         minMs: Math.min.apply(null, _fillLatencies),
         samples: _fillLatencies.slice()
+      };
+    },
+
+    /* ── Causal Win-Rate Attribution ── */
+    attributionStats: function (filter) {
+      var records = [];
+      try { records = JSON.parse(localStorage.getItem(_ATTR_KEY) || '[]'); } catch(e) {}
+      if (!records.length) return { count: 0, note: 'No closed trades recorded yet' };
+
+      /* Optional filter: {regime, asset, direction, source} */
+      if (filter) {
+        records = records.filter(function (r) {
+          return Object.keys(filter).every(function (k) { return r[k] === filter[k]; });
+        });
+      }
+
+      var total  = records.length;
+      var wins   = records.filter(function (r) { return r.win; }).length;
+      var avgPnl = records.reduce(function (s, r) { return s + (r.pnl_usd || 0); }, 0) / total;
+
+      /* Break down win rate by regime */
+      var byRegime = {};
+      records.forEach(function (r) {
+        var rg = r.regime || 'UNKNOWN';
+        if (!byRegime[rg]) byRegime[rg] = { total: 0, wins: 0 };
+        byRegime[rg].total++;
+        if (r.win) byRegime[rg].wins++;
+      });
+      Object.keys(byRegime).forEach(function (k) {
+        byRegime[k].winRate = Math.round(byRegime[k].wins / byRegime[k].total * 100) + '%';
+      });
+
+      /* Break down by confidence band */
+      var byConf = { 'lo(<70)': {t:0,w:0}, 'mid(70-84)': {t:0,w:0}, 'hi(85+)': {t:0,w:0} };
+      records.forEach(function (r) {
+        var c = r.confidence || 0;
+        var band = c < 70 ? 'lo(<70)' : c < 85 ? 'mid(70-84)' : 'hi(85+)';
+        byConf[band].t++; if (r.win) byConf[band].w++;
+      });
+      Object.keys(byConf).forEach(function (k) {
+        var b = byConf[k];
+        byConf[k].winRate = b.t ? Math.round(b.w / b.t * 100) + '%' : 'n/a';
+      });
+
+      return {
+        count:     total,
+        winRate:   Math.round(wins / total * 100) + '%',
+        avgPnlUsd: +avgPnl.toFixed(2),
+        byRegime:  byRegime,
+        byConf:    byConf,
+        records:   records   /* full detail — filter before logging */
       };
     },
 

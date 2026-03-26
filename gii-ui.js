@@ -1,4 +1,4 @@
-/* GII UI — gii-ui.js v7
+/* GII UI — gii-ui.js v8
  * GII panel renderer — injects #giiWrap after #eeWrap
  * Depends on: window.GII, window.GII_AGENT_*, window.GII_SCRAPER_MANAGER
  * Exposes: window.GII_UI
@@ -257,6 +257,14 @@
     { name: 'onchain ◎',         global: 'GII_AGENT_ONCHAIN'          },
     { name: 'event-momentum ◎',  global: 'GII_AGENT_EVENT_MOMENTUM'   },
     { name: 'macro-cross ◎',     global: 'GII_AGENT_MACRO_CROSS'      },
+    // Market data & positioning agents
+    { name: 'cot-signals ◎',     global: 'COT_SIGNALS'                },
+    { name: 'funding-rate ◎',    global: 'FUNDING_RATES'              },
+    { name: 'econ-calendar ◎',   global: 'ECON_CALENDAR'              },
+    { name: 'macro-regime ◎',    global: 'MacroRegime'                },
+    { name: 'options-market ◎',  global: 'OptionsMarket'              },
+    { name: 'sentiment-vel ◎',   global: 'SentimentVelocity'          },
+    { name: 'source-cred ◎',     global: 'SourceCredibility'          },
   ];
 
   // ── dirty flag — set by GII core after each cycle ─────────────────────────
@@ -292,7 +300,7 @@
       '<span class="gii-badge gii-badge-gti">GTI: ' + Math.round(gti) + '</span>' +
       '<span class="gii-badge ' + levelClass + '">' + gtiLevel + '</span>' +
       '<span style="color:rgba(255,255,255,0.5);font-size:11px">▲ ' + signals.length + ' signals</span>' +
-      '<span style="color:rgba(255,255,255,0.5);font-size:11px">⬡ ' + status.agentCount + '/' + AGENT_DEFS.length + ' agents</span>' +
+      '<span style="color:rgba(255,255,255,0.5);font-size:11px">⬡ ' + AGENT_DEFS.filter(function(d){ return !!window[d.global]; }).length + '/' + AGENT_DEFS.length + ' agents</span>' +
       (status.hormuzActive ? '<span class="gii-badge" style="background:#ff1744;color:#fff">HORMUZ PATTERN</span>' : '') +
       '</div>';
 
@@ -498,20 +506,43 @@
       }
 
       var st = {};
-      try { st = agent.status() || {}; } catch (e) { st = { error: String(e) }; }
+      var _stRaw, _isPassive = false, _passiveNote = '';
+      try {
+        _stRaw = agent.status();
+        if (_stRaw && typeof _stRaw === 'object') {
+          st = _stRaw;
+        } else if (typeof _stRaw === 'string') {
+          _isPassive = true;
+          // Strip [MODULE] prefix and take first line as note
+          _passiveNote = _stRaw.replace(/^\[[^\]]+\]\s*/, '').split('\n')[0].trim();
+        }
+      } catch (e) {
+        if (e && e.message && e.message.indexOf('not a function') !== -1) {
+          _isPassive = true; // no status() — static data module
+        } else {
+          st = { error: String(e) };
+        }
+      }
 
       var sigs = 0;
       try { sigs = (agent.signals() || []).length; } catch (e) {}
 
+      // lastPoll: prefer status obj, fall back to lastUpdate() for passive agents
       var lastPoll = st.lastPoll || 0;
+      if (!lastPoll && typeof agent.lastUpdate === 'function') {
+        try { lastPoll = agent.lastUpdate() || 0; } catch(e) {}
+      }
       var age = lastPoll ? (now - lastPoll) : Infinity;
       var statusDot, statusLabel;
-      if (!lastPoll) {
-        statusDot  = '○';
-        statusLabel = '<span style="color:rgba(255,255,255,0.35)">○ PENDING</span>';
+      if (_isPassive) {
+        statusDot  = '●';
+        statusLabel = '<span style="color:var(--green,#00e676)">● OK</span>';
       } else if (st.error) {
         statusDot  = '●';
         statusLabel = '<span style="color:var(--red,#ff1744)">● ERROR</span>';
+      } else if (!lastPoll) {
+        statusDot  = '○';
+        statusLabel = '<span style="color:rgba(255,255,255,0.35)">○ PENDING</span>';
       } else if (age > staleMs) {
         statusDot  = '●';
         statusLabel = '<span style="color:var(--amber,#ffc107)">● STALE</span>';
@@ -520,7 +551,7 @@
         statusLabel = '<span style="color:var(--green,#00e676)">● OK</span>';
       }
 
-      var noteText = st.error || st.note || '';
+      var noteText = _isPassive ? _passiveNote : (st.error || st.note || '');
       if (noteText.length > 60) {
         // Log full error/note to console so it's not silently lost
         if (st.error) console.warn('[GII-UI] ' + def.name + ' error (full):', noteText);
@@ -577,9 +608,17 @@
       var a = window[d.global];
       if (!a) return false;
       try {
-        var s = a.status() || {};
-        return !s.error && s.lastPoll && (now - s.lastPoll) < staleMs;
-      } catch (e) { return false; }
+        var sr = a.status();
+        if (typeof sr === 'string') return true; // passive data modules are always healthy
+        var s = sr || {};
+        if (s.error) return false;
+        var lp = s.lastPoll || (typeof a.lastUpdate === 'function' ? a.lastUpdate() : 0);
+        return !!(lp && (now - lp) < staleMs);
+      } catch (e) {
+        // no status() at all → static module, count as healthy
+        if (e && e.message && e.message.indexOf('not a function') !== -1) return true;
+        return false;
+      }
     }).length;
     html += '<tr style="border-top:1px solid rgba(224,64,251,0.3)">' +
       '<td colspan="2" style="color:var(--gii);font-weight:700;padding-top:6px">' +

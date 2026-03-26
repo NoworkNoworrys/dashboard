@@ -113,6 +113,20 @@
     else if (yieldTrend < -2) { s +=  8; notes.push('Yields falling ' + yieldTrend.toFixed(1) + 'bp'); }
     else if (yieldTrend > 5)  { s -=  5; notes.push('Yields rising ' + yieldTrend.toFixed(1) + 'bp'); }
 
+    /* ─ Options market overlay (VIX term structure + PCR) ─ */
+    if (window.OptionsMarket) {
+      var optScore = OptionsMarket.riskScore();   // -20 to +20
+      if (optScore !== 0) {
+        s += optScore;
+        var om = OptionsMarket.current();
+        if (optScore > 0) {
+          notes.push('Options stress: ' + om.tsSignal + ' TS, PCR ' + (om.pcr !== null ? om.pcr.toFixed(2) : '?') + ' (+' + optScore + ')');
+        } else {
+          notes.push('Options calm: ' + om.tsSignal + ' TS (' + optScore + ')');
+        }
+      }
+    }
+
     /* ─ Cap score ─ */
     s = Math.max(0, Math.min(100, s));
 

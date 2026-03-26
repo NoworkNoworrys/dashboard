@@ -158,6 +158,48 @@
       assert('memStats.priceCache is number', typeof mem.priceCache === 'number');
       var pnl = EE.unrealisedPnl();
       assert('unrealisedPnl returns array',   Array.isArray(pnl));
+    },
+
+    /* ─── 9. Intelligence modules loaded ─── */
+    'Intel modules': function () {
+      assert('MacroRegime loaded',            typeof window.MacroRegime === 'object');
+      assert('MacroRegime.current() ok',      typeof MacroRegime.current().regime === 'string');
+      assert('SourceCredibility loaded',      typeof window.SourceCredibility === 'object');
+      assert('SourceCredibility.weight()',    typeof SourceCredibility.weight('reuters') === 'number');
+      assert('Reuters weight > 1',            SourceCredibility.weight('reuters') >= 1.0);
+      assert('Reddit weight < 0.5',           SourceCredibility.weight('reddit') < 0.5);
+      assert('SentimentVelocity loaded',      typeof window.SentimentVelocity === 'object');
+      assert('SentimentVelocity.score()',     typeof SentimentVelocity.score('GLOBAL') === 'number');
+      assert('OptionsMarket loaded',          typeof window.OptionsMarket === 'object');
+      assert('COT_SIGNALS loaded',            typeof window.COT_SIGNALS === 'object');
+      assert('COT_SIGNALS.signals()',         Array.isArray(COT_SIGNALS.signals()));
+      /* Funding Rate Agent */
+      assert('FUNDING_RATES loaded',          typeof window.FUNDING_RATES === 'object');
+      assert('FUNDING_RATES.signals()',       Array.isArray(FUNDING_RATES.signals()));
+      assert('FUNDING_RATES.rates()',         typeof FUNDING_RATES.rates() === 'object');
+      /* Economic Calendar Agent */
+      assert('ECON_CALENDAR loaded',          typeof window.ECON_CALENDAR === 'object');
+      assert('ECON_CALENDAR.shouldBlock()',   typeof ECON_CALENDAR.shouldBlock() === 'boolean');
+      assert('ECON_CALENDAR.signals()',       Array.isArray(ECON_CALENDAR.signals()));
+      assert('ECON_CALENDAR.confMultiplier()',typeof ECON_CALENDAR.confMultiplier() === 'number');
+      /* GII Entry (confluence gate) */
+      assert('GII_AGENT_ENTRY loaded',        typeof window.GII_AGENT_ENTRY === 'object');
+      assert('GII_AGENT_ENTRY.submit()',      typeof GII_AGENT_ENTRY.submit === 'function');
+      assert('GII_AGENT_ENTRY.status()',      typeof GII_AGENT_ENTRY.status === 'function');
+      /* Market Observer */
+      assert('GII_AGENT_MARKET_OBSERVER',     typeof window.GII_AGENT_MARKET_OBSERVER === 'object');
+      assert('MO.status() ok',               typeof GII_AGENT_MARKET_OBSERVER.status === 'function');
+      /* Correlation Agent */
+      assert('GII_AGENT_CORRELATION loaded',  typeof window.GII_AGENT_CORRELATION === 'object');
+      assert('GII_AGENT_CORRELATION.signals()', typeof GII_AGENT_CORRELATION.signals === 'function');
+    },
+
+    /* ─── 10. Attribution stats ─── */
+    'Attribution': function () {
+      assert('attributionStats is function',  typeof EE.attributionStats === 'function');
+      var stats = EE.attributionStats();
+      assert('attributionStats returns obj',  typeof stats === 'object' && 'count' in stats);
+      assert('count is number',               typeof stats.count === 'number');
     }
   };
 

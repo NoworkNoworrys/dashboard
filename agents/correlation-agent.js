@@ -121,8 +121,10 @@
 
   // Record a price sample for an asset, capping to MAX_SAMPLES
   function _record(asset, price) {
+    var p = parseFloat(price);
+    if (!isFinite(p) || p <= 0) return;
     if (!_priceHistory[asset]) _priceHistory[asset] = [];
-    _priceHistory[asset].push({ price: price, ts: Date.now() });
+    _priceHistory[asset].push({ price: p, ts: Date.now() });
     if (_priceHistory[asset].length > MAX_SAMPLES) _priceHistory[asset].shift();
   }
 
@@ -184,6 +186,82 @@
     sig.timestamp = Date.now();
     _signals.unshift(sig);
     if (_signals.length > MAX_SIGNALS) _signals.length = MAX_SIGNALS;
+  }
+
+  // ── Dynamic correlation tracking ─────────────────────────────────────────────
+
+  /* Pearson correlation on % returns (stationary, unlike raw prices).
+     Returns coefficient (-1 to 1) or null if insufficient shared history. */
+  function _pearson(a1, a2) {
+    var h1 = _priceHistory[a1] || [];
+    var h2 = _priceHistory[a2] || [];
+    var n  = Math.min(h1.length, h2.length);
+    if (n < 6) return null;  // need at least 6 overlapping samples
+
+    /* % returns */
+    var r1 = [], r2 = [];
+    for (var i = 1; i < n; i++) {
+      if (h1[i-1].price && h2[i-1].price) {
+        r1.push((h1[i].price - h1[i-1].price) / h1[i-1].price);
+        r2.push((h2[i].price - h2[i-1].price) / h2[i-1].price);
+      }
+    }
+    var m = r1.length;
+    if (m < 5) return null;
+
+    var s1=0, s2=0, s11=0, s22=0, s12=0;
+    for (var j = 0; j < m; j++) {
+      s1  += r1[j]; s2  += r2[j];
+      s11 += r1[j]*r1[j]; s22 += r2[j]*r2[j];
+      s12 += r1[j]*r2[j];
+    }
+    var num = m * s12 - s1 * s2;
+    var den = Math.sqrt((m * s11 - s1*s1) * (m * s22 - s2*s2));
+    return den ? +(num / den).toFixed(3) : 0;
+  }
+
+  /* Recompute dynamic correlation pairs and publish to window._dynamicCorrMatrix.
+     EE reads this to augment its static CORR_GROUPS. */
+  var _CORR_HIGH          = 0.70;   // above this → treat as correlated
+  var _CORR_LOW           = 0.30;   // below this → treat as decorrelated (even if in static group)
+  var _DECORR_MIN_SAMPLES = 12;     // need 12 samples (1hr) before trusting a low-correlation reading
+
+  function _updateDynCorrMatrix() {
+    var assets  = Object.keys(_priceHistory);
+    var matrix  = {};   // asset → {peer: coeff}  (high correlation >= 0.70)
+    var decorrM = {};   // asset → {peer: coeff}  (low correlation  <  0.30)
+
+    for (var i = 0; i < assets.length; i++) {
+      for (var j = i + 1; j < assets.length; j++) {
+        var a1 = assets[i], a2 = assets[j];
+        var c  = _pearson(a1, a2);
+        if (c === null) continue;
+
+        if (c >= _CORR_HIGH) {
+          if (!matrix[a1]) matrix[a1] = {};
+          if (!matrix[a2]) matrix[a2] = {};
+          matrix[a1][a2] = c;
+          matrix[a2][a1] = c;
+        } else if (c < _CORR_LOW) {
+          // Only trust a decorrelation reading if we have enough history.
+          // With fewer than 12 samples, noise can produce a spuriously low
+          // Pearson even for genuinely correlated assets (e.g. BTC/ETH).
+          var minLen = Math.min(
+            (_priceHistory[a1] || []).length,
+            (_priceHistory[a2] || []).length
+          );
+          if (minLen >= _DECORR_MIN_SAMPLES) {
+            if (!decorrM[a1]) decorrM[a1] = {};
+            if (!decorrM[a2]) decorrM[a2] = {};
+            decorrM[a1][a2] = c;
+            decorrM[a2][a1] = c;
+          }
+        }
+      }
+    }
+
+    window._dynamicCorrMatrix   = matrix;
+    window._dynamicDecorrMatrix = decorrM;
   }
 
   // ── main scan ────────────────────────────────────────────────────────────────
@@ -298,6 +376,10 @@
       }
     }
 
+    /* Update dynamic correlation matrix — EE uses this to detect
+       decorrelation events within static groups */
+    _updateDynCorrMatrix();
+
     console.log('[CORR] Scan #' + _scanCount + ': ' +
                 _activePairCount() + ' pairs with data, ' +
                 newSignals.length + ' signals this scan, ' +
@@ -367,7 +449,27 @@
     // Force an immediate scan (bypasses the timer)
     scan: function () {
       _scan();
-    }
+    },
+
+    /* Dynamic Pearson correlation between two assets (-1 to 1, or null if insufficient data).
+       Based on rolling 5-min price history. Requires at least 6 shared samples. */
+    pearson: function (a1, a2) {
+      return _pearson(a1.toUpperCase(), a2.toUpperCase());
+    },
+
+    /* True if two assets are currently correlated (≥ 0.70 Pearson on recent returns).
+       Falls back to static CORR_GROUPS if insufficient price history. */
+    isSameGroup: function (a1, a2) {
+      var matrix = window._dynamicCorrMatrix || {};
+      var m1 = matrix[a1.toUpperCase()];
+      if (m1 && m1[a2.toUpperCase()] !== undefined) {
+        return m1[a2.toUpperCase()] >= _CORR_HIGH;
+      }
+      return false; // unknown — defer to static groups
+    },
+
+    /* Current correlation matrix snapshot */
+    corrMatrix: function () { return window._dynamicCorrMatrix || {}; }
   };
 
   window.addEventListener('load', _init);

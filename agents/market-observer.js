@@ -145,8 +145,10 @@
 
   // Record a price sample; cap history
   function _record(asset, price) {
+    var p = parseFloat(price);
+    if (!isFinite(p) || p <= 0) return;
     if (!_priceHistory[asset]) _priceHistory[asset] = [];
-    _priceHistory[asset].push({ price:price, ts:Date.now() });
+    _priceHistory[asset].push({ price:p, ts:Date.now() });
     if (_priceHistory[asset].length > HISTORY_MAX) _priceHistory[asset].shift();
   }
 
@@ -160,8 +162,9 @@
       if (h[i].ts >= cutoff) { oldest = h[i]; break; }
     }
     var cur = h[h.length - 1];
-    if (!oldest.price) return null;
-    return (cur.price - oldest.price) / oldest.price * 100;
+    if (!oldest.price || !isFinite(oldest.price)) return null;
+    var pct = (cur.price - oldest.price) / oldest.price * 100;
+    return isFinite(pct) ? pct : null;
   }
 
   // Average range of completed 30-min buckets (6 samples × 5min)
@@ -289,7 +292,7 @@
 
       var thr     = _thr(asset);
       var movePct = _movePct(asset, 30 * 60 * 1000);
-      if (movePct === null) return;
+      if (movePct === null || !isFinite(movePct)) return;
       var absMov  = Math.abs(movePct);
 
       if (absMov < thr.movePct) return; // below threshold
@@ -306,7 +309,7 @@
 
       var align = _giiAlign(asset, dir);
       var sc    = _score(absMov, thr.movePct, confirmed, align);
-      if (sc < MIN_SCORE) return;
+      if (!isFinite(sc) || sc < MIN_SCORE) return;
 
       var hints = [];
       if (_nearLevel(asset))   hints.push('near key level');
@@ -344,7 +347,7 @@
 
       var lmov = _movePct(pair.lead, 30*60*1000);
       var lagm = _movePct(pair.lag,  30*60*1000);
-      if (lmov === null || lagm === null) return;
+      if (lmov === null || lagm === null || !isFinite(lmov) || !isFinite(lagm)) return;
       if (Math.abs(lmov) < pair.leadThr) return;
 
       var lagThr = _thr(pair.lag);
@@ -462,7 +465,15 @@
     if (!el) return;
 
     if (!_allObs.length) {
-      el.innerHTML = '<div class="ee-placeholder">Scanning — first observations appear after 2 cycles (~10 min)</div>';
+      var _msg;
+      if (_status.scanCount > 0 && _status.assetsScanned === 0) {
+        _msg = 'No price feed — check HLFeed connection';
+      } else if (_status.scanCount > 1) {
+        _msg = 'No setups yet — ' + _status.assetsScanned + ' assets scanned, thresholds not met';
+      } else {
+        _msg = 'Scanning — first observations appear after 2 cycles (~10 min)';
+      }
+      el.innerHTML = '<div class="ee-placeholder">' + _msg + '</div>';
       return;
     }
 
@@ -513,10 +524,10 @@
   // ── init ─────────────────────────────────────────────────────────────────────
 
   function _init() {
-    // Restore persisted obs for immediate display
+    // Restore persisted obs for immediate display (drop any with NaN/null scores)
     try {
       var saved = JSON.parse(localStorage.getItem(OBS_KEY) || '[]');
-      if (Array.isArray(saved)) _allObs = saved;
+      if (Array.isArray(saved)) _allObs = saved.filter(function(o){ return isFinite(o.score) && o.score > 0; });
     } catch(e){}
 
     // First scan after 15s (let HL WebSocket warm up), then every 5min

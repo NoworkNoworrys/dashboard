@@ -71,6 +71,7 @@ def fetch_market_prices() -> Dict[str, Dict[str, Any]]:
     prices.update(_fetch_crypto_cached())
     prices.update(_fetch_stooq_cached())
     prices.update(_fetch_us10y())
+    prices.update(_fetch_cboe_vix_term())
     return prices
 
 
@@ -94,7 +95,18 @@ def _fetch_stooq_cached() -> Dict[str, Dict[str, Any]]:
         return _stooq_cache
     result = _fetch_stooq()
     if result:
-        _stooq_cache   = result
+        # Merge with old cache: preserve stale prices for tickers missing from the fresh
+        # result (e.g. WTI/Brent returning N/D during a futures contract roll period).
+        merged = dict(_stooq_cache)
+        for ticker, data in result.items():
+            data.pop('stale', None)   # clear any previous staleness flag
+            merged[ticker] = data
+        for ticker in list(merged.keys()):
+            if ticker not in result:
+                merged[ticker] = dict(merged[ticker])
+                merged[ticker]['stale'] = True
+                print(f'[MARKET] Stooq: {ticker} missing from refresh — keeping stale price')
+        _stooq_cache   = merged
         _stooq_last_ts = datetime.datetime.now().timestamp()
     return result or _stooq_cache
 
@@ -227,3 +239,42 @@ def _fetch_us10y() -> Dict[str, Dict[str, Any]]:
         return {'US10Y': {'price': yield_today, 'chg24h': chg24h}}
 
     return {}
+
+
+# ── CBOE VIX term structure (VIX9D, VIX3M) ────────────────────────────────────
+# Source: CBOE's own CDN — free, no key, delayed ~15min
+_CBOE_BASE   = 'https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/{sym}.json'
+_cboe_cache: Dict[str, Dict[str, Any]] = {}
+_cboe_last_ts: float = 0.0
+_CBOE_TTL: float = 600.0   # 10 minutes
+
+
+def _fetch_cboe_vix_term() -> Dict[str, Dict[str, Any]]:
+    global _cboe_cache, _cboe_last_ts
+    now = datetime.datetime.now().timestamp()
+    if _cboe_cache and (now - _cboe_last_ts) < _CBOE_TTL:
+        return _cboe_cache
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for ticker, sym in [('VIX9D', '_VIX9D'), ('VIX3M', '_VIX3M')]:
+        try:
+            url  = _CBOE_BASE.format(sym=sym)
+            resp = requests.get(url, timeout=10, headers=BROWSER_HEADERS)
+            resp.raise_for_status()
+            data   = resp.json()
+            series = data.get('data', [])
+            if not series:
+                continue
+            latest = series[-1]
+            close  = float(latest.get('close', 0))
+            prev   = float(series[-2].get('close', 0)) if len(series) >= 2 else None
+            chg24h = round(close - prev, 2) if prev else None
+            result[ticker] = {'price': round(close, 2), 'chg24h': chg24h}
+        except Exception as e:
+            print(f'[MARKET] CBOE {ticker} error: {e}')
+
+    if result:
+        _cboe_cache   = result
+        _cboe_last_ts = now
+        print(f'[MARKET] CBOE VIX term: {result}')
+    return result or _cboe_cache

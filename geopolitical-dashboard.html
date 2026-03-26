@@ -5115,10 +5115,15 @@
         <span class="ee-badge" id="eeBadgeMode">SIMULATION</span>
         <span class="ee-badge" id="eeBadgeEnabled">AUTO OFF</span>
         <span class="ee-badge" id="macroRegimeBadge" style="color:#555" title="Macro regime loading...">REGIME —</span>
+        <span class="ee-badge" id="optionsMarketBadge" style="color:#555" title="Options market loading...">OPT —</span>
+        <span class="ee-badge" id="cotBadge" style="color:#555" title="COT positioning loading...">COT —</span>
+        <span class="ee-badge" id="fundingRateBadge" style="color:#555" title="Funding rates loading...">FR —</span>
+        <span class="ee-badge" id="econCalBadge" style="color:#555" title="Economic calendar loading...">CAL —</span>
         <span class="ee-badge" id="eeBadgeBalance">$10,000</span>
         <span class="ee-badge" id="eeBadgeOpen">0 OPEN</span>
         <span class="ee-badge" id="eeBadgePnl">+$0 P&amp;L</span>
         <span class="ee-badge" id="eeBadgeRate">— WIN</span>
+        <span class="ee-badge" id="eeStaleDataBadge" style="display:none;color:#f87171" title="These prices are from a cached refresh — live data temporarily unavailable (e.g. futures contract roll)"></span>
         <button class="ee-mode-btn sim"  id="eeModeBtn"   onclick="EE.toggleMode()">MODE: SIMULATION</button>
         <button class="ee-toggle-btn"    id="eeToggleBtn" onclick="EE.toggleAuto()">&#9658; START AUTO</button>
       </div>
@@ -10345,8 +10350,10 @@ document.addEventListener('DOMContentLoaded', function() {
     var kwHits = Object.keys(SEV).filter(function(k){ return text.includes(k); });
     var kwSevSum = kwHits.reduce(function(acc, k){ return acc + SEV[k]; }, 0);
     var s2 = Math.min(20, Math.round(kwSevSum * 5));
-    // 3. Source corroboration 0-15
-    var s3 = Math.min(15, (evt.srcCount||1) * 4);
+    // 3. Source credibility 0-15 (srcWeight replaces raw srcCount)
+    // Tier-1 source alone (1.2) ≈ two generic sources; Reuters (1.2) → 8; state dept (1.5) → 10
+    var _s3w = evt.srcWeight !== undefined ? evt.srcWeight : (evt.srcCount || 1);
+    var s3 = Math.min(15, Math.round(_s3w * 7));
     // 4. Social velocity 0-15
     var s4 = Math.min(15, Math.round((evt.socialV||0) * 15));
     // 5. Geographic importance 0-15
@@ -10403,14 +10410,41 @@ document.addEventListener('DOMContentLoaded', function() {
     var evt = {
       title   : title.slice(0, 90),
       desc    : (desc||'').replace(/<[^>]+>/g,'').slice(0, 200),
-      source  : source || '?',
-      srcCount: 1,
-      socialV : 0,
-      ts      : Date.now(),
-      time    : hhmm(),
-      region  : extractRegion(title + ' ' + (desc||'')),
+      source    : source || '?',
+      srcCount  : 1,
+      srcWeight : (window.SourceCredibility ? SourceCredibility.weight(source) : 1.0),
+      socialV   : 0,
+      ts        : Date.now(),
+      time      : hhmm(),
+      region    : extractRegion(title + ' ' + (desc||'')),
     };
     if (extras) Object.keys(extras).forEach(function(k){ evt[k]=extras[k]; });
+
+    /* Normalise region to canonical uppercase form so SentimentVelocity buckets
+       are consistent regardless of how the feed tagged the event.
+       Backend regions are usually correct; this guards against manual/UI events. */
+    var _REGION_CANON = {
+      'global':'GLOBAL','worldwide':'GLOBAL','international':'GLOBAL',
+      'middle east':'MENA','mena':'MENA','gulf':'MENA','iran':'MENA','israel':'MENA',
+      'russia':'EASTERN_EUROPE','ukraine':'EASTERN_EUROPE','eastern europe':'EASTERN_EUROPE',
+      'china':'EAST_ASIA','taiwan':'EAST_ASIA','east asia':'EAST_ASIA','korea':'EAST_ASIA',
+      'europe':'EUROPE','eu':'EUROPE','nato':'EUROPE',
+      'us':'NORTH_AMERICA','usa':'NORTH_AMERICA','north america':'NORTH_AMERICA',
+      'asia':'ASIA_PACIFIC','asia pacific':'ASIA_PACIFIC','india':'SOUTH_ASIA',
+      'africa':'AFRICA','latin america':'LATIN_AMERICA','south america':'LATIN_AMERICA'
+    };
+    if (evt.region) {
+      evt.region = _REGION_CANON[evt.region.toLowerCase().trim()] ||
+                   evt.region.toUpperCase().replace(/\s+/g, '_');
+    }
+
+    /* Record for velocity tracking BEFORE extras override (region is now set) */
+    if (window.SentimentVelocity) {
+      SentimentVelocity.record(evt.region);
+      /* Boost socialV if this story is accelerating — S4 score rewards rapid build-up */
+      var _velScore = SentimentVelocity.score(evt.region);
+      if (_velScore > (evt.socialV || 0)) evt.socialV = _velScore;
+    }
 
     scoreEvent(evt);
 
@@ -11775,8 +11809,9 @@ document.addEventListener('DOMContentLoaded', function() {
     var hits = Object.keys(SEV).filter(function(k) { return text.includes(k); });
     var s2 = Math.min(20, Math.round(hits.reduce(function(acc, k){ return acc + SEV[k]; }, 0) * 5));
 
-    // s3: source corroboration
-    var s3 = Math.min(15, (evt.srcCount || 1) * 4);
+    // s3: source credibility (mirrors scoreEvent update)
+    var _s3wL = evt.srcWeight !== undefined ? evt.srcWeight : (evt.srcCount || 1);
+    var s3 = Math.min(15, Math.round(_s3wL * 7));
 
     // s4: social velocity
     var s4 = Math.min(15, Math.round((evt.socialV || 0) * 15));
@@ -11931,7 +11966,7 @@ document.addEventListener('DOMContentLoaded', function() {
         '<div class="lrn-reasoning">' +
           '<div class="lrn-r-cell"><div class="lrn-r-lbl">S1 Severity</div><div class="lrn-r-val">' + r.s1 + '/25</div><div class="lrn-r-note">' + esc(r.topSevKw || 'none') + '</div></div>' +
           '<div class="lrn-r-cell"><div class="lrn-r-lbl">S2 Keyword Density</div><div class="lrn-r-val">' + r.s2 + '/20</div><div class="lrn-r-note">' + r.kwHits.length + ' keywords</div></div>' +
-          '<div class="lrn-r-cell"><div class="lrn-r-lbl">S3 Source Count</div><div class="lrn-r-val">' + r.s3 + '/15</div><div class="lrn-r-note">' + (evt.srcCount||1) + ' source(s)</div></div>' +
+          '<div class="lrn-r-cell"><div class="lrn-r-lbl">S3 Source Credibility</div><div class="lrn-r-val">' + r.s3 + '/15</div><div class="lrn-r-note">' + (window.SourceCredibility ? SourceCredibility.label(evt.source) : (evt.srcCount||1) + ' src') + '</div></div>' +
           '<div class="lrn-r-cell"><div class="lrn-r-lbl">S4 Social Velocity</div><div class="lrn-r-val">' + r.s4 + '/15</div><div class="lrn-r-note">socialV ' + ((evt.socialV||0)*100).toFixed(0) + '%</div></div>' +
           '<div class="lrn-r-cell"><div class="lrn-r-lbl">S5 Geographic</div><div class="lrn-r-val">' + r.s5 + '/15</div><div class="lrn-r-note">' + esc(r.topGeoKw || 'global') + '</div></div>' +
           '<div class="lrn-r-cell"><div class="lrn-r-lbl">S6 Market Sens.</div><div class="lrn-r-val">' + r.s6 + '/10</div><div class="lrn-r-note">' + (evt.assets||[]).length + ' assets</div></div>' +
@@ -12820,7 +12855,7 @@ function showEventModal(evt) {
         '<div class="evt-modal-reasoning">' +
           '<div class="evt-modal-r-cell"><div class="evt-modal-r-lbl">S1 Severity</div><div class="evt-modal-r-val">' + r.s1 + '<span style="font-size:12px;color:var(--dim)">/25</span></div><div class="evt-modal-r-note">' + _esc(r.topSevKw||'none') + '</div></div>' +
           '<div class="evt-modal-r-cell"><div class="evt-modal-r-lbl">S2 Keyword Density</div><div class="evt-modal-r-val">' + r.s2 + '<span style="font-size:12px;color:var(--dim)">/20</span></div><div class="evt-modal-r-note">' + r.kwHits.length + ' matches</div></div>' +
-          '<div class="evt-modal-r-cell"><div class="evt-modal-r-lbl">S3 Source Count</div><div class="evt-modal-r-val">' + r.s3 + '<span style="font-size:12px;color:var(--dim)">/15</span></div><div class="evt-modal-r-note">' + (evt.srcCount||1) + ' source(s)</div></div>' +
+          '<div class="evt-modal-r-cell"><div class="evt-modal-r-lbl">S3 Source Credibility</div><div class="evt-modal-r-val">' + r.s3 + '<span style="font-size:12px;color:var(--dim)">/15</span></div><div class="evt-modal-r-note">' + (window.SourceCredibility ? SourceCredibility.label(evt.source) : (evt.srcCount||1) + ' src') + '</div></div>' +
           '<div class="evt-modal-r-cell"><div class="evt-modal-r-lbl">S4 Social Velocity</div><div class="evt-modal-r-val">' + r.s4 + '<span style="font-size:12px;color:var(--dim)">/15</span></div><div class="evt-modal-r-note">socialV ' + ((evt.socialV||0)*100).toFixed(0) + '%</div></div>' +
           '<div class="evt-modal-r-cell"><div class="evt-modal-r-lbl">S5 Geographic</div><div class="evt-modal-r-val">' + r.s5 + '<span style="font-size:12px;color:var(--dim)">/15</span></div><div class="evt-modal-r-note">' + _esc(r.topGeoKw||'global') + '</div></div>' +
           '<div class="evt-modal-r-cell"><div class="evt-modal-r-lbl">S6 Market Sensitivity</div><div class="evt-modal-r-val">' + r.s6 + '<span style="font-size:12px;color:var(--dim)">/10</span></div><div class="evt-modal-r-note">' + assets.length + ' asset(s)</div></div>' +
@@ -13345,13 +13380,31 @@ function _modalKeyHandler(e) {
      when the first IC signal is sized. Self-contained; reads localStorage directly. -->
 <script src="agents/ic-risk-engine.js?v=2"></script>
 
+<!-- Source Credibility — maps source tags to reliability weights for S3 scoring -->
+<script src="agents/source-credibility.js?v=1"></script>
+
+<!-- Sentiment Velocity — tracks narrative acceleration (events/hr vs baseline) -->
+<script src="agents/sentiment-velocity.js?v=1"></script>
+
+<!-- Options Market — VIX term structure + put/call ratio; feeds into MacroRegime score -->
+<script src="agents/options-market.js?v=1"></script>
+
+<!-- COT Signals — CFTC weekly speculative positioning (contrarian signals) -->
+<script src="agents/cot-signals.js?v=2"></script>
+
+<!-- Funding Rate Agent — crypto perp crowding indicator (Binance, free, no key) -->
+<script src="agents/funding-rate.js?v=1"></script>
+
+<!-- Economic Calendar — high-impact event gate (Forex Factory, free, no key) -->
+<script src="agents/econ-calendar.js?v=2"></script>
+
 <!-- Macro Regime Classifier — loaded before EE so canExecute() can gate on regime -->
 <script src="agents/macro-regime.js?v=1"></script>
 
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
-<script src="executionEngine.js?v=102"></script>
+<script src="executionEngine.js?v=104"></script>
 <!-- Smoke tests — EETests.run() in console to validate core EE behaviour -->
-<script src="tests/ee-smoke-tests.js?v=2"></script>
+<script src="tests/ee-smoke-tests.js?v=3"></script>
 
 <!-- GII Core — loaded before agents so window.GII (defensiveAssets, riskAssets, etc.) is
      available when agent IIFEs execute. Agents all guard GII calls, so order is safe. -->
@@ -13404,12 +13457,12 @@ function _modalKeyHandler(e) {
 <script src="agents/gii-deescalation.js?v=1"></script>
 <script src="agents/gii-risk.js?v=1"></script>
 <script src="agents/gii-manager.js?v=6"></script>
-<script src="agents/gii-entry.js?v=14"></script>
+<script src="agents/gii-entry.js?v=16"></script>
 <script src="agents/gii-exit.js?v=12"></script>
 <script src="agents/gii-portfolio.js?v=4"></script>
 <script src="agents/gii-routing.js?v=11"></script>
 <script src="gii-meta.js?v=2"></script>
-<script src="gii-ui.js?v=16"></script>
+<script src="gii-ui.js?v=18"></script>
 <script src="gii-debug.js?v=5"></script>
 <script src="gii-gatekeeper.js?v=3"></script>
 
@@ -13417,11 +13470,11 @@ function _modalKeyHandler(e) {
 <script src="hl-feed.js?v=7"></script>
 
 <!-- Market Observer + signal agents — all load after hl-feed so HLFeed is defined -->
-<script src="agents/market-observer.js?v=1"></script>
+<script src="agents/market-observer.js?v=2"></script>
 <script src="agents/technicals-agent.js?v=3"></script>
 <script src="agents/macro-events-agent.js?v=2"></script>
 <script src="agents/crypto-signals-agent.js?v=2"></script>
-<script src="agents/correlation-agent.js?v=3"></script>
+<script src="agents/correlation-agent.js?v=4"></script>
 <script src="agents/momentum-agent.js?v=2"></script>
 <script src="agents/onchain-signals-agent.js?v=1"></script>
 <script src="agents/event-momentum-agent.js?v=1"></script>

@@ -99,6 +99,22 @@ RSS_FEEDS = [
     ('https://news.un.org/feed/subscribe/en/news/all/rss.xml',    'UNNEWS'),
 ]
 
+# ── Non-English RSS feeds (require translation) ───────────────────────────────
+# Format: (url, source_tag, language_code)
+# Language codes: 'ar' = Arabic, 'ru' = Russian, 'zh' = Mandarin, 'fr' = French
+MULTILANG_FEEDS = [
+    # ── Arabic — Middle East primary sources (often break stories 1-4h before English) ──
+    ('https://www.aljazeera.net/xml/rss/all.xml',                   'ALJAZ_AR',  'ar'),
+    ('https://arabic.rt.com/rss/',                                  'RT_AR',     'ar'),  # low weight (state-adj)
+    ('https://www.bbc.com/arabic/index.xml',                        'BBC_AR',    'ar'),
+    # ── Russian — independent coverage (Meduza is exiled independent press) ──
+    ('https://meduza.io/rss/all',                                   'MEDUZA',    'ru'),
+    ('https://inosmi.ru/export/rss2/index.xml',                     'INOSMI',    'ru'),
+    # ── French — European/African coverage (often ahead of English-only outlets) ──
+    ('https://www.lemonde.fr/international/rss_full.xml',           'LEMONDE',   'fr'),
+    ('https://www.liberation.fr/arc/outboundfeeds/rss/?outputType=xml', 'LIBE',  'fr'),
+]
+
 # ── Reddit ───────────────────────────────────────────────────────────────────
 REDDIT_SUBS = [
     'geopolitics',
