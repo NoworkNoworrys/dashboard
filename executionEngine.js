@@ -4692,6 +4692,38 @@
       return true;
     },
 
+    /* ── Purge phantom trades: close all open trades that never got a broker fill ──
+       Phantom trades have broker_status === null (the order was queued but never sent
+       to the broker, e.g. because the broker wasn't connected at signal time).
+       They count against position limits and block new signals without being real.
+       This closes each one at its entry price (P&L ≈ 0) so no phantom gains/losses
+       hit the balance. saveTrades() + saveCfg() + _apiPatchTrade() are all called
+       inside closeTrade(), so the fix persists across reloads.                       */
+    purgePhantomTrades: function () {
+      var phantoms = _trades.filter(function (t) {
+        return t.status === 'OPEN' && t.broker_status == null;
+      });
+      if (!phantoms.length) {
+        log('CONFIG', 'No phantom trades found — all open trades have broker confirmation', 'dim');
+        return 0;
+      }
+      var n = phantoms.length;
+      phantoms.forEach(function (t) {
+        var ep = t.entry_price;
+        if (!ep || !isFinite(ep) || ep <= 0) {
+          // Fallback: use stop_loss as a proxy if entry_price is missing
+          ep = t.stop_loss || 1;
+        }
+        log('CONFIG', 'Phantom purge: ' + t.asset + ' ' + t.direction +
+          ' [venue:' + t.venue + '] broker_status=null — closing flat @ $' + ep.toFixed(2), 'amber');
+        // closeTrade saves to localStorage, patches SQLite, and updates virtual_balance
+        closeTrade(t.trade_id, ep, 'PHANTOM_PURGE');
+      });
+      log('CONFIG', 'Purged ' + n + ' phantom trade(s) — signals now unblocked', 'green');
+      renderUI();
+      return n;
+    },
+
     /* ── gii-exit: get last known price for an asset from the price cache ── */
     getLastPrice: function (asset) {
       if (!asset) return null;
