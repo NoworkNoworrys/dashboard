@@ -2014,6 +2014,32 @@
     }
 
     // ── Fire TickTrader order if this trade is routed there ───────────────
+    if (trade.venue === 'OANDA' && window.OANDABroker && OANDABroker.isConnected()) {
+      OANDABroker.placeOrder(trade.asset, trade.size_usd, trade.direction, trade)
+        .then(function (order) {
+          trade.broker_order_id = order.id;
+          trade.broker_status   = order.status;
+          saveTrades();
+          log('OANDA', trade.asset + ' order placed: ' + order.id + ' (' + order.status + ')', 'cyan');
+        })
+        .catch(function (e) {
+          trade.broker_status   = 'REJECTED';
+          trade.broker_error    = e.message || 'unknown error';
+          trade.status          = 'CLOSED';
+          trade.close_reason    = 'BROKER_REJECTED';
+          trade.timestamp_close = new Date().toISOString();
+          _cfg.virtual_balance += (trade.open_commission || 0);
+          saveTrades();
+          saveCfg();
+          _apiPatchTrade(trade.trade_id, {
+            status: 'CLOSED', close_reason: 'BROKER_REJECTED',
+            broker_error: trade.broker_error, timestamp_close: trade.timestamp_close
+          });
+          log('OANDA', '⚠ Order REJECTED for ' + trade.asset + ' — trade closed, commission refunded. Reason: ' + trade.broker_error, 'red');
+          renderUI();
+        });
+    }
+
     if (trade.venue === 'TICKTRADER' && window.TTBroker && TTBroker.isConnected()) {
       TTBroker.placeOrder(trade.asset, trade.size_usd, trade.direction, trade)
         .then(function (order) {
@@ -2279,6 +2305,13 @@
       });
     }
 
+    // ── Close OANDA position if routed there ─────────────────────────────
+    if (trade.venue === 'OANDA' && window.OANDABroker && OANDABroker.isConnected()) {
+      OANDABroker.closePosition(trade.asset, trade.broker_order_id).catch(function (e) {
+        log('OANDA', '⚠ Close position failed for ' + trade.asset + ': ' + e.message, 'amber');
+      });
+    }
+
     // ── Close TickTrader position if routed there ─────────────────────────
     if (trade.venue === 'TICKTRADER' && window.TTBroker && TTBroker.isConnected()) {
       TTBroker.closePosition(trade.asset, trade.broker_order_id).catch(function (e) {
@@ -2487,10 +2520,12 @@
         _venue = 'HL';
       } else if (window.AlpacaBroker && AlpacaBroker.covers(_asset)) {
         _venue = 'ALPACA';
-      } else if (window.TTBroker && TTBroker.covers(_asset)) {
+      } else if (window.OANDABroker && OANDABroker.isConnected() && OANDABroker.covers(_asset)) {
+        _venue = 'OANDA';
+      } else if (window.TTBroker && TTBroker.isConnected() && TTBroker.covers(_asset)) {
         _venue = 'TICKTRADER';
       } else {
-        _flagTrade(sig, 'No venue — not on Hyperliquid, Alpaca, or TickTrader. Add broker for this asset.');
+        _flagTrade(sig, 'No venue — not on Hyperliquid, Alpaca, OANDA, or TickTrader. Add broker for this asset.');
         _logSignal(sig, 'SKIPPED', 'No venue: ' + sig.asset);
         return;
       }
