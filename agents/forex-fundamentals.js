@@ -382,7 +382,7 @@
       source       : 'forex-fundamentals',
       asset        : pair,
       bias         : direction,
-      confidence   : Math.round(confidence * 100) / 100,
+      confidence   : Math.round(confidence),
       reasoning    : reasoning,
       region       : 'GLOBAL',
       sector       : 'fx',
@@ -525,7 +525,7 @@
 
       // ── Confidence ───────────────────────────────────────────────────────
       // Maps score 50→0.78, 75→0.88 (capped)
-      var conf = Math.min(0.88, 0.55 + score / 200);
+      var conf = Math.min(88, 55 + score / 2);   // 0-100 scale to match EE threshold
 
       // ── Reasoning string ─────────────────────────────────────────────────
       var csiStr   = def.base + '#' + baseRank + ' vs ' + def.quote + '#' + quoteRank;

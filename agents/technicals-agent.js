@@ -283,10 +283,10 @@
    * Confidence mapping from composite score.
    */
   function _confidence(score) {
-    if (score >= 90) return 0.88;
-    if (score >= 80) return 0.80;
-    if (score >= 70) return 0.72;
-    return 0.65;
+    if (score >= 90) return 88;   // 0-100 scale to match EE threshold
+    if (score >= 80) return 80;
+    if (score >= 70) return 72;
+    return 65;
   }
 
   /*

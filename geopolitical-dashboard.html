@@ -13524,7 +13524,7 @@ window._TT_BOOTSTRAP = {
 <script src="agents/live-portfolio.js?v=1"></script>
 
 <!-- Forex Fundamentals Agent — CSI, carry trade, unwind detection, session timing -->
-<script src="agents/forex-fundamentals.js?v=1"></script>
+<script src="agents/forex-fundamentals.js?v=2"></script>
 
 <!-- IC Risk Engine — must load before executionEngine so ICRiskEngine is available
      when the first IC signal is sized. Self-contained; reads localStorage directly. -->
@@ -13620,15 +13620,15 @@ window._TT_BOOTSTRAP = {
 <script src="hl-feed.js?v=7"></script>
 
 <!-- Market Observer + signal agents — all load after hl-feed so HLFeed is defined -->
-<script src="agents/market-observer.js?v=3"></script>
-<script src="agents/technicals-agent.js?v=4"></script>
+<script src="agents/market-observer.js?v=4"></script>
+<script src="agents/technicals-agent.js?v=5"></script>
 <script src="agents/macro-events-agent.js?v=2"></script>
 <script src="agents/crypto-signals-agent.js?v=2"></script>
 <script src="agents/correlation-agent.js?v=4"></script>
 <script src="agents/momentum-agent.js?v=2"></script>
 <script src="agents/onchain-signals-agent.js?v=1"></script>
 <script src="agents/event-momentum-agent.js?v=1"></script>
-<script src="agents/macro-cross-agent.js?v=2"></script>
+<script src="agents/macro-cross-agent.js?v=3"></script>
 <script>
   // Bridge: route gii-technicals.js (GII_TA_SIGNAL events) into EE.onSignals().
   // gii-technicals dispatches these events but previously nothing consumed them.

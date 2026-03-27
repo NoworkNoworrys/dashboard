@@ -476,7 +476,7 @@
         source       : 'market-obs',
         asset        : o.asset,
         bias         : o.direction,
-        confidence   : Math.min(0.92, 0.50 + o.score / 200), // score 66→0.83, 86→0.93
+        confidence   : Math.min(92, 50 + o.score / 2),  // 0-100 scale: score 66→83, 86→93
         reasoning    : o.description + (o.hints.length ? ' · ' + o.hints.join(', ') : ''),
         region       : 'GLOBAL',
         sector       : o.assetClass,

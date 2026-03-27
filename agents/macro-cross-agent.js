@@ -114,7 +114,7 @@
       source       : 'macro-cross',
       asset        : asset,
       bias         : bias,
-      confidence   : Math.round(conf * 100) / 100,
+      confidence   : Math.round(conf),
       reasoning    : reasoning,
       region       : 'GLOBAL',
       sector       : sector,
@@ -153,29 +153,29 @@
     if (eurusdRet < -0.4) {
       // EUR/USD down → USD strengthening → risk-off
       var usdCtx = 'EUR/USD ' + retFmt + ' (1h) — DXY strengthening, risk-off';
-      _tryEmit(batch, 'SPY', 'SHORT', 0.67,
+      _tryEmit(batch, 'SPY', 'SHORT', 67,
         usdCtx + ' → equities under pressure',
         'equity', ['fx', 'equity']);
-      _tryEmit(batch, 'QQQ', 'SHORT', 0.66,
+      _tryEmit(batch, 'QQQ', 'SHORT', 66,
         usdCtx + ' → tech equities under pressure',
         'equity', ['fx', 'equity']);
-      _tryEmit(batch, 'GLD', 'LONG', 0.66,
+      _tryEmit(batch, 'GLD', 'LONG', 66,
         usdCtx + ' → safe-haven demand for gold',
         'precious', ['fx', 'precious']);
-      _tryEmit(batch, 'BTC', 'SHORT', 0.65,
+      _tryEmit(batch, 'BTC', 'SHORT', 65,
         usdCtx + ' → crypto risk-off outflows',
         'crypto', ['fx', 'crypto']);
 
     } else if (eurusdRet > 0.4) {
       // EUR/USD up → USD weakening → risk-on
       var weakCtx = 'EUR/USD +' + retFmt + ' (1h) — USD weakening, risk-on';
-      _tryEmit(batch, 'GLD', 'LONG', 0.70,
+      _tryEmit(batch, 'GLD', 'LONG', 70,
         weakCtx + ' → weaker USD supports gold',
         'precious', ['fx', 'precious']);
-      _tryEmit(batch, 'BTC', 'LONG', 0.67,
+      _tryEmit(batch, 'BTC', 'LONG', 67,
         weakCtx + ' → crypto benefits from USD weakness',
         'crypto', ['fx', 'crypto']);
-      _tryEmit(batch, 'SPY', 'LONG', 0.65,
+      _tryEmit(batch, 'SPY', 'LONG', 65,
         weakCtx + ' → risk-on equity tailwind',
         'equity', ['fx', 'equity']);
     }
@@ -192,7 +192,7 @@
 
     if (gldRet > 1.0 && spyRet <= 0) {
       // GLD up >1% AND SPY flat/down → risk-off confirmed
-      _tryEmit(batch, 'SPY', 'SHORT', 0.68,
+      _tryEmit(batch, 'SPY', 'SHORT', 68,
         'GLD ' + gldFmt + ' (1h) with SPY ' + spyFmt +
         ' — gold/equity divergence confirms risk-off',
         'equity', ['gold-equity', 'equity', 'precious']);
@@ -200,9 +200,9 @@
       // GLD down >1% AND SPY up >0.5% → risk-on
       var riskOnCtx = 'GLD ' + gldFmt + ' with SPY ' + spyFmt +
                       ' (1h) — gold/equity divergence signals risk-on';
-      _tryEmit(batch, 'BTC', 'LONG', 0.67,
+      _tryEmit(batch, 'BTC', 'LONG', 67,
         riskOnCtx, 'crypto', ['gold-equity', 'crypto', 'precious']);
-      _tryEmit(batch, 'SOL', 'LONG', 0.67,
+      _tryEmit(batch, 'SOL', 'LONG', 67,
         riskOnCtx, 'crypto', ['gold-equity', 'crypto', 'precious']);
     }
   }
@@ -222,7 +222,7 @@
     // BTC big move, SPY flat → crypto-specific momentum
     if (btcAbs > 2.0 && spyAbs < 0.3) {
       var btcBias = btcRet > 0 ? 'LONG' : 'SHORT';
-      _tryEmit(batch, 'BTC', btcBias, 0.66,
+      _tryEmit(batch, 'BTC', btcBias, 66,
         'BTC ' + btcFmt + ' (1h) while SPY ' + spyFmt +
         ' — crypto-specific move, momentum signal',
         'crypto', ['crypto-regime', 'crypto']);
@@ -238,11 +238,11 @@
     var xauFmt = (xauRet >= 0 ? '+' : '') + xauRet.toFixed(2) + '%';
     var xagFmt = (xagRet >= 0 ? '+' : '') + xagRet.toFixed(2) + '%';
     if (xauRet > 0.8 && xagRet < 0.2) {
-      _tryEmit(batch, 'XAG_USD', 'LONG', 0.68,
+      _tryEmit(batch, 'XAG_USD', 'LONG', 68,
         'XAU ' + xauFmt + ' (1h) but XAG only ' + xagFmt + ' — silver lagging gold rally',
         'precious', ['gold-silver', 'precious']);
     } else if (xagRet > 1.5 && xauRet < 0.4) {
-      _tryEmit(batch, 'XAU_USD', 'LONG', 0.67,
+      _tryEmit(batch, 'XAU_USD', 'LONG', 67,
         'XAG ' + xagFmt + ' leading with XAU only ' + xauFmt + ' — gold catch-up expected',
         'precious', ['gold-silver', 'precious']);
     }
@@ -257,20 +257,20 @@
     var spxFmt = (spxRet >= 0 ? '+' : '') + spxRet.toFixed(2) + '%';
     if (broRet > 1.5 && spxRet > 0) {
       // Oil up strongly while equities also up → energy stocks should follow
-      _tryEmit(batch, 'XLE', 'LONG', 0.65,
+      _tryEmit(batch, 'XLE', 'LONG', 65,
         'Brent ' + broFmt + ' with SPX ' + spxFmt + ' (1h) — energy sector bullish',
         'energy', ['oil-equity', 'energy']);
     } else if (broRet > 2.0 && spxRet < -0.5) {
       // Oil surging but equities falling → stagflation signal
-      _tryEmit(batch, 'XAU_USD', 'LONG', 0.70,
+      _tryEmit(batch, 'XAU_USD', 'LONG', 70,
         'Brent ' + broFmt + ' vs SPX ' + spxFmt + ' — stagflation hedge, gold long',
         'precious', ['oil-equity', 'stagflation', 'precious']);
-      _tryEmit(batch, 'SPX500_USD', 'SHORT', 0.66,
+      _tryEmit(batch, 'SPX500_USD', 'SHORT', 66,
         'Brent ' + broFmt + ' squeezing margins vs SPX ' + spxFmt,
         'equity', ['oil-equity', 'stagflation', 'equity']);
     } else if (broRet < -2.0 && spxRet > 0.5) {
       // Oil falling, equities rising → growth optimism, risk-on
-      _tryEmit(batch, 'NAS100_USD', 'LONG', 0.65,
+      _tryEmit(batch, 'NAS100_USD', 'LONG', 65,
         'Brent ' + broFmt + ' (lower input costs) with SPX ' + spxFmt + ' — tech risk-on',
         'equity', ['oil-equity', 'equity']);
     }
@@ -284,16 +284,16 @@
     var jpyFmt = (jpyRet >= 0 ? '+' : '') + jpyRet.toFixed(2) + '%';
     // USD/JPY falling = JPY strengthening = risk-off
     if (jpyRet < -0.4) {
-      _tryEmit(batch, 'XAU_USD', 'LONG', 0.68,
+      _tryEmit(batch, 'XAU_USD', 'LONG', 68,
         'USD/JPY ' + jpyFmt + ' (1h) — yen strength signals risk-off, gold safe-haven bid',
         'precious', ['jpy-risk', 'precious']);
-      _tryEmit(batch, 'BTC', 'SHORT', 0.64,
+      _tryEmit(batch, 'BTC', 'SHORT', 64,
         'USD/JPY ' + jpyFmt + ' — yen risk-off proxy, crypto outflows likely',
         'crypto', ['jpy-risk', 'crypto']);
     } else if (jpyRet > 0.4) {
       // USD/JPY rising = USD strength / risk-on
       if (xauRet !== null && xauRet < -0.3) {
-        _tryEmit(batch, 'BTC', 'LONG', 0.65,
+        _tryEmit(batch, 'BTC', 'LONG', 65,
           'USD/JPY ' + jpyFmt + ' (risk-on) with gold soft — crypto risk-on rotation',
           'crypto', ['jpy-risk', 'crypto']);
       }
@@ -311,13 +311,13 @@
 
     if (gldRet > 1.0 && slvRet < 0.3) {
       // Gold up strongly but silver lagging → silver should catch up
-      _tryEmit(batch, 'SLV', 'LONG', 0.69,
+      _tryEmit(batch, 'SLV', 'LONG', 69,
         'GLD ' + gldFmt + ' (1h) but SLV only ' + slvFmt +
         ' — silver lagging gold rally, catch-up expected',
         'precious', ['gold-silver', 'precious']);
     } else if (slvRet > 2.0 && gldRet < 0.5) {
       // Silver surging but gold lagging → gold should follow
-      _tryEmit(batch, 'GLD', 'LONG', 0.67,
+      _tryEmit(batch, 'GLD', 'LONG', 67,
         'SLV ' + slvFmt + ' (1h) leading with GLD only ' + gldFmt +
         ' — silver leading gold, mean-reversion to gold expected',
         'precious', ['gold-silver', 'precious']);
