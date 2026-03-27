@@ -2719,11 +2719,15 @@
           window.HLBroker && typeof HLBroker.isConnected === 'function' && HLBroker.isConnected()) {
         _venue = 'HL';
       } else if (window.AlpacaBroker && AlpacaBroker.covers(_asset)) {
-        // Alpaca paper accounts cannot short stocks (only longs; crypto is spot-buy-only too).
-        // Block any SHORT routed to Alpaca to avoid silent 403 rejections.
-        if (sig.dir === 'SHORT') {
-          _flagTrade(sig, 'Alpaca paper account cannot short ' + _asset + ' — no margin/short-selling on paper.');
-          _logSignal(sig, 'SKIPPED', 'Alpaca no-short: ' + _asset);
+        // Alpaca spot crypto cannot be shorted (buy-only). Block crypto SHORTs only.
+        // Stock shorts are fine — Alpaca paper supports margin shorting for equities.
+        var _isAlpacaCrypto = window.AlpacaBroker && typeof AlpacaBroker.isCrypto === 'function'
+          ? AlpacaBroker.isCrypto(_asset)
+          : !!(window.AlpacaBroker && AlpacaBroker.covers(_asset) &&
+               ['BTC','ETH','SOL','XRP','DOGE','LTC','AVAX','LINK','BCH','UNI','AAVE','DOT','ADA','BNB','SHIB'].indexOf(_asset.toUpperCase()) !== -1);
+        if (sig.dir === 'SHORT' && _isAlpacaCrypto) {
+          _flagTrade(sig, 'Alpaca spot crypto cannot be shorted — ' + _asset + ' is buy-only on Alpaca.');
+          _logSignal(sig, 'SKIPPED', 'Alpaca crypto no-short: ' + _asset);
           return;
         }
         _venue = 'ALPACA';
