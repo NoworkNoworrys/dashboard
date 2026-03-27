@@ -390,14 +390,30 @@
     } catch (e) { return 1.0; }
   }
 
+  // Returns true if this asset has an active scalp slot occupied (cross-checks EE).
+  function _isScalpActive(sym) {
+    if (!_activeScalps[sym]) return false;
+    if (Date.now() - _activeScalps[sym].signalTs > SCALP_TIMEOUT_MS) {
+      _activeScalps[sym] = null;
+      return false;
+    }
+    // Cross-check EE: if the signal was skipped/rejected, no open trade exists.
+    // Free the slot so the next cycle can retry rather than blocking for 2h.
+    if (window.EE && typeof EE.getOpenTrades === 'function') {
+      try {
+        var _open = EE.getOpenTrades();
+        var _found = _open.some(function (t) {
+          return (t.asset || '').toUpperCase() === sym.toUpperCase();
+        });
+        if (!_found) { _activeScalps[sym] = null; return false; }
+      } catch (e) {}
+    }
+    return true;
+  }
+
   // Scalper slot: one trade at a time, per asset
   function _slotFreeFor(asset) {
-    if (!_activeScalps[asset]) return true;
-    if (Date.now() - _activeScalps[asset].signalTs > SCALP_TIMEOUT_MS) {
-      _activeScalps[asset] = null;
-      return true;
-    }
-    return false;
+    return !_isScalpActive(asset);
   }
 
   // ── indicator computation ─────────────────────────────────────────────────
@@ -749,7 +765,7 @@
         // enough on short timeframes to run 2 positions simultaneously.
         // A 3rd same-direction scalp is still blocked to prevent over-concentration.
         var _sameDirCount = SCALPER_ASSETS.filter(function (otherSym) {
-          return otherSym !== sym && _activeScalps[otherSym] && _activeScalps[otherSym].bias === bestDir;
+          return otherSym !== sym && _isScalpActive(otherSym) && _activeScalps[otherSym].bias === bestDir;
         }).length;
         if (_sameDirCount >= 2) {
           _status['note_' + sym] = 'Corr-blocked: ' + _sameDirCount + ' same-direction scalps already active';
