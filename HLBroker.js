@@ -221,12 +221,13 @@
     name:    'HL',
     version: 1,
 
-    // isConnected: only return true if connected AND has usable balance.
-    // A $0 testnet wallet is "connected" but cannot execute orders — fall through to Alpaca.
+    // isConnected: only return true if connected AND has confirmed positive balance.
+    // A $0 testnet wallet (or unconfirmed equity) falls through to Alpaca.
     isConnected: function () {
       if (!_cfg.connected) return false;
-      // If equity has been fetched and is zero, treat as not ready for trading
-      if (_cfg.equity !== null && _cfg.equity <= 0) return false;
+      // Require confirmed positive equity before routing live orders here.
+      // null = not yet fetched; 0 = unfunded. Both fall through to Alpaca.
+      if (!_cfg.equity || _cfg.equity <= 0) return false;
       return true;
     },
     isTestnet:   function () { return _cfg.testnet; },
