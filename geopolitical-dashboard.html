@@ -13417,8 +13417,18 @@ function _modalKeyHandler(e) {
 <!-- Polymarket Integration — prediction market consensus → IC pipeline (paper trading only) -->
 <script src="polymarket.js?v=15"></script>
 
+<!-- TickTrader credentials bootstrap — pre-loaded before adapter so auto-connect fires -->
+<script>
+window._TT_BOOTSTRAP = {
+  brokerUrl:   'https://ttlivewebapi.fxopen.net:8443',
+  tokenId:     '7a9def38-ab28-42e8-8a7c-5c2703577719',
+  tokenKey:    'aamAZnf8YJFMdkjC',
+  tokenSecret: 'h5c4RrgqD4DxBgcggWK57AYCR3rmd874YQAAq7BNwC35YBSt8aG8QFFSfHk296kF',
+  demo:        true
+};
+</script>
 <!-- TickTrader Broker adapter — forex majors via any TickTrader-powered broker -->
-<script src="agents/ticktrader-broker.js?v=2"></script>
+<script src="agents/ticktrader-broker.js?v=5"></script>
 
 <!-- Alpaca Broker adapter — loaded before EE so venue router is available -->
 <script src="agents/alpaca-broker.js?v=5"></script>
@@ -14086,8 +14096,7 @@ function _modalKeyHandler(e) {
 .tab-badge.visible { display: inline-block; }
 
 /* ══════════════════════════════ TAB SHOW / HIDE ══════════════════════════════════════ */
-.nav-section { display: none; }
-.nav-section.visible { display: block; }
+.nav-section:not(.visible) { display: none; }
 
 /* ══════════════════════════════ OVERVIEW GRID ════════════════════════════════════════ */
 #overviewGrid {
