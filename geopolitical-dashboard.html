@@ -2226,6 +2226,7 @@
     <button class="nav-btn" data-tab="markets"   data-color="#a050e0">📊 Markets <span class="tab-badge" id="badge-markets"></span></button>
     <button class="nav-btn" data-tab="analytics" data-color="#20b090">📈 Performance</button>
     <button class="nav-btn" data-tab="monitors"  data-color="#e8a020">🌐 Monitors</button>
+    <button class="nav-btn" data-tab="sysmon"    data-color="#ff4444">🖥 System <span class="tab-badge" id="lmNavBadge" style="display:none"></span></button>
   </nav>
 
   <!-- ══════════════════════════ COMMAND STRIP ═══════════════════════════════════════ -->
@@ -5226,6 +5227,17 @@
     </div>
     <div id="mo-content">
       <div class="ee-placeholder">Market Observer initialising — first scan in ~15 seconds&hellip;</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════════
+       SYSTEM MONITOR — Live health dashboard (live-monitor.js)
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <div class="nav-section" data-tab="sysmon" id="lmWrap">
+    <div id="lmPanel">
+      <div style="padding:40px;text-align:center;color:var(--dim);font-size:11px">
+        🖥 System Monitor initialising — first scan in ~4 seconds after page load…
+      </div>
     </div>
   </div>
 
@@ -14302,6 +14314,52 @@ window._TT_BOOTSTRAP = {
 }
 .tab-badge.visible { display: inline-block; }
 
+/* ══════════════════════════════ LIVE MONITOR ═════════════════════════════════════════ */
+#lmWrap          { padding:14px 16px; max-width:1400px; margin:0 auto; }
+.lm-banner       { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:10px 16px; border-radius:3px; margin-bottom:14px; border-left:4px solid; }
+.lm-banner-ready { background:rgba(0,200,160,0.1); border-color:#00c8a0; }
+.lm-banner-warn  { background:rgba(255,149,0,0.1);  border-color:#ff9500; }
+.lm-banner-crit  { background:rgba(255,68,68,0.12); border-color:#ff4444; }
+.lm-banner-status{ font-size:15px; font-weight:800; letter-spacing:2px; min-width:90px; }
+.lm-banner-ready .lm-banner-status { color:#00c8a0; }
+.lm-banner-warn  .lm-banner-status { color:#ff9500; }
+.lm-banner-crit  .lm-banner-status { color:#ff4444; }
+.lm-banner-score { font-size:11px; font-weight:700; color:var(--bright); background:rgba(255,255,255,0.06); padding:3px 10px; border-radius:20px; }
+.lm-banner-time  { font-size:9px; color:var(--dim); margin-left:auto; }
+.lm-banner-issues{ font-size:9px; color:var(--dim); flex-basis:100%; padding-top:2px; }
+
+.lm-card         { background:var(--bg2); border:1px solid var(--border); border-radius:3px; padding:12px 14px; margin-bottom:12px; }
+.lm-card-title   { font-size:9px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:var(--bright); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+.lm-count        { background:rgba(255,68,68,0.2); color:#ff8888; border:1px solid rgba(255,68,68,0.35); border-radius:10px; font-size:8px; padding:1px 6px; }
+
+.lm-alert        { display:flex; align-items:flex-start; gap:6px; padding:6px 10px; margin-bottom:4px; border-radius:2px; font-size:10px; line-height:1.5; }
+.lm-alert-crit   { background:rgba(255,68,68,0.1);  border:1px solid rgba(255,68,68,0.3);  border-left:3px solid #ff4444; color:#ffaaaa; }
+.lm-alert-warn   { background:rgba(255,149,0,0.1);  border:1px solid rgba(255,149,0,0.3);  border-left:3px solid #ff9500; color:#ffcc88; }
+.lm-alert-ts     { font-size:8px; color:var(--dim); margin-left:auto; white-space:nowrap; }
+.lm-none         { font-size:10px; padding:8px 0; }
+
+.lm-tbl          { width:100%; border-collapse:collapse; font-size:9px; }
+.lm-tbl th       { text-align:left; padding:4px 8px; color:var(--dim); font-weight:700; letter-spacing:0.6px; border-bottom:1px solid var(--border); font-size:8px; text-transform:uppercase; }
+.lm-tbl td       { padding:4px 8px; border-bottom:1px solid rgba(255,255,255,0.03); vertical-align:middle; }
+.lm-tbl tr:last-child td { border-bottom:none; }
+.lm-tbl tr:hover td      { background:rgba(255,255,255,0.02); }
+.lm-row-crit td  { background:rgba(255,68,68,0.04); }
+.lm-row-warn td  { background:rgba(255,149,0,0.04); }
+.lm-note         { color:var(--dim); font-style:italic; font-size:8px; }
+
+.lm-g  { color:#00c8a0; }
+.lm-a  { color:#ff9500; }
+.lm-r  { color:#ff4444; }
+.lm-d  { color:#555; }
+
+.lm-sparks      { display:flex; flex-wrap:wrap; gap:12px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+.lm-sparks-lg .lm-spark-cell canvas { width:200px; height:40px; }
+.lm-spark-cell  { display:flex; flex-direction:column; gap:3px; }
+.lm-spark-lbl   { font-size:8px; color:var(--dim); letter-spacing:0.3px; }
+.lm-spark-cell canvas { display:block; border-radius:2px; background:var(--bg3); }
+
+.lm-footer      { font-size:8px; color:var(--dim); text-align:center; padding:8px 0 2px; letter-spacing:0.3px; }
+
 /* ══════════════════════════════ TAB SHOW / HIDE ══════════════════════════════════════ */
 .nav-section:not(.visible) { display: none; }
 
@@ -14648,5 +14706,7 @@ window._TT_BOOTSTRAP = {
 
 })();
 </script>
+
+<script src="live-monitor.js?v=1"></script>
 </body>
 </html>
