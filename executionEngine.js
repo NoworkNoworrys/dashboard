@@ -82,6 +82,54 @@
     'DOT':  70,  // 29% WR across 7 trades
   };
 
+  /* ── Dynamic confidence floor updater ─────────────────────────────────────
+     Reads all-time attribution data from localStorage and recalculates
+     per-asset confidence floors every 30 minutes.
+     Rules (require ≥12 closed trades per asset to take effect):
+       WR < 25%: floor = max(current, 85)  — near-blocked, very poor
+       WR < 35%: floor = max(current, 78)  — poor, high bar
+       WR < 45%: floor = max(current, 70)  — below average, raise bar
+       WR 45–55%: floor unchanged
+       WR > 60%: floor = min(current, 60)  — relax floor for hot assets
+       WR > 70%: floor = min(current, 55)  — strong performer, relax further
+     Static hardcoded values above serve as a starting point; once enough
+     trade data exists the dynamic calculation takes over.                   */
+  function _updateDynamicFloors() {
+    try {
+      var recs = JSON.parse(localStorage.getItem('geodash_attribution_v1') || '[]');
+      if (!recs.length) return;
+      // Group by asset
+      var byAsset = {};
+      recs.forEach(function (r) {
+        var a = r.asset;
+        if (!a) return;
+        if (!byAsset[a]) byAsset[a] = { total: 0, wins: 0 };
+        byAsset[a].total++;
+        if (r.win) byAsset[a].wins++;
+      });
+      var changed = [];
+      Object.keys(byAsset).forEach(function (asset) {
+        var d  = byAsset[asset];
+        if (d.total < 12) return;  // insufficient data
+        var wr = d.wins / d.total;
+        var cur = EE_ASSET_CONF_FLOOR[asset] || 0;
+        var next = cur;
+        if      (wr < 0.25) next = Math.max(cur, 85);
+        else if (wr < 0.35) next = Math.max(cur, 78);
+        else if (wr < 0.45) next = Math.max(cur, 70);
+        else if (wr > 0.70) next = Math.min(cur || 65, 55);
+        else if (wr > 0.60) next = Math.min(cur || 65, 60);
+        if (next !== cur) {
+          EE_ASSET_CONF_FLOOR[asset] = next;
+          changed.push(asset + ':' + cur + '→' + next + '(' + Math.round(wr*100) + '%WR)');
+        } else if (next > 0 && !EE_ASSET_CONF_FLOOR[asset]) {
+          EE_ASSET_CONF_FLOOR[asset] = next;
+        }
+      });
+      if (changed.length) log('RISK', 'Dynamic floors updated: ' + changed.join(', '), 'dim');
+    } catch(e) {}
+  }
+
   var EE_SECTOR_MAP = {
     /* Energy — WTI, BRENT, GAS on HL perps; XLE/XOM flagged (no HL token) */
     'WTI':'energy',   'BRENT':'energy', 'XLE':'energy',  'XOM':'energy',
@@ -292,7 +340,10 @@
     'momentum':           'momentum',
     'correlation':        'correlation',
     'cot':                'fundamental',
-    'funding-rate':       'on-chain'
+    'funding-rate':       'on-chain',
+    'funding':            'on-chain',
+    'smartmoney':         'fundamental',
+    'positioning':        'fundamental'
   };
 
   /* ── Asset remap table ─────────────────────────────────────────────────────
@@ -2259,6 +2310,31 @@
         log('RISK', sig.asset + ' VIX ' + _vixNow.toFixed(0) + ' size ×' + _vixSizeMult +
             ': $' + _bfVix.toFixed(2) + ' → $' + riskAmt.toFixed(2), 'amber');
       }
+    }
+
+    // Options market stress multiplier: VIX term structure and PCR give an
+    // independent read on near-term fear that VIX alone can miss.
+    // BACKWARDATION (short vol > long vol) = crisis pricing → reduce risk-asset longs.
+    // EUPHORIA (PCR very low) = complacency → reduce longs (crowded, reversal risk).
+    // Not applied to: forex, defensive assets (GLD/XAU/TLT), scalper signals.
+    if (window.OptionsMarket && !_fxLeveraged && !_isScalperSig) {
+      try {
+        var _opts = OptionsMarket.current();
+        var _optRisk = _opts.riskScore || 0;  // -20 to +20 (positive = risk-off)
+        var _optMult = 1.0;
+        var _isDefOpt = ['GLD','XAU','SLV','TLT','SILVER'].indexOf(normaliseAsset(sig.asset)) !== -1;
+        if (!_isDefOpt) {
+          if (_optRisk >= 14 && sig.dir === 'LONG') _optMult = 0.65;       // SEVERE_BACKWARDATION: 65%
+          else if (_optRisk >= 8 && sig.dir === 'LONG') _optMult = 0.80;   // BACKWARDATION/FEAR:   80%
+          else if (_optRisk <= -8 && sig.dir === 'LONG') _optMult = 0.80;  // EUPHORIA: complacent longs, shrink
+        }
+        if (_optMult < 1.0) {
+          var _bfOpt = riskAmt;
+          riskAmt = riskAmt * _optMult;
+          log('RISK', sig.asset + ' options stress (' + (_opts.tsSignal || '?') + '/' + (_opts.pcrSignal || '?') +
+              ') ×' + _optMult + ': $' + _bfOpt.toFixed(2) + ' → $' + riskAmt.toFixed(2), 'amber');
+        }
+      } catch(e) {}
     }
 
     // Correlation load multiplier: if many risk-on LONG trades are already open,
@@ -6553,6 +6629,13 @@
         _reconcileAlpacaPositions();
         _reconcileHLPositions();
       }, 15000); // first run 15s after load (let fills settle)
+    }
+
+    // Dynamic confidence floors: run at init (5s delay for attribution data to load)
+    // and every 30 min thereafter — adjusts EE_ASSET_CONF_FLOOR from live trade history.
+    setTimeout(_updateDynamicFloors, 5000);
+    if (!window._eeFloorsInterval) {
+      window._eeFloorsInterval = setInterval(_updateDynamicFloors, 30 * 60 * 1000);
     }
 
     // Live broker equity polling — every 60 seconds, used for real-time position sizing

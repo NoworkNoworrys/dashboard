@@ -13652,6 +13652,75 @@ window._TT_BOOTSTRAP = {
     } catch (err) {}
   });
 
+  // ── Positioning Signal Bridge ────────────────────────────────────────────────
+  // COT (CFTC), Funding Rate (perp crowding), and SmartMoney agents generate signals
+  // but have no standalone path to the EE — they only contribute as corroboration.
+  // This bridge polls them every 5 min, cross-checks for multi-agent agreement, and
+  // submits high-conviction entries directly through gii-entry for full scoring.
+  // Threshold: ≥2 agents must agree on the same asset+direction before submitting.
+  (function () {
+    var _REGION_MAP = {
+      BTC:'GLOBAL',ETH:'GLOBAL',SOL:'GLOBAL',DOGE:'GLOBAL',ADA:'GLOBAL',
+      BNB:'GLOBAL',XRP:'GLOBAL',LTC:'GLOBAL',DOT:'GLOBAL',LINK:'GLOBAL',
+      WTI:'MIDDLE_EAST',BRENT:'MIDDLE_EAST',GLD:'GLOBAL',XAU:'GLOBAL',
+      SPY:'NORTH_AMERICA',QQQ:'NORTH_AMERICA',NVDA:'NORTH_AMERICA',
+      EUR_USD:'EUROPE',GBP_USD:'EUROPE',USD_JPY:'ASIA'
+    };
+
+    function _toDir(v) { return ((v||'').toLowerCase() === 'short' ? 'SHORT' : 'LONG'); }
+
+    function _run() {
+      if (!window.GII_AGENT_ENTRY || typeof GII_AGENT_ENTRY.submit !== 'function') return;
+
+      var cotSigs = [], frSigs = [], smSigs = [];
+      try { if (window.COT_SIGNALS)         cotSigs = COT_SIGNALS.signals().filter(function(s){ return (s.confidence||0) >= 72; }); } catch(e){}
+      try { if (window.FUNDING_RATES)        frSigs  = FUNDING_RATES.signals().filter(function(s){ return (s.confidence||0) >= 68; }); } catch(e){}
+      try { if (window.GII_AGENT_SMARTMONEY) smSigs  = GII_AGENT_SMARTMONEY.signals().filter(function(s){ return (s.confidence||0) >= 70; }); } catch(e){}
+
+      // Map asset+direction → list of agreeing sources
+      var map = {};
+      function _add(sig, src, dirField, confField) {
+        var asset = (sig.asset||'').toUpperCase();
+        var dir   = _toDir(sig[dirField] || sig.bias || sig.dir);
+        var conf  = sig[confField] || sig.confidence || sig.conf || 0;
+        if (!asset || !dir) return;
+        var k = asset + '|' + dir;
+        if (!map[k]) map[k] = { asset:asset, dir:dir, sources:[], totalConf:0, labels:[] };
+        map[k].sources.push(src);
+        map[k].totalConf += conf;
+        map[k].labels.push(src + '(' + Math.round(conf) + '%)');
+      }
+      cotSigs.forEach(function(s){ _add(s,'cot','bias','confidence'); });
+      frSigs.forEach(function(s){  _add(s,'funding','bias','confidence'); });
+      smSigs.forEach(function(s){  _add(s,'smartmoney','dir','confidence'); });
+
+      var toSubmit = [];
+      Object.keys(map).forEach(function(k) {
+        var e = map[k];
+        if (e.sources.length < 2) return;  // must have 2+ agreeing agents
+        var avgConf = Math.round(e.totalConf / e.sources.length);
+        toSubmit.push({
+          asset:    e.asset,
+          dir:      e.dir,
+          conf:     Math.min(85, avgConf),  // cap at 85 — positioning is slow/fundamentalcontext
+          source:   e.sources[0],
+          srcCount: e.sources.length,
+          region:   _REGION_MAP[e.asset] || 'GLOBAL',
+          reason:   'POSITIONING: ' + e.labels.join(' + ')
+        });
+      });
+
+      if (toSubmit.length) {
+        console.log('[POSITIONING BRIDGE] ' + toSubmit.length + ' cross-agent signal(s): ' +
+          toSubmit.map(function(s){ return s.asset+' '+s.dir+'('+s.conf+'%)'; }).join(', '));
+        GII_AGENT_ENTRY.submit(toSubmit, 'positioning');
+      }
+    }
+
+    setTimeout(_run, 35000);                       // first run 35s after load
+    setInterval(_run, 5 * 60 * 1000);              // then every 5 min
+  })();
+
   // Keep Market Observer header badges in sync
   setInterval(function () {
     if (!window.GII_AGENT_MARKET_OBSERVER) return;

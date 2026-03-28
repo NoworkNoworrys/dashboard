@@ -181,8 +181,10 @@
     if (!relevant.length) return null;  // agent abstains — no relevant view
 
     var biasDir = dir === 'SHORT' ? 'short' : 'long';
-    var matching = relevant.filter(function (s) { return s.bias === biasDir; });
-    var opposing = relevant.filter(function (s) { return s.bias && s.bias !== biasDir && s.bias !== 'neutral'; });
+    // Some agents (e.g. gii-smartmoney) use `s.dir` instead of `s.bias` — normalise both.
+    function _sigDir(s) { return (s.bias || s.dir || '').toLowerCase(); }
+    var matching = relevant.filter(function (s) { return _sigDir(s) === biasDir; });
+    var opposing = relevant.filter(function (s) { var d = _sigDir(s); return d && d !== biasDir && d !== 'neutral'; });
 
     return {
       agrees:   matching.length > opposing.length,
