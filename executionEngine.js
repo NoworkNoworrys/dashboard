@@ -1770,15 +1770,41 @@
       }
     }
 
+    // ── Forex market hours gate (OANDA only) ─────────────────────────────────
+    // OANDA trades 24/5: Sun 17:00 ET → Fri 17:00 ET.
+    // Block signals during the weekend closure window and add a 30-min buffer
+    // after the Sunday open (wide spreads and gap risk).
+    // US equity session gates below are irrelevant for forex — skip them.
+    var _isOandaFx = sig._venue === 'OANDA';
+    if (_isOandaFx) {
+      var _fxNow    = new Date();
+      var _fxDay    = _fxNow.getUTCDay();  // 0=Sun, 1=Mon, …, 5=Fri, 6=Sat
+      var _fxMoFx   = _fxNow.getUTCMonth();
+      var _fxEtOff  = (_fxMoFx >= 2 && _fxMoFx <= 10) ? 240 : 300; // EDT/EST
+      var _fxEtMins = (_fxNow.getUTCHours() * 60 + _fxNow.getUTCMinutes() + 1440 - _fxEtOff) % 1440;
+      var _fxClose  = 17 * 60;   // 5pm ET — Friday close / Sunday open
+      var _fxClosed =
+        _fxDay === 6 ||                                         // all day Saturday
+        (_fxDay === 5 && _fxEtMins >= _fxClose) ||             // Friday after 5pm ET
+        (_fxDay === 0 && _fxEtMins < _fxClose);                // Sunday before 5pm ET
+      if (_fxClosed) {
+        return { ok: false, reason: 'Forex market closed — OANDA trades Sun 17:00 ET – Fri 17:00 ET' };
+      }
+      // 30-min buffer after Sunday open: spreads are wide, weekend gaps settle
+      if (_fxDay === 0 && _fxEtMins >= _fxClose && _fxEtMins < _fxClose + 30) {
+        return { ok: false, reason: 'Forex Sunday-open buffer (17:00–17:30 ET) — wide spreads/gap risk' };
+      }
+      // No US equity session gate for forex — fall through to age check
+    }
+
     // Time-of-day filter: avoid first and last 30 min of US equity session.
     // Open (09:30–10:00 ET) and close (15:30–16:00 ET) have wide spreads,
     // erratic price action, and high false-signal rates for news-based entries.
-    // Scalper signals are exempt — they are specifically designed for short-term moves.
+    // Scalper signals and OANDA forex signals are exempt.
     var _isScalperForTod = sig.reason && (sig.reason.indexOf('SCALPER') === 0 || sig.reason.indexOf('GII:') === 0);
-    if (!_isScalperForTod) {
+    if (!_isScalperForTod && !_isOandaFx) {
       var _now = new Date();
       // Convert to US Eastern Time (UTC-5 standard, UTC-4 daylight saving).
-      // Simple approximation: ET = UTC - 5h (adjust for DST where needed).
       var _utcH = _now.getUTCHours(), _utcM = _now.getUTCMinutes();
       // DST approximation: EDT (UTC-4) runs Mar–Nov, EST (UTC-5) Nov–Mar
       var _mo = _now.getUTCMonth(); // 0=Jan
@@ -2426,6 +2452,8 @@
       // notional leverage may differ if risk caps were hit — compare with
       // size_usd / virtual_balance in the UI to see the effective leverage.
       leverage:     sig.leverage || 1,
+      // Dollar risk at open (used for R-multiple display in closed trade rows)
+      initial_risk_usd: +riskAmt.toFixed(2),
       // Original (pre-routing) asset name if gii-routing remapped it (e.g. GLD→XAU).
       original_asset: sig.original_asset || null,
       // Regime snapshot: market conditions at trade open (GTI level, risk mode, VIX, threat).
@@ -4475,9 +4503,33 @@
     }
     var subtitleEl = document.getElementById('eeSubtitle');
     if (subtitleEl) {
-      subtitleEl.textContent = 'Signal-driven trade automation \u00b7 ' +
+      // Market status: show which venues are currently open
+      var _sbNow    = new Date();
+      var _sbDay    = _sbNow.getUTCDay();  // 0=Sun, 6=Sat
+      var _sbMo     = _sbNow.getUTCMonth();
+      var _sbEtOff  = (_sbMo >= 2 && _sbMo <= 10) ? 240 : 300;
+      var _sbEtMins = (_sbNow.getUTCHours() * 60 + _sbNow.getUTCMinutes() + 1440 - _sbEtOff) % 1440;
+      // US equity: Mon–Fri 09:30–16:00 ET
+      var _usOpen = _sbDay >= 1 && _sbDay <= 5 &&
+                    _sbEtMins >= 570 && _sbEtMins < 960;  // 9:30–16:00
+      // OANDA forex: Sun 17:00 ET – Fri 17:00 ET
+      var _fxClosed2 = _sbDay === 6 ||
+        (_sbDay === 5 && _sbEtMins >= 1020) ||  // Fri after 17:00 ET
+        (_sbDay === 0 && _sbEtMins < 1020);      // Sun before 17:00 ET
+      var _mktStatus = [];
+      if (_usOpen) _mktStatus.push('US\u2009\u25cf');       // green dot via CSS
+      else         _mktStatus.push('US\u2009\u25cb');
+      if (!_fxClosed2) _mktStatus.push('FX\u2009\u25cf');
+      else             _mktStatus.push('FX\u2009\u25cb');
+      // Crypto: always 24/7
+      _mktStatus.push('Crypto\u2009\u25cf');
+      subtitleEl.innerHTML = 'Signal-driven trade automation &middot; ' +
         (_cfg.mode === 'LIVE' ? 'Live trading' : 'Paper trading') +
-        ' \u00b7 Venues: Hyperliquid \u00b7 Alpaca \u00b7 OANDA';
+        ' &middot; ' +
+        _mktStatus.map(function (s) {
+          var open = s.indexOf('\u25cf') !== -1;
+          return '<span style="color:' + (open ? '#22dd88' : '#888') + '">' + s + '</span>';
+        }).join(' &nbsp; ');
     }
   }
 
@@ -4580,6 +4632,10 @@
 
       var venueBadge = t.venue === 'ALPACA'
         ? '<span style="font-size:7px;padding:1px 4px;border-radius:2px;background:#1a2a4a;color:#4da6ff;margin-left:4px;letter-spacing:0.5px">ALPACA</span>'
+        : t.venue === 'OANDA'
+        ? '<span style="font-size:7px;padding:1px 4px;border-radius:2px;background:#1a2a1a;color:#22dd88;margin-left:4px;letter-spacing:0.5px">OANDA</span>'
+        : t.venue === 'TICKTRADER'
+        ? '<span style="font-size:7px;padding:1px 4px;border-radius:2px;background:#2a1a2a;color:#dd88ff;margin-left:4px;letter-spacing:0.5px">TT</span>'
         : '<span style="font-size:7px;padding:1px 4px;border-radius:2px;background:#1a1a3a;color:#a78bfa;margin-left:4px;letter-spacing:0.5px">HL</span>';
       return '<div class="ee-trade-card">' +
         '<div class="ee-tc-hdr">' +
@@ -4656,12 +4712,24 @@
       var cls = pc >= 0 ? 'pos' : 'neg';
       var icon    = (t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP') ? '\u2713' : t.close_reason === 'STOP_LOSS' ? '\u2717' : '\u2014';
       var iconCls = (t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP') ? 'tp' : 'sl';
+      // R-multiple: pnl_usd / initial_risk_usd (1R = risked $, so 2R = 2× the risk)
+      var rMult = '';
+      if (t.initial_risk_usd && Math.abs(t.initial_risk_usd) > 0) {
+        var r = pu / Math.abs(t.initial_risk_usd);
+        rMult = '<span style="font-size:9px;color:' + (r >= 0 ? '#00c8a0' : '#ff4444') + ';margin-left:3px">' +
+          (r >= 0 ? '+' : '') + r.toFixed(1) + 'R</span>';
+      }
+      // Small venue badge on closed rows
+      var crVenue = t.venue === 'ALPACA' ? '<span style="font-size:7px;color:#4da6ff;margin-left:3px">ALP</span>'
+        : t.venue === 'OANDA'      ? '<span style="font-size:7px;color:#22dd88;margin-left:3px">FX</span>'
+        : t.venue === 'TICKTRADER' ? '<span style="font-size:7px;color:#dd88ff;margin-left:3px">TT</span>'
+        : '<span style="font-size:7px;color:#a78bfa;margin-left:3px">HL</span>';
       return '<div class="ee-closed-row">' +
         '<span class="ee-cr-reason ' + iconCls + '">' + icon + '</span>' +
-        '<span class="ee-cr-asset">' + _esc(t.asset) + '</span>' +
+        '<span class="ee-cr-asset">' + _esc(t.asset) + crVenue + '</span>' +
         '<span class="ee-cr-dir ' + t.direction.toLowerCase() + '">' + t.direction + '</span>' +
         '<span class="ee-cr-pnl ' + cls + '">' + (pc >= 0 ? '+' : '') + pc + '%</span>' +
-        '<span class="ee-cr-usd ' + cls + '">' + (pu >= 0 ? '+$' : '-$') + _num(Math.abs(pu)) + '</span>' +
+        '<span class="ee-cr-usd ' + cls + '">' + (pu >= 0 ? '+$' : '-$') + _num(Math.abs(pu)) + rMult + '</span>' +
         '<span class="ee-cr-ts">' + _age(t.timestamp_open) + '</span>' +
       '</div>';
     }).join('');
