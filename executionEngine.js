@@ -1072,6 +1072,13 @@
       })
       .catch(function (err) {
         _apiOnline = false;
+        // A3: stop the price-poll interval if it was started by /api/status success
+        // but the trades fetch (or config fetch) subsequently failed — otherwise the
+        // engine stays in a degraded state: online=false but polling indefinitely.
+        if (_backendPriceInterval) {
+          clearInterval(_backendPriceInterval);
+          _backendPriceInterval = null;
+        }
         if (retryCount < RETRY_DELAYS.length) {
           var delay = RETRY_DELAYS[retryCount];
           log('SYSTEM', 'Backend unreachable — retrying in ' + (delay / 1000) + 's (attempt ' + (retryCount + 1) + '/' + RETRY_DELAYS.length + ')', 'dim');
@@ -2032,8 +2039,10 @@
     // Hard cap: prevents compounding from creating unrealistically large positions.
     // Dynamic cap scales at 1% of balance (raised from 0.5%) to grow with the account.
     // At $1k balance → cap=$100, at $10k → cap=$100, at $20k → cap=$200.
+    // A7: use _effectiveBal (already computed above) so the cap scales with
+    // live broker equity when connected, not just the paper virtual_balance.
     var _dynamicCap = (_cfg.max_risk_usd > 0)
-      ? Math.max(_cfg.max_risk_usd, _cfg.virtual_balance * 0.01)
+      ? Math.max(_cfg.max_risk_usd, _effectiveBal * 0.01)
       : 0;
     if (_dynamicCap > 0) riskAmt = Math.min(riskAmt, _dynamicCap);
 
@@ -2324,7 +2333,8 @@
   function openTrade(sig, entryPrice) {
     // Belt-and-suspenders: final same-asset guard before writing to _trades.
     // Catches any path that bypassed canExecute (rotation timing, re-scan race, etc.).
-    if (openTrades().some(function (t) { return t.asset === sig.asset; })) {
+    // A11: normalise both sides so "WTI" and "WTI Crude Oil" resolve to the same key
+    if (openTrades().some(function (t) { return normaliseAsset(t.asset) === normaliseAsset(sig.asset); })) {
       log('TRADE', sig.asset + ' openTrade blocked — position already open (final guard)', 'amber');
       return;
     }
@@ -2848,6 +2858,9 @@
       close_reason:    trade.close_reason,
       pnl_pct:         trade.pnl_pct,
       pnl_usd:         trade.pnl_usd,
+      // A10: persist total_pnl_usd (pnl_usd + partial_pnl_usd) so analytics
+      // correctly classify partial-TP trades after a DB reload
+      total_pnl_usd:   trade.total_pnl_usd,
       price_source:    trade.price_source || 'SIMULATED'
     });
 
@@ -2969,11 +2982,16 @@
     // Circuit breaker: if an agent goes haywire and floods >50 signals/10s, throttle it.
     var _now = Date.now();
     if (_now - _sigRateWindow > 10000) { _sigRateWindow = _now; _sigRateCount = 0; }
-    _sigRateCount += sigs.length;
-    if (_sigRateCount > _SIG_RATE_LIMIT) {
-      log('SYSTEM', '⚠ Signal rate limit hit (' + _sigRateCount + '/10s) — batch dropped to protect execution engine', 'warn');
-      return;
+    // A16: trim to the remaining quota rather than dropping the entire batch —
+    // if 48 signals have passed and a batch of 5 arrives, 2 are legitimate.
+    var _quota = Math.max(0, _SIG_RATE_LIMIT - _sigRateCount);
+    if (sigs.length > _quota) {
+      log('SYSTEM', '⚠ Signal rate limit — accepting ' + _quota + '/' + sigs.length +
+        ' signal(s) this window (' + _sigRateCount + '/' + _SIG_RATE_LIMIT + ' used)', 'warn');
+      sigs = sigs.slice(0, _quota);
     }
+    _sigRateCount += sigs.length;
+    if (!sigs.length) return;
 
     _lastSignals = sigs;                 // always cache — re-scan loop needs these
 
@@ -3294,7 +3312,10 @@
 
     var vb   = _cfg.virtual_balance;
     var diff = Math.abs(vb - brokerEquity);
-    var pct  = vb > 0 ? diff / vb * 100 : 100;
+    // A23: use max(vb, brokerEquity) as denominator — if vb hits the $1 floor after
+    // a catastrophic loss the pct would explode vs real broker equity, spamming the log.
+    var _driftBase = Math.max(vb, brokerEquity);
+    var pct  = _driftBase > 0 ? diff / _driftBase * 100 : 100;
 
     if (pct > 5) {
       log('SYSTEM',
@@ -3498,6 +3519,25 @@
           delete _reversalCooldown[k];
         }
       });
+      // A20: prune _noPriceThrottle — 1h entries for assets with no price feed.
+      // Never pruned before → one entry per dead asset accumulates indefinitely.
+      Object.keys(_noPriceThrottle).forEach(function (k) {
+        if (_cdNow - (_noPriceThrottle[k] || 0) > 3600000) {
+          delete _noPriceThrottle[k];
+        }
+      });
+    })();
+
+    // A5: compute _tpHitRate ONCE per monitor cycle (outside forEach) — it was
+    // previously an IIFE inside forEach, scanning all trades for every open trade.
+    // With N open trades and M closed trades that was O(N×M) per 15s cycle.
+    var _monCycleHitRate = (function () {
+      var _closed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
+      if (_closed.length < 20) return 0.40; // conservative prior — favour partial until we have data
+      var _tpHits = _closed.filter(function (t) {
+        return t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP';
+      }).length;
+      return _tpHits / _closed.length;
     })();
 
     openTrades().forEach(function (trade, _monIdx) {
@@ -3544,15 +3584,8 @@
         //   on every winning trade. Only use partial TP when the system rarely
         //   reaches full TP (< 45%), where banking early is positive-EV.
         var _sconf       = trade.signal_conf || 65;
-        var _tpHitRate   = (function () {
-          var _closed = _trades.filter(function (t) { return t.status === 'CLOSED'; });
-          if (_closed.length < 20) return 0.40; // conservative prior — favour partial until we have data
-          var _tpHits = _closed.filter(function (t) {
-            return t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP';
-          }).length;
-          return _tpHits / _closed.length;
-        })();
-        var _skipPartial = (_sconf >= 75 && trade.entry_type === 'breakout') || (_tpHitRate >= 0.45);
+        // A5: use pre-computed per-cycle hit rate (not a per-trade IIFE scan)
+        var _skipPartial = (_sconf >= 75 && trade.entry_type === 'breakout') || (_monCycleHitRate >= 0.45);
         var _partialFrac = _sconf >= 70 ? 0.25 : 0.50;
         if (_cfg.partial_tp_enabled && !trade.partial_tp_taken && !_skipPartial) {
           var tp1 = isLong
@@ -3566,7 +3599,11 @@
             // For SHORT, tp1 is BELOW entry; a lower price is MORE favourable, so
             // Math.max is wrong (it would use a worse-than-available price).
             // Correct: Math.min for SHORT too (fill at the best/lowest available fill).
-            var partialClosePrice = isLong ? Math.min(price, tp1) : Math.min(price, tp1);
+            // A6: both LONG and SHORT use Math.min(price, tp1):
+          // For LONG: cap at tp1 so we don't claim a better fill than the limit.
+          // For SHORT: tp1 is below entry; min gives the lower (more favourable) price.
+          // The ternary was dead code (both arms identical) — simplified to one expression.
+          var partialClosePrice = Math.min(price, tp1);
             // Reality check 2 — apply limit-order exit slippage (spread only, no market slippage)
             var adjPartialClose = _adjustedExitPrice(trade.asset, partialClosePrice, trade.direction, 'TAKE_PROFIT');
             var pnlPerUnit   = isLong ? (adjPartialClose - trade.entry_price) : (trade.entry_price - adjPartialClose);
@@ -3787,7 +3824,9 @@
             trade.funding_cost_usd = +((trade.funding_cost_usd || 0) + fundingCost).toFixed(4);
             _cfg.virtual_balance -= fundingCost;
             saveCfg();
-            saved = true;
+            // A9: saveTrades() here so costs_usd/funding_cost_usd reach localStorage/DB
+            // immediately — previously saved=true but saveTrades() had already passed.
+            saveTrades();
             log('COST', trade.asset + ' funding ×' + (fundingDue - fundingPaid) +
               ' periods  -$' + _num(fundingCost), 'dim');
           }
@@ -4070,7 +4109,9 @@
     });
     var wins   = closed.filter(function (t) { return t.close_reason === 'TAKE_PROFIT' || t.close_reason === 'TRAILING_STOP'; });
     // Session P&L — balance change since session start (not vs hard-coded default)
-    var startBal = _sessionStartBalance || DEFAULTS.virtual_balance;
+    // A18: fall back to current balance (0 P&L) not the hardcoded default ($1000)
+    // — avoids a misleading "+$4000" P&L flash on page load before init sets the baseline
+    var startBal = _sessionStartBalance || _cfg.virtual_balance;
     var totPnl   = _cfg.virtual_balance - startBal;
     var rate   = closed.length ? Math.round(wins.length / closed.length * 100) : null;
 
@@ -4467,7 +4508,9 @@
     var eligible = closed.filter(function (t) { return (t.confidence || 0) >= cfg.min_confidence; });
     if (!eligible.length) return { count: 0, winRate: 0, totalPnl: 0, maxDD: 0, pf: null };
 
-    var balance  = _cfg.virtual_balance || 10000;
+    // A19: use a fixed starting balance so sim results are reproducible regardless
+    // of current account size — live balance makes comparisons misleading
+    var balance  = DEFAULTS.virtual_balance;
     var riskUsd  = balance * cfg.risk_per_trade_pct / 100;
     var wins = 0, totalPnl = 0, peak = 0, running = 0, maxDD = 0, grossWins = 0, grossLoss = 0;
 
@@ -4586,7 +4629,14 @@
      ══════════════════════════════════════════════════════════════════════════════ */
 
   function _esc(s) {
-    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // A15: also escape quotes — required for safe use inside HTML attribute values
+    // (e.g. onclick="EE.manualClose('...')" where trade_id is user/DB-supplied)
+    return String(s || '')
+      .replace(/&/g,  '&amp;')
+      .replace(/</g,  '&lt;')
+      .replace(/>/g,  '&gt;')
+      .replace(/'/g,  '&#39;')
+      .replace(/"/g,  '&quot;');
   }
 
   function _num(n) {
@@ -4708,7 +4758,9 @@
         var ss = scalperStats[src];
         ss.trades++;
         if (isWin) ss.wins++; else ss.losses++;
-        ss.pnl += pnl + (t.partial_pnl_usd || 0);
+        // A14: pnl is already total_pnl_usd (which includes partial_pnl_usd) —
+        // adding partial_pnl_usd again double-counted every partial-TP trade.
+        ss.pnl += pnl;
         if (t.partial_tp_taken) ss.partial++;
         if (t.timestamp_open && t.timestamp_close) {
           var sdur = (new Date(t.timestamp_close).getTime() - new Date(t.timestamp_open).getTime()) / 60000;
@@ -5139,15 +5191,17 @@
       } else {
         var assetStats = a.assetMap; // already computed above
         var assetKeys = Object.keys(assetStats).sort(function (a, b) {
-          return Math.abs(assetStats[b].pnl) - Math.abs(assetStats[a].pnl);
+          // A4 fix: field is pnl_usd, not pnl
+          return Math.abs(assetStats[b].pnl_usd) - Math.abs(assetStats[a].pnl_usd);
         });
         var rows = assetKeys.map(function (k) {
           var s = assetStats[k];
           var tot = s.wins + s.losses;
           var wr = tot ? Math.round(s.wins / tot * 100) : 0;
           var wrCls = wr >= 60 ? 'color:var(--green)' : wr < 40 ? 'color:var(--red)' : 'color:var(--amber)';
-          var pnlCls = s.pnl >= 0 ? 'color:var(--green)' : 'color:var(--red)';
-          var pnlStr = (s.pnl >= 0 ? '+$' : '-$') + _num(Math.abs(s.pnl));
+          // A4 fix: use pnl_usd (the actual field name from calcAnalytics)
+          var pnlCls = s.pnl_usd >= 0 ? 'color:var(--green)' : 'color:var(--red)';
+          var pnlStr = (s.pnl_usd >= 0 ? '+$' : '-$') + _num(Math.abs(s.pnl_usd));
           return '<tr style="border-bottom:1px solid rgba(255,255,255,0.05)">' +
             '<td style="padding:3px 8px;font-weight:700">' + _esc(k) + '</td>' +
             '<td style="padding:3px 8px">' + tot + '</td>' +
@@ -5379,7 +5433,8 @@
         max_per_region:       { min: 1,   max: 5,        int: true  },
         max_per_sector:       { min: 1,   max: 5,        int: true  },
         virtual_balance:      { min: 100, max: 10000000, int: false },
-        max_risk_usd:         { min: 0,   max: 10000,    int: false },
+        // A21: min=1 so that 0 can't accidentally disable the hard risk cap entirely
+        max_risk_usd:         { min: 1,   max: 10000,    int: false },
         trailing_stop_pct:    { min: 0.1, max: 10,       int: false },
         daily_loss_limit_pct: { min: 1,   max: 100,      int: false },
         event_gate_hours:     { min: 0,   max: 4,        int: false }
@@ -5561,7 +5616,10 @@
       _peakEquity          = _cfg.virtual_balance;
       _ddFromPeak          = 0;
       try { localStorage.setItem('geodash_session_start_v1', _sessionStart); } catch(e) {}
-      try { localStorage.setItem('geodash_session_balance_v1', String(_sessionStartBalance)); } catch(e) {}
+      // A8: write same JSON object format that init() expects — plain String() caused
+      // a TypeError on reload because init() does JSON.parse().date/.balance
+      var _srTodayKey = new Date().toISOString().slice(0, 10);
+      try { localStorage.setItem('geodash_session_balance_v1', JSON.stringify({ date: _srTodayKey, balance: _sessionStartBalance })); } catch(e) {}
       // Clear closed trade history so Strategy Analytics resets too
       _trades = _trades.filter(function (t) { return t.status === 'OPEN'; });
       saveTrades();
@@ -6032,7 +6090,10 @@
       if (status) { status.textContent = 'Connecting…'; status.style.color = 'var(--amber)'; }
       // Ping the new URL
       fetch(url + '/api/status', { headers: { 'Content-Type': 'application/json' } })
-        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
         .then(function () {
           _apiOnline = true;
           _backendChecked = true;
