@@ -343,7 +343,8 @@
     'funding-rate':       'on-chain',
     'funding':            'on-chain',
     'smartmoney':         'fundamental',
-    'positioning':        'fundamental'
+    'positioning':        'fundamental',
+    'opening-bias':       'technical'
   };
 
   /* ── Asset remap table ─────────────────────────────────────────────────────
@@ -1789,6 +1790,29 @@
       }
     }
 
+    // Session health throttle: rapid loss rate detection.
+    // If 3+ losses occur within 45 minutes, signal quality has likely degraded
+    // (bad data feed, choppy market, broken thesis). Raise the confidence floor
+    // by +12% for the next entry to filter low-conviction noise.
+    // This is a SOFT brake — it raises the bar rather than fully stopping.
+    // Distinct from: daily loss limit (hard stop), _ddMult (size scaler), lossStreak (cooldown).
+    // Scalper signals exempt — they use their own tight risk controls.
+    var _isScalperHealth = sig.reason && (sig.reason.indexOf('SCALPER') === 0 || sig.reason.indexOf('GII:') === 0);
+    if (!_isScalperHealth) {
+      var _rapWin = 45 * 60 * 1000;  // 45-minute window
+      var _rapNow = Date.now();
+      var _rapLosses = _trades.filter(function(t) {
+        return t.status === 'CLOSED' && (t.pnl_usd || 0) < 0 && t.timestamp_close &&
+               (_rapNow - new Date(t.timestamp_close).getTime()) < _rapWin;
+      }).length;
+      if (_rapLosses >= 3) {
+        var _rapFloor = _cfg.min_confidence + 12;
+        if (sig.conf < _rapFloor) {
+          return { ok: false, reason: 'Session health: ' + _rapLosses + ' losses in 45min — conf floor raised to ' + _rapFloor + '% (soft brake)' };
+        }
+      }
+    }
+
     // Pre-event gate: block new trades within event_gate_hours of HIGH-IMPACT calendar events.
     // Asset/region-aware: an event in one region doesn't block unrelated assets.
     //   importance >= 5 (market-moving): blocks ALL signals — systemic global risk.
@@ -2213,8 +2237,27 @@
       }
     })();
 
+    // Source credibility multiplier: high-credibility sources (Reuters, Pentagon, central banks)
+    // get larger position sizes; low-credibility sources (Reddit, TASS, unverified Telegram)
+    // get smaller sizes. Range: 0.75× (junk) → 1.20× (official/wire). Neutral at 1.0 (tier-1 press).
+    // Requires window.SourceCredibility — falls back to 1.0 if unavailable.
+    var _credMult = 1.0;
+    if (window.SourceCredibility) {
+      try {
+        var _credSrc = sig.source || _inferSource(sig.reason || '');
+        var _credW   = SourceCredibility.weight(_credSrc);
+        // Smooth scale: 0.75 at weight=0.3, 1.00 at weight=1.0, 1.20 at weight=1.5
+        _credMult = Math.max(0.75, Math.min(1.20, 0.75 + (_credW - 0.3) / 1.2 * 0.45));
+        _credMult = +_credMult.toFixed(3);
+        if (Math.abs(_credMult - 1.0) > 0.04) {
+          log('RISK', sig.asset + ' src credibility "' + _credSrc + '" T' + SourceCredibility.tier(_credSrc) +
+              ' → size ×' + _credMult.toFixed(2), _credMult > 1.0 ? 'green' : 'dim');
+        }
+      } catch(e) {}
+    }
+
     var _effectiveBal = _getEffectiveBalance();
-    var riskAmt  = _effectiveBal * _cfg.risk_per_trade_pct / 100 * impactMult * kellyMult * streakMult * _ddMult * confMult * _srcWrMult;
+    var riskAmt  = _effectiveBal * _cfg.risk_per_trade_pct / 100 * impactMult * kellyMult * streakMult * _ddMult * confMult * _srcWrMult * _credMult;
     if (_ddMult < 1.0) {
       log('RISK', sig.asset + ' peak-DD -' + _ddFromPeak.toFixed(1) + '% → size ×' + _ddMult + ' (' + (_ddMult * 100) + '%)', 'amber');
     }
