@@ -1593,7 +1593,10 @@
     return _trades.filter(function (t) { return t.status === 'OPEN'; });
   }
 
-  function canExecute(sig) {
+  /* _skipPendingCheck: pass true from the post-fetch recheck path.
+     The pending lock is held by the CURRENT signal at that point — checking it
+     would always return false and block the trade from opening itself. */
+  function canExecute(sig, _skipPendingCheck) {
     if (_halted)
       return { ok: false, reason: '🛑 KILL SWITCH ACTIVE — EE.resume() to re-enable' };
 
@@ -1692,8 +1695,10 @@
     if (open.some(function (t) { return normaliseAsset(t.asset) === normaliseAsset(sig.asset); }))
       return { ok: false, reason: 'Already have open trade for ' + sig.asset };
 
-    // Pending lock: fetchPrice is async — block second signal for same asset while first is in flight
-    if (_pendingOpen[normaliseAsset(sig.asset)])
+    // Pending lock: fetchPrice is async — block second signal for same asset while first is in flight.
+    // Skip this check in the post-fetch recheck (_skipPendingCheck=true) — the lock was set by the
+    // current signal itself, so checking it would always reject the trade we're trying to open.
+    if (!_skipPendingCheck && _pendingOpen[normaliseAsset(sig.asset)])
       return { ok: false, reason: 'Price fetch already in progress for ' + sig.asset };
 
     // Correlation guard: block if a correlated asset is already open in the same direction.
@@ -3504,8 +3509,9 @@
         }
         // Re-validate after async gap — another signal for same asset may have
         // opened while price was being fetched (fixes duplicate-position race condition).
-        // Lock is still held through this check (M1 fix).
-        var recheck = canExecute(sig);
+        // Lock is still held through this check (M1 fix), so pass _skipPendingCheck=true
+        // to avoid canExecute rejecting the trade on its own lock.
+        var recheck = canExecute(sig, true);
         if (!recheck.ok) {
           delete _pendingOpen[_lockKey]; // release on reject
           _logSignal(sig, 'SKIPPED', 'post-fetch recheck: ' + recheck.reason);
