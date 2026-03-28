@@ -3526,12 +3526,20 @@
     });
     if (!hlTrades.length) return;
     HLBroker.getOpenPositions(function (hlPositions) {
+      // Safety: if HL returns an empty/null list, it almost certainly means the connection
+      // isn't fully established yet, not that every position was liquidated simultaneously.
+      // An empty response with open EE trades = connection gap, not mass liquidation.
+      // Only close trades when HL reports AT LEAST ONE position (proves the feed is live).
+      if (!hlPositions || !hlPositions.length) {
+        log('HL', 'Reconciliation skipped — HL returned empty position list (connection not ready?). ' + hlTrades.length + ' EE trade(s) left open.', 'amber');
+        return;
+      }
       var hlAssets = {};
-      (hlPositions || []).forEach(function (p) { hlAssets[normaliseAsset(p.asset || p.coin || '')] = p; });
+      hlPositions.forEach(function (p) { hlAssets[normaliseAsset(p.asset || p.coin || '')] = p; });
       hlTrades.forEach(function (t) {
         if (!hlAssets[normaliseAsset(t.asset)]) {
           var fallback = _livePrice[t.trade_id] || _priceCache[normaliseAsset(t.asset)] || t.entry_price;
-          log('HL', t.asset + ' position missing from HL — liquidated or closed externally. Closing EE trade @ $' + (fallback || 0).toFixed(4), 'red');
+          log('HL', t.asset + ' confirmed missing from HL position list — closing as LIQUIDATED @ $' + (fallback || 0).toFixed(4), 'red');
           closeTrade(t.trade_id, fallback || t.entry_price, 'LIQUIDATED');
         }
       });
