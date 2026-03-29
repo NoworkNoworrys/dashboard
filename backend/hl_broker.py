@@ -104,10 +104,9 @@ def connect(wallet: str, private_key: str, testnet: bool = True) -> dict:
         # Verify connection with a direct account state fetch
         state      = _info_post({'type': 'clearinghouseState', 'user': wallet})
         ms         = state.get('marginSummary', {})
-        perp_eq    = float(ms.get('accountValue', 0))
-        spot_usdc  = _spot_usdc()
-        equity     = perp_eq + spot_usdc   # unified account: spot USDC counts as margin
-        available  = float(state.get('withdrawable', 0)) + spot_usdc
+        # accountValue already reflects spot USDC as collateral (HL unified account)
+        equity     = float(ms.get('accountValue', 0))
+        available  = float(state.get('withdrawable', 0))
         unrealised = float(ms.get('totalUnrealizedPnl', 0))
 
         # Build Exchange with patched spot_meta
@@ -136,17 +135,6 @@ def disconnect():
     _cfg['connected'] = False
 
 
-def _spot_usdc() -> float:
-    """Return available USDC in the spot/unified account."""
-    try:
-        spot = _info_post({'type': 'spotClearinghouseState', 'user': _cfg['wallet']})
-        for b in spot.get('balances', []):
-            if b.get('coin') == 'USDC':
-                return float(b.get('total', 0))
-    except Exception:
-        pass
-    return 0.0
-
 
 def get_account() -> dict:
     if not _cfg.get('wallet'):
@@ -154,16 +142,12 @@ def get_account() -> dict:
     try:
         state      = _info_post({'type': 'clearinghouseState', 'user': _cfg['wallet']})
         ms         = state.get('marginSummary', {})
-        perp_equity = float(ms.get('accountValue', 0))
-        spot_usdc   = _spot_usdc()
-        # Unified account: spot USDC is collateral for perps too
-        total_equity = perp_equity + spot_usdc
+        # accountValue already reflects spot USDC as collateral (HL unified account)
         return {
             'ok':        True,
-            'equity':    total_equity,
-            'available': float(state.get('withdrawable', 0)) + spot_usdc,
+            'equity':    float(ms.get('accountValue', 0)),
+            'available': float(state.get('withdrawable', 0)),
             'unrealised': float(ms.get('totalUnrealizedPnl', 0)),
-            'spot_usdc': spot_usdc,
         }
     except Exception as e:
         return {'ok': False, 'error': str(e)}
