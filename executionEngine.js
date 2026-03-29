@@ -2639,6 +2639,24 @@
     _cfg.virtual_balance -= openComm;
     saveCfg();
 
+    // ── Final broker connectivity guard ──────────────────────────────────
+    // Abort if the assigned venue's broker is no longer connected at execution
+    // time (e.g. disconnected between venue assignment and here). Refund the
+    // open commission so the virtual balance stays clean.
+    var _brokerReady = (
+      (trade.venue === 'HL'         && window.HLBroker    && HLBroker.isConnected())    ||
+      (trade.venue === 'ALPACA'     && window.AlpacaBroker && AlpacaBroker.isConnected()) ||
+      (trade.venue === 'OANDA'      && window.OANDABroker  && OANDABroker.isConnected())  ||
+      (trade.venue === 'TICKTRADER' && window.TTBroker     && TTBroker.isConnected())
+    );
+    if (!_brokerReady) {
+      _cfg.virtual_balance += (trade.open_commission || 0);
+      saveCfg();
+      _flagTrade(sig, trade.venue + ' broker disconnected at execution — trade aborted.');
+      _logSignal(sig, 'SKIPPED', trade.venue + ' broker not ready');
+      return;
+    }
+
     _trades.unshift(trade);
     _cooldown[normaliseAsset(sig.asset) + '_' + dir] = Date.now();
     saveTrades();
@@ -3444,7 +3462,7 @@
       );
       if (_hlConnectedCheck) {
         _venue = 'HL';
-      } else if (window.AlpacaBroker && AlpacaBroker.covers(_asset)) {
+      } else if (window.AlpacaBroker && AlpacaBroker.isConnected() && AlpacaBroker.covers(_asset)) {
         // Alpaca spot crypto cannot be shorted (buy-only). Block crypto SHORTs only.
         // Stock shorts are fine — Alpaca paper supports margin shorting for equities.
         var _isAlpacaCrypto = window.AlpacaBroker && typeof AlpacaBroker.isCrypto === 'function'
