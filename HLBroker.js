@@ -93,7 +93,13 @@
     'MSFT':      { name: 'Microsoft token' },
     'AMZN':      { name: 'Amazon token' },
     'GOOGL':     { name: 'Google token' },
-    // GLD and SLV removed — no mid price on HL testnet or mainnet perps
+    /* ── HL spot equity tokens (added Mar 2026) ──────────────────────── */
+    'GLD':       { name: 'Gold token',   hlCoin: '@276' },
+    'SLV':       { name: 'Silver token', hlCoin: '@265' },
+    'SILVER':    { name: 'Silver token', hlCoin: '@265' },
+    'XAG':       { name: 'Silver token', hlCoin: '@265' },
+    'HOOD':      { name: 'Robinhood token', hlCoin: '@271' },
+    'CRCL':      { name: 'Circle token',    hlCoin: '@263' },
   };
 
   /* Maps dashboard asset names to the actual HL coin ticker for order placement */

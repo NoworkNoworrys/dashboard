@@ -50,7 +50,7 @@
     // ── Core risk parameters (Morgan's live settings — these are the standard) ─
     min_confidence:        55,           // minimum signal confidence to trade
     virtual_balance:       1000,         // placeholder — overwritten by live broker equity sync
-    risk_per_trade_pct:    1,            // 1% per trade: conservative for small account
+    risk_per_trade_pct:    10,           // 10% per trade: sized for small $26 HL account
     stop_loss_pct:         2.5,          // 2.5% stop distance
     take_profit_ratio:     3.0,          // 3.0R target (raised from 2.5 — partial TP at 70% = 2.1R vs old 1.25R)
     max_open_trades:       12,
@@ -711,6 +711,7 @@
   var _PRICE_STALE_RESCAN  = 10 * 60 * 1000; // 10 min — skip re-scan signal if price this old
   var _PRICE_STALE_TIMEOUT = 30 * 60 * 1000; // 30 min — force-close open trade if no fresh price
   var _noPriceThrottle  = {};   // asset → ts of last "Price unavailable" siglog entry (1h throttle)
+  var _noVenueThrottle  = {};   // asset → ts of last "No venue" flag+log entry (1h throttle)
 
   /* ══════════════════════════════════════════════════════════════════════════════
      PERSISTENCE
@@ -1677,14 +1678,16 @@
         var _sigSrcName  = (sig.source || _inferSource(sig.reason || '')).toLowerCase();
         var _isSpecialist = !!SPECIALIST_SOURCES[_sigSrcName];
         var _sigConfNow  = sig.conf || 0;  // already 0-100 after normalisation
-        if (_isSpecialist && _sigConfNow >= 88) {
-          // Fast Track: specialist agent, very high confidence — execute without second confirmation.
+        // technicals and crypto-signals are trusted solo sources at 72%+ (proven accuracy)
+        var _specialistThreshold = (_sigSrcName === 'technicals' || _sigSrcName === 'crypto-signals') ? 72 : 88;
+        if (_isSpecialist && _sigConfNow >= _specialistThreshold) {
+          // Fast Track: specialist agent, high confidence — execute without second confirmation.
           // confMult will apply 1.5-1.75× sizing boost for this confidence level.
           log('RISK', sig.asset + ' fast-track: ' + _sigSrcName + ' specialist conf=' + _sigConfNow +
-              '% — single-source execution allowed', 'green');
+              '% ≥' + _specialistThreshold + '% — single-source execution allowed', 'green');
         } else {
           return { ok: false, reason: 'srcCount ' + (sig.srcCount === undefined ? 'missing' : sig.srcCount) +
-                   ' — not corroborated (need 2+ sources, or specialist conf≥88%). Source: ' + _sigSrcName };
+                   ' — not corroborated (need 2+ sources, or specialist conf≥' + (_isSpecialist ? _specialistThreshold : 88) + '%). Source: ' + _sigSrcName };
         }
       }
     }
@@ -1728,6 +1731,12 @@
         if (corrConflict)
           return { ok: false, reason: 'Correlated position open: ' + corrConflict.asset + ' ' + corrConflict.direction };
       }
+    }
+    // Extended correlation guard: portfolio-level group concentration check
+    if (window.GII_CORRELATION_GUARD && typeof GII_CORRELATION_GUARD.check === 'function') {
+      var _corrGuard = GII_CORRELATION_GUARD.check(sig, open);
+      if (!_corrGuard.ok)
+        return { ok: false, reason: _corrGuard.reason };
     }
 
     // Direction-aware cooldown: keyed on asset+direction so a BTC SHORT can enter
@@ -2158,12 +2167,12 @@
         // correct size is 0 (don't trade). We don't go to zero because we need
         // trades to gather data and regime conditions can flip, but we DO cut
         // harder than the old 0.30 floor which provided no real penalty.
-        if (_allClosed.length < 10) {
-          kellyMult = 0.30;  // insufficient data — conservative prior, keep gathering info
-          log('RISK', sig.asset + ' Kelly: negative EV but <10 trades — using conservative 30% prior', 'dim');
+        if (_allClosed.length < 20) {
+          kellyMult = 0.50;  // insufficient data — use moderate prior, keep gathering info
+          log('RISK', sig.asset + ' Kelly: negative EV but <20 trades — using 50% prior (learning phase)', 'dim');
         } else {
-          kellyMult = 0.15;  // data-confirmed negative EV — cut to 15% to preserve capital
-          log('RISK', '⚠ ' + sig.asset + ' Kelly: negative EV (W=' + (_globalW*100).toFixed(0) + '%, R=' + R.toFixed(1) + ') — sizing at 15% floor to protect capital', 'amber');
+          kellyMult = 0.20;  // data-confirmed negative EV — cut to 20% to preserve capital
+          log('RISK', '⚠ ' + sig.asset + ' Kelly: negative EV (W=' + (_globalW*100).toFixed(0) + '%, R=' + R.toFixed(1) + ') — sizing at 20% floor to protect capital', 'amber');
         }
       }
     })();
@@ -2287,8 +2296,22 @@
       } catch(e) {}
     }
 
+    // Quality multiplier: combines impactMult (GTI/event), source WR, and source credibility
+    // into a single bounded factor. Replaces 3 independent unbounded multipliers with one
+    // capped value (0.60–1.40) so they can't compound to extreme sizes.
+    var qualityMult = Math.max(0.60, Math.min(1.40,
+      (impactMult * _srcWrMult * _credMult) / (1.0 * 1.0 * 1.0) // normalised vs neutral baseline
+    ));
+
+    // Total size multiplier cap: Kelly × streak × drawdown × conf × quality must not
+    // exceed 2.0 (double base risk) or fall below 0.15 (15% of base risk).
+    // This prevents the 7-multiplier chain from compounding to extreme or near-zero sizes.
+    var _totalMult = Math.max(0.15, Math.min(2.0,
+      kellyMult * streakMult * _ddMult * confMult * qualityMult
+    ));
+
     var _effectiveBal = _getEffectiveBalance();
-    var riskAmt  = _effectiveBal * _cfg.risk_per_trade_pct / 100 * impactMult * kellyMult * streakMult * _ddMult * confMult * _srcWrMult * _credMult;
+    var riskAmt  = _effectiveBal * _cfg.risk_per_trade_pct / 100 * _totalMult;
     if (_ddMult < 1.0) {
       log('RISK', sig.asset + ' peak-DD -' + _ddFromPeak.toFixed(1) + '% → size ×' + _ddMult + ' (' + (_ddMult * 100) + '%)', 'amber');
     }
@@ -2530,6 +2553,17 @@
       log('AUDIT', '⚠ SIZE CAP: ' + sig.asset + ' capped at 50% balance ($' + _maxNotional.toFixed(0) + ')', 'amber');
     }
 
+    // Minimum notional floor: ensure positions are large enough to be meaningful.
+    // Tiny trades ($5-10 notional) incur proportionally large fees, can't be resized,
+    // and produce noisy P&L data that corrupts the Kelly/win-rate learning loop.
+    // Floor = 1% of balance or $30, whichever is larger, capped at 10% of balance.
+    var _minNotional = Math.min(_effectiveBal * 0.10, Math.max(30, _effectiveBal * 0.01));
+    if (sizeUsd > 0 && sizeUsd < _minNotional && entryPrice > 0) {
+      units   = _minNotional / entryPrice;
+      sizeUsd = _minNotional;
+      log('RISK', sig.asset + ' size raised to minimum notional floor $' + _minNotional.toFixed(0), 'dim');
+    }
+
     // Reality check 7 — reject zero-size positions: risk budget exhausted or SL too wide.
     // Previously these slipped through as phantom trades (units=0) blocking asset slots.
     var MIN_SIZE_USD = 1.0;  // absolute floor — $1 minimum position
@@ -2626,6 +2660,22 @@
     var adjustedEntry = _adjustedEntryPrice(sig.asset, entryPrice, dir);
 
     var trade = buildTrade(sig, adjustedEntry);
+
+    // Snapshot world state at trade-open time so we can attribute wins/losses
+    // to the macro/geopolitical context that was in play when we entered.
+    if (window.GII_SITUATIONAL && typeof GII_SITUATIONAL.getContext === 'function') {
+      try {
+        var _wctx = GII_SITUATIONAL.getContext();
+        trade.world_state = {
+          gti:             _wctx.gti,
+          gtiLevel:        _wctx.gtiLevel,
+          vix:             _wctx.vix,
+          activeConflicts: _wctx.activeConflicts,
+          regimeWarnings:  _wctx.regimeWarnings,
+          dominantBias:    _wctx.dominantBias,
+        };
+      } catch(e) {}
+    }
 
     // Zero-size guard: risk-of-ruin budget can be exhausted by existing open trades,
     // leaving riskAmt=0 for the next signal. Opening a 0-unit trade is pointless —
@@ -3333,6 +3383,7 @@
   var _sigRateWindow = 0;   // start of current 10s window
   var _sigRateCount  = 0;   // signals processed in current window
   var _SIG_RATE_LIMIT = 50; // max signals per 10s before throttling
+  var _scalperPaused = false; // when true, scalper signals are dropped at intake
 
   // T2-B: signal fusion — when multiple independent agents agree on the same asset+direction
   // within a single batch, merge them into the highest-confidence signal with a confidence
@@ -3362,6 +3413,39 @@
           (boost ? ' (+' + boost + '%)' : '') + ' sources: [' + fused._fusedFrom.join(', ') + ']', 'cyan');
       return fused;
     });
+  }
+
+  /* ── Signal quality score ────────────────────────────────────────────────
+     Rates each approved signal before execution so batches can be ranked.
+     Higher = take first when slots are limited.
+     Components:
+       base        = confidence / 100
+       EV mult     = bonus for positive EV from routing, penalty for negative
+       source tier = GII/IC > multi-source > specialist > single > scalper
+       leverage    = small bonus when routing chose leverage (higher EV setup)
+  */
+  function _computeSignalScore(sig) {
+    var base = Math.max(0, (sig.conf || 0) / 100);
+
+    // EV multiplier
+    var evMult = 1.0;
+    if (sig._ev != null && isFinite(sig._ev)) {
+      evMult = sig._ev > 0 ? (1 + Math.min(sig._ev, 3) * 0.08) : 0.88;
+    }
+
+    // Source quality tier
+    var srcTier = 1.0;
+    var _srcN = (sig.source || _inferSource(sig.reason || '')).toLowerCase();
+    if (sig.reason && sig.reason.indexOf('GII:') === 0)       srcTier = 1.25; // IC/GII direct signal
+    else if ((sig.srcCount || 0) >= 3)                         srcTier = 1.18; // 3+ agreeing agents
+    else if ((sig.srcCount || 0) >= 2)                         srcTier = 1.10; // 2 agents
+    else if (SPECIALIST_SOURCES[_srcN])                        srcTier = 1.05; // specialist solo
+    if (sig.reason && sig.reason.indexOf('SCALPER') === 0)     srcTier = Math.min(srcTier, 0.82); // scalper = lowest rank
+
+    // Leverage bonus (routing confirmed higher EV with leverage)
+    var levMult = (sig.leverage && sig.leverage > 1) ? (1 + (sig.leverage - 1) * 0.04) : 1.0;
+
+    return +(base * evMult * srcTier * levMult).toFixed(3);
   }
 
   function onSignals(sigs) {
@@ -3396,8 +3480,25 @@
     // T2-B: fuse multi-agent agreement before processing
     sigs = _fuseSignals(sigs);
 
+    // Scalper pause filter: drop scalper signals while _scalperPaused is active.
+    // GII/IC and all other signals still pass through normally.
+    if (_scalperPaused) {
+      var _preFilter = sigs.length;
+      sigs = sigs.filter(function (s) {
+        return !(s.reason && (s.reason.indexOf('SCALPER') === 0));
+      });
+      if (sigs.length < _preFilter) {
+        log('SYSTEM', 'Scalper paused — dropped ' + (_preFilter - sigs.length) + ' scalper signal(s)', 'dim');
+      }
+      if (!sigs.length) return;
+    }
+
     _lastSignals = sigs;                 // always cache — re-scan loop needs these
 
+    // ── Phase 1: filter, gate, score ─────────────────────────────────────────
+    // All synchronous checks run first. Approved signals are collected with a
+    // quality score so Phase 2 can rank them before executing.
+    var _readySigs = [];
     sigs.forEach(function (sig) {
       sig._signalTs = sig._signalTs || Date.now(); // stamp entry time for fill-latency tracking
       // ── Field normalisation ─────────────────────────────────────────────────────
@@ -3448,6 +3549,43 @@
             : (_routed.leverage > 1 ? sig.asset + ' ' + _routed.leverage + '× lev' : null);
           if (_routeNote) log('ROUTING', _routeNote, 'purple');
           sig = _routed;
+        }
+        // EV gate: skip if the best available setup has negative expected value
+        if (sig._ev !== undefined && sig._ev !== null && sig._ev < 0) {
+          _logSignal(sig, 'SKIPPED', 'Negative EV (' + sig._ev.toFixed(2) + ') — no profitable setup available');
+          return;
+        }
+      }
+
+      // ── Situational alignment gate ────────────────────────────────────────
+      // Check current world state (GTI, VIX, events, sector bias) against signal.
+      // Hard blocks stop the signal entirely; penalties reduce confidence before
+      // the risk gate so the trade is sized down or blocked by the conf floor.
+      if (window.GII_SITUATIONAL && typeof GII_SITUATIONAL.checkAlignment === 'function') {
+        var _situ = GII_SITUATIONAL.checkAlignment(sig);
+        if (!_situ.ok) {
+          _logSignal(sig, 'SKIPPED', 'Situational: ' + _situ.reason);
+          return;
+        }
+        if (_situ.penaltyPct > 0) {
+          sig = Object.assign({}, sig, { conf: Math.max(0, (sig.conf || 0) - _situ.penaltyPct) });
+          log('RISK', sig.asset + ' situational penalty -' + _situ.penaltyPct + '%: ' + _situ.reason, 'orange');
+        }
+      }
+
+      // ── Sentiment / news alignment ────────────────────────────────────────
+      // Boost confidence when news confirms direction; penalise when opposing.
+      // Hard-block on active news surge against the trade.
+      if (window.GII_SENTIMENT_NEWS && typeof GII_SENTIMENT_NEWS.checkTrade === 'function') {
+        var _news = GII_SENTIMENT_NEWS.checkTrade(sig);
+        if (!_news.ok) {
+          _logSignal(sig, 'SKIPPED', 'News: ' + _news.reason);
+          return;
+        }
+        if (_news.boostPct > 0 || _news.penaltyPct > 0) {
+          var _newsAdj = (_news.boostPct || 0) - (_news.penaltyPct || 0);
+          sig = Object.assign({}, sig, { conf: Math.min(99, Math.max(0, (sig.conf || 0) + _newsAdj)) });
+          if (_news.reason) log('RISK', sig.asset + ' news adj ' + (_newsAdj > 0 ? '+' : '') + _newsAdj + '%: ' + _news.reason, 'cyan');
         }
       }
 
@@ -3525,8 +3663,16 @@
       } else if (window.TTBroker && TTBroker.isConnected() && TTBroker.covers(_asset)) {
         _venue = 'TICKTRADER';
       } else {
-        _flagTrade(sig, 'No venue — not on Hyperliquid, Alpaca, OANDA, or TickTrader. Add broker for this asset.');
-        _logSignal(sig, 'SKIPPED', 'No venue: ' + sig.asset);
+        // Throttle "No venue" flag+log to once per asset per hour.
+        // Assets genuinely not on any venue (WTI, LMT, NVDA etc.) would otherwise
+        // spam the flagged trades panel with duplicate entries every signal cycle.
+        var _nvKey  = (_asset || '__unknown__');
+        var _nvLast = _noVenueThrottle[_nvKey] || 0;
+        if (Date.now() - _nvLast >= 3600000) {
+          _noVenueThrottle[_nvKey] = Date.now();
+          _flagTrade(sig, 'No venue — not on Hyperliquid, Alpaca, OANDA, or TickTrader. Add broker for this asset.');
+          _logSignal(sig, 'SKIPPED', 'No venue: ' + sig.asset);
+        }
         return;
       }
       sig = Object.assign({}, sig, { _venue: _venue });
@@ -3542,7 +3688,34 @@
         return;
       }
 
-      // All checks passed — acquire pending lock, then fetch price and open.
+      // Signal passed all gates — score it and queue for Phase 2 ranking
+      sig._score = _computeSignalScore(sig);
+      _readySigs.push(sig);
+    });
+
+    // ── Phase 2: rank and select ──────────────────────────────────────────────
+    // When multiple signals are ready, rank by quality score and only execute
+    // the best ones that fit in available open-trade slots. This prevents the
+    // system taking 3 mediocre trades when 1 better trade is also in the batch.
+    if (_readySigs.length > 1) {
+      _readySigs.sort(function (a, b) { return (b._score || 0) - (a._score || 0); });
+      var _slotsOpen = Math.max(0, _cfg.max_open_trades - openTrades().length);
+      if (_readySigs.length > _slotsOpen) {
+        var _ranked = _readySigs.slice(0, _slotsOpen);
+        var _dropped = _readySigs.slice(_slotsOpen);
+        _dropped.forEach(function (s) {
+          _logSignal(s, 'SKIPPED', 'Ranked out — lower quality (score ' + (s._score||0).toFixed(2) +
+            ') than top-' + _slotsOpen + ' selected (best: ' + (_readySigs[0]._score||0).toFixed(2) + ')');
+        });
+        log('SYSTEM', 'Signal ranking: ' + _readySigs.length + ' candidates → top ' + _ranked.length +
+          ' selected (scores: ' + _ranked.map(function(s){ return s.asset+' '+s._score; }).join(', ') + ')', 'green');
+        _readySigs = _ranked;
+      }
+    }
+
+    // ── Phase 3: execute selected signals ─────────────────────────────────────
+    // Async price fetch + open for each ranked signal.
+    _readySigs.forEach(function (sig) {
       // Fix #5: add a 30s safety timeout on the lock. If fetchPrice hangs (network
       // timeout, dead CORS proxy, etc.) the callback may never fire, leaving
       // _pendingOpen[asset]=true forever and permanently blocking that asset.
@@ -3556,45 +3729,29 @@
       }, 30000);
       fetchPrice(sig.asset, function (price) {
         clearTimeout(_pendingTimer);
-        // M1 fix: hold the lock through the post-fetch canExecute re-check.
-        // Releasing here and re-checking below left a brief window where a second
-        // signal for the same asset (e.g. from re-scan) could pass canExecute
-        // concurrently. Lock stays until openTrade() completes or is rejected.
-        // _pendingOpen[_lockKey] = true; ← keep held, delete after recheck below
         if (!price) {
-          delete _pendingOpen[_lockKey]; // release on early-out paths
-          // No price available — skip this trade entirely rather than open at
-          // a meaningless $100 fallback which would corrupt P&L. The 5-min
-          // re-scan loop will retry this signal when a price becomes available.
+          delete _pendingOpen[_lockKey];
           _logSignal(sig, 'SKIPPED', 'Price unavailable — will retry');
           log('TRADE', sig.asset + ' skipped: no price feed. Re-scan will retry.', 'amber');
           return;
         }
         // Re-validate after async gap — another signal for same asset may have
         // opened while price was being fetched (fixes duplicate-position race condition).
-        // Lock is still held through this check (M1 fix), so pass _skipPendingCheck=true
-        // to avoid canExecute rejecting the trade on its own lock.
         var recheck = canExecute(sig, true);
         if (!recheck.ok) {
-          delete _pendingOpen[_lockKey]; // release on reject
+          delete _pendingOpen[_lockKey];
           _logSignal(sig, 'SKIPPED', 'post-fetch recheck: ' + recheck.reason);
           return;
         }
-        // Stale-price guard: if the price in cache is older than 10 minutes,
-        // refuse to open — stale prices cause badly-sized positions (e.g. GLD
-        // fallback to Gold Futures ~$4456 when HL disconnects).
+        // Stale-price guard
         var _staleTok = normaliseAsset(sig.asset);
         var _priceAge = _priceCacheTs[_staleTok] ? (Date.now() - _priceCacheTs[_staleTok]) : Infinity;
         if (_priceAge > _PRICE_STALE_RESCAN) {
-          delete _pendingOpen[_lockKey]; // release on reject
+          delete _pendingOpen[_lockKey];
           _logSignal(sig, 'SKIPPED', 'Stale price (' + Math.round(_priceAge / 60000) + ' min old) — refusing trade on ' + sig.asset);
-          log('TRADE', sig.asset + ' skipped: price is ' + Math.round(_priceAge / 60000) + ' min old (limit 10 min). Re-scan will retry when feed recovers.', 'amber');
           return;
         }
-        delete _pendingOpen[_lockKey]; // release only after all checks pass, immediately before openTrade
-        // M7 fix: _logSignal(TRADED) moved to inside openTrade() after the zero-size guard.
-        // Previously it fired here before openTrade, so a risk-budget-exhausted rejection
-        // still showed as TRADED in the signal log with no actual trade opened.
+        delete _pendingOpen[_lockKey];
         openTrade(sig, price);
       });
     });
@@ -4897,6 +5054,14 @@
       modeBtn.textContent = 'MODE: ' + _cfg.mode;
       modeBtn.className   = 'ee-mode-btn ' + (_cfg.mode === 'LIVE' ? 'live' : 'sim');
     }
+    var scalperBtn = document.getElementById('eeScalperBtn');
+    if (scalperBtn) {
+      scalperBtn.textContent = _scalperPaused ? 'SCALPER: OFF' : 'SCALPER: ON';
+      scalperBtn.className   = 'ee-scalper-btn' + (_scalperPaused ? ' paused' : '');
+      scalperBtn.title       = _scalperPaused
+        ? 'Scalper is PAUSED — click to resume (currently focusing on GII/IC/TA signals only)'
+        : 'Scalper is ACTIVE — click to pause and focus on higher-quality signals only';
+    }
     var haltBtn = document.getElementById('eeHaltBtn');
     if (haltBtn) {
       haltBtn.textContent = _halted ? '\u25a0 HALTED' : '\u25a0 HALT';
@@ -4905,6 +5070,71 @@
         ? 'Kill switch is ACTIVE — click to resume trade execution'
         : 'Emergency kill switch — halts all new trade execution immediately. Existing trades are unaffected.';
     }
+    // ── Plain-English status bar ─────────────────────────────────────────────
+    var statusBar = document.getElementById('eeStatusBar');
+    if (statusBar) {
+      var _sbParts = [];
+      var _sbColor = '#aaa';
+
+      if (_halted) {
+        _sbParts.push('🛑 KILL SWITCH ACTIVE — click HALT to resume');
+        _sbColor = '#ff4444';
+      } else if (!_cfg.enabled) {
+        _sbParts.push('⏸ Auto-execution is OFF — click ▶ START AUTO to begin trading');
+        _sbColor = '#ff9500';
+      } else {
+        _sbParts.push('✅ Running');
+        _sbColor = '#5eead4';
+
+        // Check signal log for recent skips
+        var _recentSkips = _signalLog.filter(function(s) {
+          return s.action === 'SKIPPED' && s.skip_reason &&
+                 (Date.now() - new Date(s.ts).getTime()) < 5 * 60 * 1000;
+        });
+        var _recentTrades = _signalLog.filter(function(s) {
+          return s.action === 'TRADED' &&
+                 (Date.now() - new Date(s.ts).getTime()) < 60 * 60 * 1000;
+        });
+
+        if (_recentTrades.length) {
+          _sbParts.push('last trade: ' + _recentTrades[0].asset + ' ' + _recentTrades[0].dir +
+            ' (' + Math.round((Date.now() - new Date(_recentTrades[0].ts).getTime()) / 60000) + 'min ago)');
+        }
+
+        if (_recentSkips.length) {
+          // Group by skip reason, show most common
+          var _skipCounts = {};
+          _recentSkips.forEach(function(s) {
+            var r = s.skip_reason || 'unknown';
+            // Shorten long reasons
+            if (r.indexOf('not corroborated') !== -1) r = 'not corroborated (need 2+ sources)';
+            if (r.indexOf('Auto-execution') !== -1) r = 'auto-execution paused';
+            if (r.indexOf('No venue') !== -1) r = 'no broker venue for asset';
+            if (r.indexOf('Conf ') !== -1 && r.indexOf('< threshold') !== -1) r = 'confidence too low';
+            if (r.indexOf('Negative EV') !== -1) r = 'negative expected value';
+            if (r.indexOf('Situational') !== -1) r = 'blocked by world-state gate (GTI/VIX/event)';
+            if (r.indexOf('Max open') !== -1) r = 'max open trades reached';
+            if (r.indexOf('cooldown') !== -1 || r.indexOf('Cooldown') !== -1) r = 'asset in cooldown';
+            _skipCounts[r] = (_skipCounts[r] || 0) + 1;
+          });
+          var _topSkip = Object.keys(_skipCounts).sort(function(a,b){ return _skipCounts[b]-_skipCounts[a]; })[0];
+          _sbParts.push('last 5min skips: ' + _recentSkips.length + ' — most common: ' + _topSkip);
+          if (_skipCounts['not corroborated (need 2+ sources)'] > 0) _sbColor = '#facc15';
+        } else if (_signalLog.length === 0) {
+          _sbParts.push('no signals received yet — agents warming up (~1-3 min)');
+          _sbColor = '#aaa';
+        } else {
+          _sbParts.push('no signals skipped recently — watching for opportunities');
+        }
+
+        // Show scalper state
+        if (_scalperPaused) _sbParts.push('scalper: PAUSED');
+      }
+
+      statusBar.textContent = _sbParts.join('  |  ');
+      statusBar.style.color = _sbColor;
+    }
+
     var subtitleEl = document.getElementById('eeSubtitle');
     if (subtitleEl) {
       // Market status: show which venues are currently open
@@ -6157,6 +6387,26 @@
     /* ── Backend connectivity status (readable from outside the closure) ── */
     isBackendOnline: function () { return _apiOnline; },
 
+    /* ── Scalper pause / resume ── */
+    pauseScalper: function () {
+      _scalperPaused = true;
+      log('CONFIG', '⏸ Scalper PAUSED — scalper signals will be dropped. GII/IC/TA signals still active.', 'amber');
+      renderUI();
+    },
+    resumeScalper: function () {
+      _scalperPaused = false;
+      log('CONFIG', '▶ Scalper RESUMED — all signal sources active.', 'green');
+      renderUI();
+    },
+    scalperPaused: function () { return _scalperPaused; },
+    toggleScalper: function () {
+      _scalperPaused = !_scalperPaused;
+      log('CONFIG', _scalperPaused
+        ? '⏸ Scalper PAUSED — focusing on GII/IC/TA signals only'
+        : '▶ Scalper RESUMED — all signal sources active', _scalperPaused ? 'amber' : 'green');
+      renderUI();
+    },
+
     /* ── Toggle auto-execution on/off ── */
     toggleAuto: function () {
       _cfg.enabled = !_cfg.enabled;
@@ -7125,6 +7375,8 @@
     })();
 
     renderUI();
+    // Refresh status bar every 15 seconds so it stays current without user interaction
+    setInterval(renderUI, 15000);
     log('SYSTEM', 'Execution Engine v1.0 ready — ' + _cfg.mode + ' mode  |  ' +
         'Auto-scan ALWAYS ON  |  ' + openTrades().length + ' open trade(s) restored', 'green');
 
