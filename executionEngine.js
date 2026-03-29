@@ -2674,6 +2674,11 @@
           trade.broker_status     = 'FILLED';
           trade.broker_fill_price = fillPrice;
           if (fillPrice > 0 && isFinite(fillPrice)) trade.entry_price = fillPrice;
+          // Update size/units to actual fill (backend may have capped the notional)
+          if (pos && pos.fillSize > 0 && isFinite(pos.fillSize)) {
+            trade.units    = +pos.fillSize.toFixed(6);
+            trade.size_usd = +(pos.fillSize * fillPrice).toFixed(2);
+          }
           if (trade.signal_ts) {
             var _hlLatMs = Date.now() - trade.signal_ts;
             trade.fill_latency_ms = _hlLatMs;
