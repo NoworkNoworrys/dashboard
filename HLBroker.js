@@ -78,6 +78,12 @@
     'TIA':       { name: 'Celestia' },
     'PYTH':      { name: 'Pyth Network' },
     'JUP':       { name: 'Jupiter' },
+    /* ── Commodities ─────────────────────────────────────────────────── */
+    'GAS':       { name: 'Natural Gas', hlCoin: 'GAS' },
+    'NATGAS':    { name: 'Natural Gas', hlCoin: 'GAS' },  // alias → GAS on HL
+    'PAXG':      { name: 'PAX Gold',    hlCoin: 'PAXG' },
+    'XAU':       { name: 'Gold (PAXG)', hlCoin: 'PAXG' }, // alias → PAXG on HL
+    'GOLD':      { name: 'Gold (PAXG)', hlCoin: 'PAXG' }, // alias → PAXG on HL
     /* ── Equity tokens (HL spot) ─────────────────────────────────────── */
     'SPY':       { name: 'S&P 500 token' },
     'QQQ':       { name: 'Nasdaq token' },
@@ -89,6 +95,12 @@
     'GOOGL':     { name: 'Google token' },
     // GLD and SLV removed — no mid price on HL testnet or mainnet perps
   };
+
+  /* Maps dashboard asset names to the actual HL coin ticker for order placement */
+  function _hlCoin(asset) {
+    var info = HL_ASSETS[String(asset).toUpperCase()];
+    return (info && info.hlCoin) ? info.hlCoin : String(asset).toUpperCase();
+  }
 
   /* ── State ───────────────────────────────────────────────────────────────── */
   var _cfg = {
@@ -326,7 +338,7 @@
       var leverage = (opts && opts.leverage) ? parseInt(opts.leverage) : 1;
       if (sizeUsd <= 0) return { ok: false, error: 'notional required' };
       return _post('/api/hl/order', {
-        coin:     String(symbol).toUpperCase(),
+        coin:     _hlCoin(symbol),
         side:     side,
         sizeUsd:  sizeUsd,
         leverage: leverage
@@ -347,13 +359,13 @@
         /* SDK returned fill data directly */
         if (onFill) onFill(result.fillPrice, result);
       } else {
-        _pollFill(String(symbol).toUpperCase(), side, onFill, onFail);
+        _pollFill(_hlCoin(symbol), side, onFill, onFail);
       }
       return result;
     },
 
     closePosition: async function (symbol) {
-      return _post('/api/hl/close', { coin: String(symbol).toUpperCase() });
+      return _post('/api/hl/close', { coin: _hlCoin(symbol) });
     },
 
     getPositions: async function () {

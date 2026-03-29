@@ -3460,7 +3460,8 @@
          are sent, so the equity guard (which protects live execution) is unnecessary.
          In LIVE mode: full isConnected() check including equity > 0 is required. */
       var _hlReady = !_hlStale && window.HLFeed && HLFeed.covers(_asset) &&
-          window.HLBroker && typeof HLBroker.isConnected === 'function';
+          window.HLBroker && typeof HLBroker.isConnected === 'function' &&
+          HLBroker.covers(_asset);  // must be a tradeable HL perp, not just a feed asset
       var _hlConnectedCheck = _hlReady && (
           HLBroker.isConnected() ||
           (_cfg.broker === 'SIMULATION' && HLBroker.status && HLBroker.status().connected)

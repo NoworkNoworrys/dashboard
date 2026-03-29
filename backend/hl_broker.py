@@ -31,6 +31,21 @@ _cfg: dict = {
 
 _exchange: Optional[object] = None
 
+# Cache of per-asset size decimals: {'BTC': 5, 'SOL': 2, 'DOGE': 0, ...}
+_sz_decimals: dict = {}
+
+
+def _load_sz_decimals():
+    """Fetch and cache HL per-asset szDecimals so order sizes are rounded correctly."""
+    global _sz_decimals
+    try:
+        meta = requests.post(_url() + '/info', json={'type': 'meta'}, timeout=10).json()
+        _sz_decimals = {a['name']: int(a.get('szDecimals', 5))
+                        for a in meta.get('universe', [])
+                        if 'name' in a}
+    except Exception as e:
+        print(f'[HLBroker] Could not load szDecimals: {e}')
+
 
 def _url() -> str:
     return constants.TESTNET_API_URL if _cfg['testnet'] else constants.MAINNET_API_URL
@@ -115,6 +130,7 @@ def connect(wallet: str, private_key: str, testnet: bool = True) -> dict:
 
         _cfg['connected'] = True
         save_config()
+        _load_sz_decimals()  # cache per-asset size precision
 
         return {
             'ok':        True,
@@ -195,8 +211,9 @@ def place_order(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> 
             except Exception:
                 pass  # non-fatal
 
-        # Coin quantity = full notional ÷ price (HL uses leverage for margin calc)
-        sz = round(size_usd / price, 5)
+        # Coin quantity = full notional ÷ price, rounded to HL's required decimal places
+        decimals = _sz_decimals.get(coin, 5)
+        sz = round(size_usd / price, decimals)
         if sz <= 0:
             return {'ok': False, 'error': f'Calculated size {sz} too small'}
 
@@ -270,6 +287,7 @@ if _SDK and _cfg.get('wallet') and _cfg.get('private_key'):
     try:
         _exchange = _build_exchange(_cfg['private_key'], _cfg['wallet'])
         _cfg['connected'] = True
+        _load_sz_decimals()
         print(f"[HLBroker] Auto-connected {'testnet' if _cfg['testnet'] else 'mainnet'} — {_cfg['wallet'][:10]}…")
     except Exception as e:
         print(f'[HLBroker] Auto-reconnect failed: {e}')
