@@ -3814,34 +3814,49 @@
   // This runs every 5 minutes alongside Alpaca reconciliation.
   var _lastHLReconcile = 0;
   function _reconcileHLPositions() {
-    if (!window.HLBroker || typeof HLBroker.isConnected !== 'function' || !HLBroker.isConnected()) return;
-    if (typeof HLBroker.getOpenPositions !== 'function') return;
+    if (!window.HLBroker || !HLBroker.isConnected()) return;
+    if (typeof HLBroker.getPositions !== 'function') return;
     var now = Date.now();
     if (now - _lastHLReconcile < 4 * 60 * 1000) return;  // dedupe: max once per 4 min
     _lastHLReconcile = now;
     var hlTrades = openTrades().filter(function (t) {
-      return t.venue === 'HL' && t.broker_status === 'FILLED' && t.broker_order_id;
+      return t.venue === 'HL' && t.broker_status === 'FILLED';
     });
     if (!hlTrades.length) return;
-    HLBroker.getOpenPositions(function (hlPositions) {
-      // Safety: if HL returns an empty/null list, it almost certainly means the connection
-      // isn't fully established yet, not that every position was liquidated simultaneously.
-      // An empty response with open EE trades = connection gap, not mass liquidation.
-      // Only close trades when HL reports AT LEAST ONE position (proves the feed is live).
-      if (!hlPositions || !hlPositions.length) {
-        log('HL', 'Reconciliation skipped — HL returned empty position list (connection not ready?). ' + hlTrades.length + ' EE trade(s) left open.', 'amber');
-        return;
-      }
-      var hlAssets = {};
-      hlPositions.forEach(function (p) { hlAssets[normaliseAsset(p.asset || p.coin || '')] = p; });
-      hlTrades.forEach(function (t) {
-        if (!hlAssets[normaliseAsset(t.asset)]) {
-          var fallback = _livePrice[t.trade_id] || _priceCache[normaliseAsset(t.asset)] || t.entry_price;
-          log('HL', t.asset + ' confirmed missing from HL position list — closing as LIQUIDATED @ $' + (fallback || 0).toFixed(4), 'red');
-          closeTrade(t.trade_id, fallback || t.entry_price, 'LIQUIDATED');
+    HLBroker.getPositions()
+      .then(function (result) {
+        // getPositions returns {ok, positions:[]} or array directly
+        var hlPositions = Array.isArray(result) ? result
+          : (result && Array.isArray(result.positions)) ? result.positions
+          : null;
+        // Safety: empty list when EE has open trades = connection gap, not mass liquidation.
+        // Only close trades when HL reports AT LEAST ONE position (proves feed is live).
+        if (!hlPositions || !hlPositions.length) {
+          log('HL', 'Reconciliation skipped — HL returned empty position list (connection not ready?). ' + hlTrades.length + ' EE trade(s) left open.', 'amber');
+          return;
         }
-      });
-    });
+        var hlAssets = {};
+        hlPositions.forEach(function (p) {
+          var key = normaliseAsset(p.coin || p.asset || '');
+          if (key) hlAssets[key] = p;
+        });
+        hlTrades.forEach(function (t) {
+          if (!hlAssets[normaliseAsset(t.asset)]) {
+            var fallback = _livePrice[t.trade_id] || _priceCache[normaliseAsset(t.asset)] || t.entry_price;
+            log('HL', t.asset + ' missing from HL positions — closed externally. Closing EE trade @ $' + (fallback || 0).toFixed(4), 'amber');
+            closeTrade(t.trade_id, fallback || t.entry_price, 'EXTERNALLY_CLOSED');
+          }
+        });
+        // Log orphan HL positions not tracked by EE
+        hlPositions.forEach(function (p) {
+          var key = normaliseAsset(p.coin || p.asset || '');
+          var eeMatch = hlTrades.some(function (t) { return normaliseAsset(t.asset) === key; });
+          if (!eeMatch) {
+            log('HL', '⚠ Orphan HL position: ' + (p.coin || p.asset) + ' (not in EE trades — manually opened or prior session)', 'amber');
+          }
+        });
+      })
+      .catch(function () { /* silent — HL may be temporarily unavailable */ });
   }
 
   // OANDA position reconciliation — mirrors _reconcileAlpacaPositions().
@@ -5043,7 +5058,7 @@
           ' &nbsp; <span class="ee-tc-sl">SL: ' + _num(t.stop_loss) + '</span>' +
           ' &nbsp; <span class="ee-tc-tp">TP: ' + _num(t.take_profit) + '</span>' +
           ' &nbsp; Size: $' + _num(t.size_usd) +
-          ' &nbsp; <span style="color:#e040fb">Lev: ' + (t.size_usd > 0 ? (t.size_usd / _cfg.virtual_balance).toFixed(2) : '—') + '×</span>' +
+          ' &nbsp; <span style="color:#e040fb">Lev: ' + (t.leverage && t.leverage > 1 ? t.leverage + '×' : t.size_usd > 0 ? (t.size_usd / _cfg.virtual_balance).toFixed(2) + '×' : '1×') + '</span>' +
           liveRow +
         '</div>' +
         '<div class="ee-tc-actions">' +
