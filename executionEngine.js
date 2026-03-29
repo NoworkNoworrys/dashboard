@@ -3924,7 +3924,7 @@
       var sessionLossPct = _monEffectiveStart > 0 ? (_monRealisedPnl / _monEffectiveStart * 100) : 0;
       if (sessionLossPct < -_cfg.daily_loss_limit_pct) {
         _cfg.enabled = false;
-        saveCfg();
+        // Don't saveCfg() — pause is session-only; reload starts fresh
         log('RISK', 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached (' +
           sessionLossPct.toFixed(1) + '%) — no new trades until tomorrow', 'red');
         _notify('⚠ Daily Loss Limit Hit',
@@ -3952,7 +3952,7 @@
       var _profitPct = _monEffectiveStart > 0 ? (_monProfitPnl / _monEffectiveStart * 100) : 0;
       if (_profitPct >= _cfg.daily_profit_target_pct) {
         _cfg.enabled = false;
-        saveCfg();
+        // Don't saveCfg() — pause is session-only; reload starts fresh
         log('RISK', '🎯 Daily profit target +' + _cfg.daily_profit_target_pct + '% reached (' +
           _profitPct.toFixed(1) + '%) — pausing new entries to protect gains', 'green');
         _notify('🎯 Daily Target Hit',
@@ -4026,7 +4026,7 @@
       var _prevDd = _ddFromPeak;
       _ddFromPeak = _newDd;
       if (_newDd >= 10 && _prevDd < 10 && _cfg.enabled) {
-        _cfg.enabled = false; saveCfg();
+        _cfg.enabled = false; // Don't saveCfg() — pause is session-only; reload starts fresh
         log('RISK', '⛔ Peak-equity drawdown -' + _newDd.toFixed(1) + '% (peak $' +
             _num(_peakEquity) + ') — auto-execution paused', 'red');
         _notify('⚠ Peak Drawdown -10%', '-' + _newDd.toFixed(1) + '% from peak $' +
