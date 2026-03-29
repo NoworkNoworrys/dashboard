@@ -335,8 +335,8 @@
     }
 
     html += _brokerPill('OANDA', oSt.connected,
-      oSt.connected ? (oSt.nav != null ? '£' + oSt.nav.toFixed(0) : 'Loading…') : 'Disconnected',
-      oSt.connected && oSt.nav != null ? '≈$' + (oSt.nav * fx).toFixed(0) : '');
+      oSt.connected ? (oSt.nav != null ? '$' + (oSt.nav * fx).toFixed(0) : 'Loading…') : 'Disconnected',
+      oSt.connected && oSt.nav != null ? '£' + oSt.nav.toFixed(0) : '');
 
     html += _brokerPill('Alpaca', aSt.connected,
       aSt.connected ? '$' + (aSt.equity || 0).toFixed(0) : 'Disconnected',
