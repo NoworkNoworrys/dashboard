@@ -3644,11 +3644,15 @@
          where GLD (or any tokenised stock/ETF/commodity) opens on OANDA-FX and
          immediately closes because OANDA cannot accept the instrument.
          In SIMULATION mode: accept HL even with $0 equity — no real orders sent. */
-      var _isHLNative = !_hlStale &&
+      // Is this asset HL-native? (independent of whether HL is currently healthy)
+      // This must NOT include _hlStale so that stale-feed periods don't cause
+      // HL assets to fall through to OANDA/Alpaca and get "No venue".
+      var _isHLNative =
           window.HLFeed  && typeof HLFeed.covers  === 'function' && HLFeed.covers(_asset) &&
           window.HLBroker && typeof HLBroker.covers === 'function' && HLBroker.covers(_asset);
-      var _hlReady = _isHLNative && typeof HLBroker.isConnected === 'function';
-      var _hlConnectedCheck = _hlReady && (
+      // Is HL healthy enough to accept orders right now?
+      var _hlHealthy = !_hlStale && _isHLNative && typeof HLBroker.isConnected === 'function';
+      var _hlConnectedCheck = _hlHealthy && (
           HLBroker.isConnected() ||
           (_cfg.broker === 'SIMULATION' && HLBroker.status && HLBroker.status().connected)
       );
