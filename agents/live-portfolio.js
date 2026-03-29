@@ -346,8 +346,11 @@
       ttSt.connected ? (ttSt.currency || '') + ' ' + (ttSt.balance || 0) : 'Disconnected',
       ttSt.connected && !ttSt.balance ? 'Unfunded' : '');
 
-    var hlConnected = window.HLFeed && HLFeed.isConnected && HLFeed.isConnected();
-    html += _brokerPill('Hyperliquid', hlConnected, hlConnected ? 'Feed live' : 'Feed offline', 'Prices only');
+    var hlSt = window.HLBroker ? HLBroker.status() : {};
+    var hlConnected = window.HLBroker && HLBroker.isConnected && HLBroker.isConnected();
+    html += _brokerPill('Hyperliquid', hlConnected,
+      hlConnected ? '$' + (hlSt.equity || 0).toFixed(2) : 'Disconnected',
+      hlConnected ? (hlSt.testnet ? 'Testnet' : 'Live') : '');
 
     html += '</div>';
 
