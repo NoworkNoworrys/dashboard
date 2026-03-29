@@ -95,16 +95,19 @@ def connect(wallet: str, private_key: str, testnet: bool = True) -> dict:
 
     try:
         acct = eth_account.Account.from_key(private_key)
-        if acct.address.lower() != wallet.lower():
-            return {'ok': False, 'error': 'Private key does not match wallet address'}
+        # Agent/API wallets legitimately have a different address from the main account.
+        # The SDK signs orders with `acct` (API wallet) but queries/attributes them to
+        # `wallet` (main account) via account_address=wallet. No address match required.
 
         _cfg.update({'wallet': wallet, 'private_key': private_key, 'testnet': testnet})
 
         # Verify connection with a direct account state fetch
         state      = _info_post({'type': 'clearinghouseState', 'user': wallet})
         ms         = state.get('marginSummary', {})
-        equity     = float(ms.get('accountValue', 0))
-        available  = float(state.get('withdrawable', 0))
+        perp_eq    = float(ms.get('accountValue', 0))
+        spot_usdc  = _spot_usdc()
+        equity     = perp_eq + spot_usdc   # unified account: spot USDC counts as margin
+        available  = float(state.get('withdrawable', 0)) + spot_usdc
         unrealised = float(ms.get('totalUnrealizedPnl', 0))
 
         # Build Exchange with patched spot_meta
@@ -133,17 +136,34 @@ def disconnect():
     _cfg['connected'] = False
 
 
+def _spot_usdc() -> float:
+    """Return available USDC in the spot/unified account."""
+    try:
+        spot = _info_post({'type': 'spotClearinghouseState', 'user': _cfg['wallet']})
+        for b in spot.get('balances', []):
+            if b.get('coin') == 'USDC':
+                return float(b.get('total', 0))
+    except Exception:
+        pass
+    return 0.0
+
+
 def get_account() -> dict:
     if not _cfg.get('wallet'):
         return {'ok': False, 'error': 'Not connected'}
     try:
         state      = _info_post({'type': 'clearinghouseState', 'user': _cfg['wallet']})
         ms         = state.get('marginSummary', {})
+        perp_equity = float(ms.get('accountValue', 0))
+        spot_usdc   = _spot_usdc()
+        # Unified account: spot USDC is collateral for perps too
+        total_equity = perp_equity + spot_usdc
         return {
             'ok':        True,
-            'equity':    float(ms.get('accountValue', 0)),
-            'available': float(state.get('withdrawable', 0)),
+            'equity':    total_equity,
+            'available': float(state.get('withdrawable', 0)) + spot_usdc,
             'unrealised': float(ms.get('totalUnrealizedPnl', 0)),
+            'spot_usdc': spot_usdc,
         }
     except Exception as e:
         return {'ok': False, 'error': str(e)}
