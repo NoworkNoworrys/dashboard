@@ -1697,16 +1697,11 @@
     if (open.length >= _cfg.max_open_trades)
       return { ok: false, reason: 'Max open trades (' + _cfg.max_open_trades + ') reached' };
 
-    // 'GLOBAL' is not a real geographic region — it is the default fallback tag
-    // for assets that have no specific country/region (crypto, global ETFs, etc.).
-    // Capping at max_per_region against GLOBAL would block almost all crypto signals,
-    // so we only enforce the per-region cap for actual named regions (US, MIDDLE_EAST etc).
-    var _sigRegion = (sig.region || 'GLOBAL').toUpperCase();
-    if (_sigRegion !== 'GLOBAL') {
-      var regionOpen = open.filter(function (t) { return (t.region || 'GLOBAL').toUpperCase() === _sigRegion; }).length;
-      if (regionOpen >= _cfg.max_per_region)
-        return { ok: false, reason: 'Max per region (' + _cfg.max_per_region + ') reached for ' + sig.region };
-    }
+    // Per-region cap removed: GII signals tag trades with the geopolitical event region
+    // (MENA conflict → ETH tagged MENA, Eastern Europe story → GAS tagged EASTERN_EUROPE),
+    // not the asset's own geography. This caused one news event to fill a region bucket
+    // and block all subsequent unrelated signals. Concentration risk is already handled
+    // by max_per_sector (below) and the correlation guard agent.
 
     // Sector concentration cap: prevent overloading a single sector (energy, crypto, etc.)
     var sector = EE_SECTOR_MAP[normaliseAsset(sig.asset)];
