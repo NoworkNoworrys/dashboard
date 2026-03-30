@@ -1658,7 +1658,7 @@
       return { ok: false, reason: 'WATCH signals are excluded from execution' };
 
     // Economic calendar gate: block all new trades within 30 min of a high-impact event
-    if (window.ECON_CALENDAR) {
+    if (_cfg.event_gate_enabled && window.ECON_CALENDAR) {
       try {
         if (ECON_CALENDAR.shouldBlock()) {
           var _calEvt = ECON_CALENDAR.imminent();
@@ -2591,7 +2591,8 @@
     // Tiny trades ($5-10 notional) incur proportionally large fees, can't be resized,
     // and produce noisy P&L data that corrupts the Kelly/win-rate learning loop.
     // Floor = 1% of balance or $30, whichever is larger, capped at 10% of balance.
-    var _minNotional = Math.min(_effectiveBal * 0.10, Math.max(30, _effectiveBal * 0.01));
+    // HL requires minimum $10 order size — ensure we always meet this
+    var _minNotional = Math.max(10, Math.min(_effectiveBal * 0.10, Math.max(30, _effectiveBal * 0.01)));
     if (sizeUsd > 0 && sizeUsd < _minNotional && entryPrice > 0) {
       units   = _minNotional / entryPrice;
       sizeUsd = _minNotional;
@@ -2767,6 +2768,16 @@
 
     // ── Fire HL order if this trade is routed to Hyperliquid ─────────────
     if (trade.venue === 'HL' && window.HLBroker && HLBroker.isConnected()) {
+      // HL requires orders ≥ $10 notional. Skip if undersized.
+      if (trade.size_usd < 10) {
+        _flagTrade(sig, 'Order undersized: $' + trade.size_usd.toFixed(2) + ' < HL minimum $10');
+        trade.broker_status = 'REJECTED';
+        trade.close_reason = 'INSUFFICIENT_SIZE';
+        trade.status = 'CLOSED';
+        _logSignal(sig, 'CLOSED', 'HL minimum order size: $' + trade.size_usd.toFixed(2) + ' < $10');
+        saveTrades();
+        return;
+      }
       var _hlSide = trade.direction === 'LONG' ? 'buy' : 'sell';
       var _hlLev  = trade.leverage ? Math.floor(trade.leverage) : 1;
       HLBroker.placeOrderWithConfirmation(
@@ -3694,7 +3705,9 @@
           window.HLFeed  && typeof HLFeed.covers  === 'function' && HLFeed.covers(_asset) &&
           window.HLBroker && typeof HLBroker.covers === 'function' && HLBroker.covers(_asset);
       // Is HL healthy enough to accept orders right now?
-      var _hlHealthy = !_hlStale && _isHLNative && typeof HLBroker.isConnected === 'function';
+      // Note: _hlStale is a price-feed quality flag — it does NOT mean the broker is down.
+      // Stale feed → gii-routing caps leverage via _hlTier(). It must not block execution.
+      var _hlHealthy = _isHLNative && typeof HLBroker.isConnected === 'function';
       var _hlConnectedCheck = _hlHealthy && (
           HLBroker.isConnected() ||
           (_cfg.broker === 'SIMULATION' && HLBroker.status && HLBroker.status().connected)
@@ -7206,9 +7219,9 @@
     /* Returns a summary string and logs key state variables for debugging.      */
     diagnose: function () {
       var open  = openTrades();
-      var last5 = (_sigLog || []).slice(-5);
+      var last5 = (_signalLog || []).slice(-5);
       var lines = [
-        '=== EE.diagnose() — v121 ===',
+        '=== EE.diagnose() — v123 ===',
         'Halted:        ' + _halted,
         'Enabled:       ' + (_cfg && _cfg.enabled),
         'ScalperPaused: ' + _scalperPaused,
