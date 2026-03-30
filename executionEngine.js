@@ -1701,11 +1701,10 @@
       return { ok: false, reason: sig.asset + ' requires conf ≥' + _assetFloor + '% (poor hist. WR) — got ' + sig.conf + '%' };
     }
 
-    // Adaptive confirmation tiers:
-    //   Fast Track  — specialist agent + conf >= 88%: single-source execution allowed.
-    //   Standard    — srcCount >= 2: corroborated by 2+ independent sources.
-    //   Blocked     — single source, conf < 88%, or non-specialist.
-    // Scalper/GII signals are always exempt (they have their own scoring pipeline).
+    // Confirmation gate: any specialist source at min_confidence passes solo.
+    // Multi-source fused signals (srcCount >= 2) always pass.
+    // Scalper/GII-routed signals are always exempt.
+    // Non-specialist single-source signals are blocked (guards against rogue unknown agents).
     var _isSrcScalper = sig.reason && (
         sig.reason.indexOf('SCALPER') === 0 ||
         sig.reason.indexOf('GII:') === 0 ||
@@ -1714,21 +1713,14 @@
     if (!_isSrcScalper) {
       var _needsCorroboration = sig.srcCount === undefined || sig.srcCount < 2;
       if (_needsCorroboration) {
-        // Check if it qualifies for Fast Track
-        var _sigSrcName  = (sig.source || _inferSource(sig.reason || '')).toLowerCase();
+        var _sigSrcName   = (sig.source || _inferSource(sig.reason || '')).toLowerCase();
         var _isSpecialist = !!SPECIALIST_SOURCES[_sigSrcName];
-        var _sigConfNow  = sig.conf || 0;  // already 0-100 after normalisation
-        // technicals and crypto-signals are trusted solo sources at 72%+ (proven accuracy)
-        var _specialistThreshold = (_sigSrcName === 'technicals' || _sigSrcName === 'crypto-signals') ? 72 : 88;
-        if (_isSpecialist && _sigConfNow >= _specialistThreshold) {
-          // Fast Track: specialist agent, high confidence — execute without second confirmation.
-          // confMult will apply 1.5-1.75× sizing boost for this confidence level.
-          log('RISK', sig.asset + ' fast-track: ' + _sigSrcName + ' specialist conf=' + _sigConfNow +
-              '% ≥' + _specialistThreshold + '% — single-source execution allowed', 'green');
-        } else {
+        if (!_isSpecialist) {
           return { ok: false, reason: 'srcCount ' + (sig.srcCount === undefined ? 'missing' : sig.srcCount) +
-                   ' — not corroborated (need 2+ sources, or specialist conf≥' + (_isSpecialist ? _specialistThreshold : 88) + '%). Source: ' + _sigSrcName };
+                   ' — not corroborated (need 2+ sources or a recognised specialist source). Source: ' + _sigSrcName };
         }
+        // Specialist source: passes at min_confidence (already checked above).
+        // Sizing will still be reduced for lower confidence via confMult.
       }
     }
 
