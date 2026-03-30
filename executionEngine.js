@@ -2591,8 +2591,8 @@
     // Tiny trades ($5-10 notional) incur proportionally large fees, can't be resized,
     // and produce noisy P&L data that corrupts the Kelly/win-rate learning loop.
     // Floor = 1% of balance or $30, whichever is larger, capped at 10% of balance.
-    // HL requires minimum $10 order size (actually > $10, so $11 safe margin)
-    var _minNotional = Math.max(11, Math.min(_effectiveBal * 0.10, Math.max(30, _effectiveBal * 0.01)));
+    // HL requires minimum $10 order size (actually > $10, so $14 safe margin)
+    var _minNotional = Math.max(14, Math.min(_effectiveBal * 0.10, Math.max(30, _effectiveBal * 0.01)));
     if (sizeUsd > 0 && sizeUsd < _minNotional && entryPrice > 0) {
       units   = _minNotional / entryPrice;
       sizeUsd = _minNotional;
@@ -2768,13 +2768,13 @@
 
     // ── Fire HL order if this trade is routed to Hyperliquid ─────────────
     if (trade.venue === 'HL' && window.HLBroker && HLBroker.isConnected()) {
-      // HL requires orders ≥ $10 notional. Skip if undersized.
-      if (trade.size_usd < 10) {
-        _flagTrade(sig, 'Order undersized: $' + trade.size_usd.toFixed(2) + ' < HL minimum $10');
+      // HL requires orders > $10 notional (exactly $10 gets rejected). Skip if undersized.
+      if (trade.size_usd <= 10) {
+        _flagTrade(sig, 'Order undersized: $' + trade.size_usd.toFixed(2) + ' <= HL minimum $10 (needs > $10)');
         trade.broker_status = 'REJECTED';
         trade.close_reason = 'INSUFFICIENT_SIZE';
         trade.status = 'CLOSED';
-        _logSignal(sig, 'CLOSED', 'HL minimum order size: $' + trade.size_usd.toFixed(2) + ' < $10');
+        _logSignal(sig, 'CLOSED', 'HL minimum order size: $' + trade.size_usd.toFixed(2) + ' <= $10');
         saveTrades();
         return;
       }
