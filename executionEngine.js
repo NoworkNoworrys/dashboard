@@ -2589,15 +2589,32 @@
     }
 
     // Minimum notional floor: ensure positions are large enough to be meaningful.
-    // Tiny trades ($5-10 notional) incur proportionally large fees, can't be resized,
-    // and produce noisy P&L data that corrupts the Kelly/win-rate learning loop.
-    // Floor = 1% of balance or $30, whichever is larger, capped at 10% of balance.
     // HL requires minimum $10 order size (actually > $10, so $14 safe margin)
     var _minNotional = Math.max(14, Math.min(_effectiveBal * 0.10, Math.max(30, _effectiveBal * 0.01)));
     if (sizeUsd > 0 && sizeUsd < _minNotional && entryPrice > 0) {
       units   = _minNotional / entryPrice;
       sizeUsd = _minNotional;
       log('RISK', sig.asset + ' size raised to minimum notional floor $' + _minNotional.toFixed(0), 'dim');
+    }
+
+    // Post-rounding guard: HL enforces asset-specific decimal precision.
+    // After rounding units to valid precision, actual notional can fall BELOW
+    // the $14 minimum (e.g. GLD: 0.07 units × $195 = $13.65 → rejected).
+    // Fix: round UP to the next valid unit so notional always meets minimum.
+    if (entryPrice > 0 && units > 0) {
+      var _SZ_DEC = {'BTC':6,'ETH':8,'SOL':2,'XRP':1,'DOGE':0,'ADA':0,'AVAX':1,'DOT':1,'LINK':2,'LTC':3,'GLD':2,'SLV':2,'PAXG':4,'WTI':2,'BRENT':2,'CRUDE':2,'NVDA':3,'HOOD':2,'CRCL':1};
+      var _dec = _SZ_DEC[sig.asset] !== undefined ? _SZ_DEC[sig.asset] : 4;
+      var _factor = Math.pow(10, _dec);
+      var _roundedUnits = Math.round(units * _factor) / _factor;
+      var _actualNotional = _roundedUnits * entryPrice;
+      // If rounding dropped us below minimum, bump up by one unit increment
+      if (_actualNotional < _minNotional) {
+        _roundedUnits = Math.ceil(units * _factor) / _factor;
+        _actualNotional = _roundedUnits * entryPrice;
+        log('RISK', sig.asset + ' units bumped to ' + _roundedUnits + ' (' + _dec + ' dec) — rounding would have dropped notional to $' + (_roundedUnits * entryPrice - (1/_factor) * entryPrice).toFixed(2), 'dim');
+      }
+      units   = _roundedUnits;
+      sizeUsd = +_actualNotional.toFixed(2);
     }
 
     // Reality check 7 — reject zero-size positions: risk budget exhausted or SL too wide.
