@@ -5518,10 +5518,14 @@
                     : e.action === 'WATCH'  ? '&#9900; WATCH'
                     : '&#8212; SKIP';
       var dirCls  = e.dir === 'LONG' ? 'sl-long' : e.dir === 'SHORT' ? 'sl-short' : 'sl-watch-dir';
+      // Extract signal source (SCALPER, TECHNICALS, IC, etc.)
+      var src = e.reason ? e.reason.split(':')[0] : 'OTHER';
+      var srcColor = src === 'SCALPER' ? '#4ea3ff' : src === 'GII' ? '#00ff88' : '#888';
+      var srcLabel = '<span style="color:' + srcColor + ';font-weight:600;margin-right:8px">[' + src + ']</span>';
       // For skipped signals, show reason prominently in place of region (more useful than region name)
       var lastCol = (e.action === 'SKIPPED' && e.skip_reason)
-        ? '<span class="sl-skip-reason prominent" style="color:#ff9500;font-style:normal;font-weight:600;grid-column:auto">' + _esc(e.skip_reason) + '</span>'
-        : '<span class="ee-sl-region">' + _esc(e.region) + '</span>';
+        ? '<span class="sl-skip-reason prominent" style="color:#ff9500;font-style:normal;font-weight:600;grid-column:auto">' + srcLabel + _esc(e.skip_reason.substring(0, 60)) + '</span>'
+        : '<span class="ee-sl-region">' + srcLabel + _esc(e.region) + '</span>';
       return '<div class="ee-sl-row">' +
         '<span class="ee-sl-ts">'  + ts + '</span>' +
         '<span class="ee-sl-asset">' + _esc(e.asset) + '</span>' +
