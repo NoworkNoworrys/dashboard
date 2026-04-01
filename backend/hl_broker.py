@@ -247,13 +247,10 @@ def _place_order_locked(coin: str, is_buy: bool, size_usd: float, leverage: int 
 
         # Cap order size to free margin (equity minus margin already in use).
         # Re-fetched inside the lock so concurrent orders see updated margin state.
-        # Use ONLY clearinghouseState.accountValue for perp margin — spot tokens
-        # (GLD, HOOD etc.) are not usable as perp collateral on HL.
-        # _portfolio_total() already includes perp value so adding accountValue
-        # on top would double-count and make available appear ~2× too high.
+        # HL spot and perp are unified — use portfolio total (same as get_account).
         state       = _info_post({'type': 'clearinghouseState', 'user': _cfg['wallet']})
         ms_         = state.get('marginSummary', {})
-        equity_     = float(ms_.get('accountValue', 0))
+        equity_     = _portfolio_total()
         margin_used_= float(ms_.get('totalMarginUsed', 0))
         available   = max(0.0, equity_ - margin_used_)
         lev       = min(max(int(leverage), 1), 50)
