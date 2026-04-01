@@ -8,6 +8,7 @@ Read operations (account state, prices) use direct HTTP to avoid the same crash.
 """
 import json
 import os
+import threading
 import requests
 from typing import Optional
 
@@ -31,8 +32,15 @@ _cfg: dict = {
 
 _exchange: Optional[object] = None
 
+# Serialize concurrent order placements — prevents race where two signals both
+# pass the margin pre-check before either has committed margin on HL.
+_order_lock = threading.Lock()
+
 # Cache of per-asset size decimals: {'BTC': 5, 'SOL': 2, 'DOGE': 0, ...}
 _sz_decimals: dict = {}
+
+# Minimum notional USD for any order (HL enforces $10; we add a buffer).
+_MIN_ORDER_USD = 11.0
 
 
 def _load_sz_decimals():
@@ -202,6 +210,11 @@ def place_order(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> 
     if not _exchange:
         return {'ok': False, 'error': 'Not connected'}
 
+    with _order_lock:  # serialise — prevents concurrent orders both passing margin check
+        return _place_order_locked(coin, is_buy, size_usd, leverage)
+
+
+def _place_order_locked(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> dict:
     try:
         # Get current mid price — xyz: perps are not in allMids, use l2Book instead
         if coin.startswith('xyz:'):
@@ -216,7 +229,8 @@ def place_order(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> 
         if not price:
             return {'ok': False, 'error': f'No mid price for {coin}'}
 
-        # Cap order size to free margin (equity minus margin already in use)
+        # Cap order size to free margin (equity minus margin already in use).
+        # Re-fetched inside the lock so concurrent orders see updated margin state.
         state       = _info_post({'type': 'clearinghouseState', 'user': _cfg['wallet']})
         ms_         = state.get('marginSummary', {})
         equity_     = float(ms_.get('accountValue', 0)) + _spot_usdc()
@@ -228,6 +242,9 @@ def place_order(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> 
             return {'ok': False, 'error': f'Insufficient balance: ${available:.2f} available'}
         if size_usd > max_notional:
             size_usd = round(max_notional, 2)
+        # Enforce HL minimum notional ($10 + buffer)
+        if size_usd < _MIN_ORDER_USD:
+            return {'ok': False, 'error': f'Order too small: ${size_usd:.2f} < ${_MIN_ORDER_USD} minimum'}
 
         # Always set leverage before placing — resets any stale leverage on the account
         try:

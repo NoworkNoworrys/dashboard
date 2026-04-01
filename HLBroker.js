@@ -318,12 +318,11 @@
     'COST':      { name: 'Costco (xyz perp)',        hlCoin: 'xyz:COST'  },
     'BABA':      { name: 'Alibaba (xyz perp)',       hlCoin: 'xyz:BABA'  },
     'TSM':       { name: 'TSMC (xyz perp)',          hlCoin: 'xyz:TSM'   },
-    /* ── HL spot-only tokens (no xyz perp equivalent) ─────────────────── */
-    'SPY':       { name: 'S&P 500 spot token',   hlCoin: '@420' },
-    'QQQ':       { name: 'Nasdaq spot token',    hlCoin: '@426' },
-    'AVGO':      { name: 'Broadcom spot token',  hlCoin: '@431' },
-    'SPACEX':    { name: 'SpaceX spot token',    hlCoin: '@416' },
-    'OPENAI':    { name: 'OpenAI spot token',    hlCoin: '@418' },
+    /* ── Spot-only tokens with NO xyz perp equivalent — NOT in HL_ASSETS.
+       Removed from broker routing so signals fail gracefully (no venue)
+       rather than hitting a broker rejection. Prices still flow via hl-feed.js
+       @N entries so the feed/charts work.
+       SPY (@420), QQQ (@426), AVGO (@431), SPACEX (@416), OPENAI (@418)      */
     /* ── Precious metal aliases → xyz perps (spot tokens can't be perp-traded) */
     'GLD':       { name: 'Gold (xyz perp)',    hlCoin: 'xyz:GOLD'   },
     'SLV':       { name: 'Silver (xyz perp)',  hlCoin: 'xyz:SILVER' },
