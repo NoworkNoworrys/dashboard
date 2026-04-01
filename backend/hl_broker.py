@@ -154,25 +154,27 @@ def disconnect():
     _cfg['connected'] = False
 
 
-def _spot_usdc(wallet: str = '') -> float:
-    """Return FREE spot USDC not already pledged as perp collateral.
-
-    When spot USDC is used as cross-margin collateral, HL sets hold = total
-    and the same amount is already reflected in clearinghouseState.accountValue.
-    Adding the held amount again would double-count it.
-    Only the unheld (free) portion is genuinely separate from the perp equity.
+def _portfolio_total(wallet: str = '') -> float:
+    """Return current total portfolio value (perp + spot tokens + USDC) via
+    the HL portfolio endpoint, which prices all holdings at current market rates.
+    Falls back to 0.0 on error.
     """
     try:
         addr = wallet or _cfg.get('wallet', '')
-        spot = _info_post({'type': 'spotClearinghouseState', 'user': addr})
-        for b in spot.get('balances', []):
-            if b.get('coin') == 'USDC':
-                total = float(b.get('total', 0))
-                hold  = float(b.get('hold',  0))
-                return max(0.0, total - hold)  # only the free (unheld) portion
+        port = _info_post({'type': 'portfolio', 'user': addr})
+        for section in port:
+            if section[0] == 'day':
+                hist = section[1].get('accountValueHistory', [])
+                if hist:
+                    return float(hist[-1][1])
     except Exception:
         pass
     return 0.0
+
+
+# Keep old name as alias so nothing else breaks
+def _spot_usdc(wallet: str = '') -> float:
+    return _portfolio_total(wallet)
 
 
 def get_account() -> dict:
@@ -181,16 +183,16 @@ def get_account() -> dict:
     try:
         state       = _info_post({'type': 'clearinghouseState', 'user': _cfg['wallet']})
         ms          = state.get('marginSummary', {})
-        perp_eq     = float(ms.get('accountValue', 0))
-        spot_usdc   = _spot_usdc()          # free (unheld) spot only
-        equity      = perp_eq + spot_usdc
         margin_used = float(ms.get('totalMarginUsed', 0))
+        unrealised  = float(ms.get('totalUnrealizedPnl', 0))
+        # Total portfolio = perp equity + spot tokens + USDC at current market prices
+        equity      = _portfolio_total()
         available   = max(0.0, equity - margin_used)
         return {
             'ok':        True,
             'equity':    equity,
             'available': available,
-            'unrealised': float(ms.get('totalUnrealizedPnl', 0)),
+            'unrealised': unrealised,
         }
     except Exception as e:
         return {'ok': False, 'error': str(e)}
