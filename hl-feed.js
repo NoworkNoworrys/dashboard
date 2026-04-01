@@ -9,8 +9,12 @@
    ─ All dead named equity/commodity entries (CL, BRENTOIL, GOLD, NVDA…) removed
    ─ Replaced with @N spot token pair-index format (e.g. @247=TSLA, @251=AAPL)
      discovered via HL spotMeta endpoint — these actually stream in allMids
-   ─ Now covers: BTC ETH SOL XRP BNB ADA (crypto perps) + TSLA AAPL AMZN META
-     QQQ MSFT GOOGL HOOD SPY SLV GLD (HL spot equity/ETF tokens)
+   ─ Now covers: BTC ETH SOL XRP BNB ADA (crypto perps) + xyz equity perps
+     (TSLA AAPL NVDA META MSFT AMZN GOOGL MSTR ORCL MU HOOD CRCL CRWV COIN
+     NFLX AMD INTC PLTR COST BABA TSM) + xyz commodities/forex/indices
+     (BRENTOIL WTI SILVER GOLD NATGAS SP500 XYZ100 EUR JPY COPPER PLATINUM)
+     + spot-only tokens: SLV GLD SPY QQQ AVGO SPACEX OPENAI
+   ─ xyz perps polled via REST l2Book every 10s (not in allMids WS)
    ─ (v2) _hlPrices store, highest-priority source, HL fee model, richer API
 
    Public API: window.HLFeed
@@ -286,6 +290,7 @@
     /* ── xyz perps — NOT in allMids; prices polled via REST (10s interval)
        API format: xyz:COINNAME for l2Book / order placement.
        See XYZ_ASSETS map and _pollXyzPrices() below.                      */
+    /* Commodity / forex / index xyz perps */
     'xyz:BRENTOIL': ['BRENT', 'BRENTOIL'],
     'xyz:CL':       ['WTI', 'WTIOIL', 'CRUDE', 'OIL', 'CL'],
     'xyz:SILVER':   ['SILVER'],
@@ -297,29 +302,39 @@
     'xyz:JPY':      ['JPY'],
     'xyz:COPPER':   ['COPPER'],
     'xyz:PLATINUM': ['PLATINUM'],
+    /* Equity xyz perps (20x–50x leverage, USDC P&L) */
+    'xyz:AAPL':     ['AAPL'],
+    'xyz:TSLA':     ['TSLA'],
+    'xyz:NVDA':     ['NVDA'],
+    'xyz:META':     ['META'],
+    'xyz:MSFT':     ['MSFT'],
+    'xyz:AMZN':     ['AMZN'],
+    'xyz:GOOGL':    ['GOOGL'],
+    'xyz:MSTR':     ['MSTR'],
+    'xyz:ORCL':     ['ORCL'],
+    'xyz:MU':       ['MU'],
+    'xyz:HOOD':     ['HOOD'],
+    'xyz:CRCL':     ['CRCL'],
+    'xyz:CRWV':     ['CRWV'],
+    'xyz:COIN':     ['COIN'],
+    'xyz:NFLX':     ['NFLX'],
+    'xyz:AMD':      ['AMD'],
+    'xyz:INTC':     ['INTC'],
+    'xyz:PLTR':     ['PLTR'],
+    'xyz:COST':     ['COST'],
+    'xyz:BABA':     ['BABA'],
+    'xyz:TSM':      ['TSM'],
 
-    /* ── HL spot equity/ETF tokens — @N pair-index (Apr 2026 spotMeta)
+    /* ── HL spot tokens — @N pair-index (no xyz perp equivalent)
        Prices stream in allMids as '@N' keys.
        Indices verified via POST /info {type:'spotMeta'}.                   */
-    '@407':  ['TSLA'],
-    '@408':  ['NVDA'],
-    '@409':  ['CRCL'],
     '@411':  ['SLV', 'XAG'],
-    '@412':  ['GOOGL'],
-    '@413':  ['AAPL'],
-    '@415':  ['HOOD'],
     '@416':  ['SPACEX'],
-    '@417':  ['MSTR'],
     '@418':  ['OPENAI'],
     '@420':  ['SPY'],
-    '@421':  ['AMZN'],
-    '@422':  ['META'],
     '@426':  ['QQQ'],
-    '@429':  ['MSFT'],
-    '@430':  ['ORCL'],
     '@431':  ['AVGO'],
-    '@432':  ['GLD'],
-    '@435':  ['MU']
+    '@432':  ['GLD']
   };
 
   /* ── HL-accurate cost model for paper-trading simulation ───────────────────
@@ -404,12 +419,15 @@
     'HPOS': 'crypto', 'BLZ': 'crypto', 'CYBER': 'crypto', 'ARK': 'crypto',
     'BADGER': 'crypto', 'ORBS': 'crypto', 'USTC': 'crypto', 'FRIEND': 'crypto',
     'SHIA': 'crypto',
-    /* Spot equity/ETF tokens */
+    /* Equity xyz perps + spot-only equity tokens */
     'TSLA': 'equity', 'NVDA': 'equity', 'CRCL': 'equity', 'GOOGL': 'equity',
     'AAPL': 'equity', 'HOOD': 'equity', 'SPY': 'equity', 'AMZN': 'equity',
     'META': 'equity', 'QQQ': 'equity', 'MSFT': 'equity', 'ORCL': 'equity',
     'AVGO': 'equity', 'MU': 'equity', 'MSTR': 'equity', 'SPACEX': 'equity',
     'OPENAI': 'equity', 'SP500': 'equity',
+    'CRWV': 'equity', 'COIN': 'equity', 'NFLX': 'equity', 'AMD': 'equity',
+    'INTC': 'equity', 'PLTR': 'equity', 'COST': 'equity', 'BABA': 'equity',
+    'TSM': 'equity',
     /* Spot precious metals */
     'SLV': 'precious', 'XAG': 'precious', 'GLD': 'precious',
     'PAXG': 'precious', 'XAU': 'precious',
