@@ -22,7 +22,22 @@
   var POLL_INTERVAL_MS  = 3 * 60 * 1000;   // 3 minutes — faster during peak hours
   var INIT_DELAY_MS     = 20000;            // 20s — offset from main scalper (16.5s)
   var GTI_GATE          = 60;              // slightly lower gate (main scalper = 65)
-  var SCALPER_ASSETS   = ['BTC', 'ETH'];  // Assets scanned each poll cycle
+  var SCALPER_ASSETS   = [
+    'BTC', 'ETH',
+    // xyz: perps — peak-session hours only, HL candleSnapshot data
+    'GOLD', 'WTI', 'BRENT', 'SILVER',
+    'GOOGL', 'AAPL', 'MSFT', 'AMZN', 'META', 'TSLA', 'NVDA', 'INTC'
+  ];  // Assets scanned each poll cycle
+  // Maps EE asset name → HL coin name for xyz: perps
+  var HL_COIN_OVERRIDE = {
+    'GOLD':   'xyz:GOLD',   'GLD':    'xyz:GOLD',
+    'SILVER': 'xyz:SILVER', 'SLV':    'xyz:SILVER',
+    'WTI':    'xyz:CL',     'BRENT':  'xyz:BRENTOIL',
+    'GOOGL':  'xyz:GOOGL',  'AAPL':   'xyz:AAPL',
+    'MSFT':   'xyz:MSFT',   'AMZN':   'xyz:AMZN',
+    'META':   'xyz:META',   'TSLA':   'xyz:TSLA',
+    'NVDA':   'xyz:NVDA',   'INTC':   'xyz:INTC',
+  };
   var SCALP_TIMEOUT_MS  = 2 * 60 * 60 * 1000;
   var MIN_CONF          = 0.58;            // slightly lower than 0.60 for peak liquidity
   var SESSION_START_UTC = 7;               // 07:00 UTC (London open)
@@ -310,6 +325,7 @@
   }
 
   function _hlFetch(sym, interval, numCandles) {
+    var hlCoin = HL_COIN_OVERRIDE[sym] || sym;  // use xyz: coin name if override exists
     var now = Date.now();
     var msPerBar = (interval === '5m') ? 5 * 60000 : 15 * 60000;
     var startTime = now - numCandles * msPerBar * 2;
@@ -318,7 +334,7 @@
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         type: 'candleSnapshot',
-        req:  { coin: sym, interval: interval, startTime: startTime, endTime: now }
+        req:  { coin: hlCoin, interval: interval, startTime: startTime, endTime: now }
       })
     })
       .then(function (r) { return r.json(); })
@@ -612,15 +628,17 @@
     }
 
     // Fetch 5m candles (100 bars ≈ 8.3h) and 15m candles (48 bars ≈ 12h)
-    var p5m  = _ccFetch(sym, 5, 100);
-    var p15m = _ccFetch(sym, 15, 48);
+    // xyz: perps skip CryptoCompare — go straight to HL candleSnapshot
+    var isXyz = !!HL_COIN_OVERRIDE[sym];
+    var p5m  = isXyz ? Promise.resolve(null) : _ccFetch(sym, 5, 100);
+    var p15m = isXyz ? Promise.resolve(null) : _ccFetch(sym, 15, 48);
 
     Promise.all([p5m, p15m])
       .then(function (results) {
         var c5m = results[0], c15m = results[1];
         _usedHLBackup = false;
 
-        // Fallback to Hyperliquid if CC fails
+        // Fallback to Hyperliquid if CC fails (or always for xyz: assets)
         var fallbacks = [];
         if (!c5m)  fallbacks.push(_hlFetch(sym, '5m',  100).then(function (d) { c5m  = d; _usedHLBackup = true; }));
         if (!c15m) fallbacks.push(_hlFetch(sym, '15m', 48).then(function (d) { c15m = d; _usedHLBackup = true; }));
