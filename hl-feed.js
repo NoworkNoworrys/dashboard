@@ -293,8 +293,8 @@
     /* Commodity / forex / index xyz perps */
     'xyz:BRENTOIL': ['BRENT', 'BRENTOIL'],
     'xyz:CL':       ['WTI', 'WTIOIL', 'CRUDE', 'OIL', 'CL'],
-    'xyz:SILVER':   ['SILVER'],
-    'xyz:GOLD':     ['GOLD'],
+    'xyz:SILVER':   ['SILVER', 'SLV', 'XAG'],
+    'xyz:GOLD':     ['GOLD', 'GLD'],
     'xyz:NATGAS':   ['NATGAS'],
     'xyz:SP500':    ['SP500'],
     'xyz:XYZ100':   ['XYZ100'],
@@ -328,13 +328,11 @@
     /* ── HL spot tokens — @N pair-index (no xyz perp equivalent)
        Prices stream in allMids as '@N' keys.
        Indices verified via POST /info {type:'spotMeta'}.                   */
-    '@411':  ['SLV', 'XAG'],
     '@416':  ['SPACEX'],
     '@418':  ['OPENAI'],
     '@420':  ['SPY'],
     '@426':  ['QQQ'],
     '@431':  ['AVGO'],
-    '@432':  ['GLD']
   };
 
   /* ── HL-accurate cost model for paper-trading simulation ───────────────────
@@ -428,11 +426,10 @@
     'CRWV': 'equity', 'COIN': 'equity', 'NFLX': 'equity', 'AMD': 'equity',
     'INTC': 'equity', 'PLTR': 'equity', 'COST': 'equity', 'BABA': 'equity',
     'TSM': 'equity',
-    /* Spot precious metals */
-    'SLV': 'precious', 'XAG': 'precious', 'GLD': 'precious',
-    'PAXG': 'precious', 'XAU': 'precious',
-    /* xyz commodity perps */
-    'SILVER': 'precious', 'GOLD': 'precious', 'PLATINUM': 'precious',
+    /* Precious metals (xyz perps + PAXG perp) */
+    'SILVER': 'precious', 'SLV': 'precious', 'XAG': 'precious',
+    'GOLD': 'precious', 'GLD': 'precious',
+    'PAXG': 'precious', 'XAU': 'precious', 'PLATINUM': 'precious',
     'WTI': 'energy', 'WTIOIL': 'energy', 'CRUDE': 'energy', 'OIL': 'energy',
     'CL': 'energy', 'BRENT': 'energy', 'BRENTOIL': 'energy',
     'GAS': 'energy', 'NATGAS': 'energy', 'COPPER': 'commodity',

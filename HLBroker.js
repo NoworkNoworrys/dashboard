@@ -324,10 +324,10 @@
     'AVGO':      { name: 'Broadcom spot token',  hlCoin: '@431' },
     'SPACEX':    { name: 'SpaceX spot token',    hlCoin: '@416' },
     'OPENAI':    { name: 'OpenAI spot token',    hlCoin: '@418' },
-    /* ── HL spot commodity/metal tokens ─────────────────────────────── */
-    'GLD':       { name: 'Gold spot token',   hlCoin: '@432' },
-    'SLV':       { name: 'Silver spot token', hlCoin: '@411' },
-    'XAG':       { name: 'Silver spot token', hlCoin: '@411' },
+    /* ── Precious metal aliases → xyz perps (spot tokens can't be perp-traded) */
+    'GLD':       { name: 'Gold (xyz perp)',    hlCoin: 'xyz:GOLD'   },
+    'SLV':       { name: 'Silver (xyz perp)',  hlCoin: 'xyz:SILVER' },
+    'XAG':       { name: 'Silver (xyz perp)',  hlCoin: 'xyz:SILVER' },
   };
 
   /* Maps dashboard asset names to the actual HL coin ticker for order placement */

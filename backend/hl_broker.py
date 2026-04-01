@@ -203,9 +203,16 @@ def place_order(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> 
         return {'ok': False, 'error': 'Not connected'}
 
     try:
-        # Get current mid price
-        mids  = _info_post({'type': 'allMids'})
-        price = float(mids.get(coin, 0))
+        # Get current mid price — xyz: perps are not in allMids, use l2Book instead
+        if coin.startswith('xyz:'):
+            book   = _info_post({'type': 'l2Book', 'coin': coin, 'nSigFigs': 5})
+            levels = book.get('levels', [])
+            if not levels or len(levels) < 2 or not levels[0] or not levels[1]:
+                return {'ok': False, 'error': f'No l2Book price for {coin}'}
+            price = (float(levels[0][0]['px']) + float(levels[1][0]['px'])) / 2
+        else:
+            mids  = _info_post({'type': 'allMids'})
+            price = float(mids.get(coin, 0))
         if not price:
             return {'ok': False, 'error': f'No mid price for {coin}'}
 

@@ -789,11 +789,22 @@ async def hl_account():
     return JSONResponse(content=result)
 
 
+def _norm_coin(raw: str) -> str:
+    """Normalise a coin identifier from the frontend.
+    xyz: perps use lowercase prefix (e.g. 'xyz:AAPL') — preserve that.
+    All other coins are uppercased (e.g. 'btc' → 'BTC').
+    """
+    s = (raw or '').strip()
+    if s.lower().startswith('xyz:'):
+        return 'xyz:' + s[4:].upper()
+    return s.upper()
+
+
 @app.post('/api/hl/order')
 async def hl_order(request: Request):
     """Place a market order on HL. Body: {coin, side, sizeUsd, leverage}"""
     body     = await request.json()
-    coin     = (body.get('coin') or '').upper().strip()
+    coin     = _norm_coin(body.get('coin', ''))
     side     = (body.get('side') or '').lower()
     size_usd = float(body.get('sizeUsd', 0))
     leverage = int(body.get('leverage', 1))
@@ -810,7 +821,7 @@ async def hl_trigger(request: Request):
     """Place a server-side trigger order (SL or TP) on HL.
     Body: {coin, side, size, triggerPx, type: 'stop'|'tp'}"""
     body       = await request.json()
-    coin       = (body.get('coin') or '').upper().strip()
+    coin       = _norm_coin(body.get('coin', ''))
     side       = (body.get('side') or '').lower()
     size       = float(body.get('size', 0))
     trigger_px = float(body.get('triggerPx', 0))
@@ -827,7 +838,7 @@ async def hl_trigger(request: Request):
 async def hl_cancel_triggers(request: Request):
     """Cancel all trigger orders for a coin. Body: {coin}"""
     body = await request.json()
-    coin = (body.get('coin') or '').upper().strip()
+    coin = _norm_coin(body.get('coin', ''))
     if not coin:
         return JSONResponse(content={'ok': False, 'error': 'coin required'})
     result = await asyncio.get_event_loop().run_in_executor(
@@ -840,7 +851,7 @@ async def hl_cancel_triggers(request: Request):
 async def hl_close(request: Request):
     """Close the full HL position for a coin. Body: {coin}"""
     body = await request.json()
-    coin = (body.get('coin') or '').upper().strip()
+    coin = _norm_coin(body.get('coin', ''))
     if not coin:
         return JSONResponse(content={'ok': False, 'error': 'coin required'})
     result = await asyncio.get_event_loop().run_in_executor(None, _hl.close_position, coin)
