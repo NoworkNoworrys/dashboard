@@ -27,6 +27,29 @@ import time
 import requests
 from typing import List, Dict, Optional
 
+# ── Timestamp bounds for sanity checking ─────────────────────────────────────
+_TS_MIN_MS = 631152000000   # Jan 1990 in ms
+_TS_MAX_MS = 2524608000000  # Jan 2050 in ms
+
+def _parse_ts(ts_raw) -> int:
+    """Parse a raw timestamp (seconds, ms, us, or ns) into milliseconds.
+    Returns current time in ms if ts_raw is missing or out of bounds."""
+    try:
+        v = float(ts_raw)
+        if v < 1e10:        # seconds
+            ts = int(v * 1000)
+        elif v < 1e13:      # milliseconds
+            ts = int(v)
+        elif v < 1e16:      # microseconds
+            ts = int(v / 1000)
+        else:               # nanoseconds
+            ts = int(v / 1e6)
+        if _TS_MIN_MS <= ts <= _TS_MAX_MS:
+            return ts
+    except (ValueError, TypeError):
+        pass
+    return int(time.time() * 1000)
+
 # ── Tracked assets (must match EE/HL routing maps) ───────────────────────────
 TRACKED_TICKERS = [
     'SPY', 'QQQ', 'VXX', 'TLT', 'GLD', 'SLV', 'XLE', 'XAR',
@@ -209,10 +232,7 @@ def fetch_flow_alerts(api_key: str, newer_than_ms: int = None) -> List[Dict]:
         if premium >= 1_000_000: keywords.append('major_premium')
 
         ts_raw = alert.get('created_at') or alert.get('start_time') or alert.get('ts')
-        try:
-            ts = int(float(ts_raw) * 1000) if ts_raw and float(ts_raw) < 1e12 else int(float(ts_raw))
-        except Exception:
-            ts = int(time.time() * 1000)
+        ts = _parse_ts(ts_raw)
 
         events.append({
             'title':    f'{ticker} {flow_type} {strike} exp {expiry} — {prem_fmt} premium',
@@ -289,10 +309,7 @@ def fetch_darkpool(api_key: str) -> List[Dict]:
         if ticker in DEFENSE_TICKERS: assets += ['LMT', 'RTX']
 
         ts_raw = p.get('executed_at') or p.get('ts') or p.get('created_at')
-        try:
-            ts = int(float(ts_raw) * 1000) if ts_raw and float(ts_raw) < 1e12 else int(float(ts_raw))
-        except Exception:
-            ts = int(time.time() * 1000)
+        ts = _parse_ts(ts_raw)
 
         events.append({
             'title':    f'{ticker} dark pool print {val_fmt} @ ${price:.2f}',
@@ -398,7 +415,8 @@ def fetch_congress_trades(api_key: str) -> List[Dict]:
         ts_raw = t.get('disclosure_date') or t.get('traded_date') or t.get('created_at')
         try:
             from datetime import datetime
-            ts = int(datetime.strptime(ts_raw[:10], '%Y-%m-%d').timestamp() * 1000) if ts_raw else int(time.time() * 1000)
+            ts_parsed = int(datetime.strptime(ts_raw[:10], '%Y-%m-%d').timestamp() * 1000) if ts_raw else 0
+            ts = ts_parsed if _TS_MIN_MS <= ts_parsed <= _TS_MAX_MS else int(time.time() * 1000)
         except Exception:
             ts = int(time.time() * 1000)
 

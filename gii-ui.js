@@ -10,6 +10,11 @@
   var GII_COLOR       = '#e040fb';
   var GII_DIM         = 'rgba(224,64,251,0.18)';
 
+  function _esc(s) {
+    if (typeof s !== 'string') s = String(s == null ? '' : s);
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   // ── inject styles ──────────────────────────────────────────────────────────
 
   function _injectStyles() {

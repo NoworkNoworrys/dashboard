@@ -106,6 +106,15 @@
     _cooldowns[_cdKey(asset, bias)] = Date.now();
   }
 
+  function _pruneCooldowns() {
+    var cutoff = Date.now() - COOLDOWN_MS;
+    var keys = Object.keys(_cooldowns);
+    for (var i = 0; i < keys.length; i++) {
+      if (_cooldowns[keys[i]] < cutoff) delete _cooldowns[keys[i]];
+    }
+  }
+  setInterval(_pruneCooldowns, 3600000);
+
   // ── signal builder ────────────────────────────────────────────────────────
 
   function _mkSig(asset, bias, conf, reasoning, sector, extraKeys) {

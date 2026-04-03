@@ -1012,6 +1012,10 @@
       .catch(function () {
         _writeQueueBusy = false;
         // Will retry next time _flushWriteQueue() is called (on reconnect or next write)
+      })
+      .finally(function () {
+        // Safety net: ensure busy flag is always cleared even if .then()/.catch() throws
+        _writeQueueBusy = false;
       });
   }
 
@@ -2014,8 +2018,8 @@
      ══════════════════════════════════════════════════════════════════════════════ */
 
   function makeId(prefix) {
-    // timestamp(base36) + sequence(base36) + 4-char random hex → collision-safe unique IDs
-    var r = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4).toUpperCase();
+    // timestamp(base36) + sequence(base36) + 8-char random hex → collision-safe unique IDs
+    var r = (Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2)).slice(0, 8).toUpperCase();
     return prefix + '-' + Date.now().toString(36).toUpperCase() + '-' + (++_seq).toString(36).toUpperCase() + '-' + r;
   }
 

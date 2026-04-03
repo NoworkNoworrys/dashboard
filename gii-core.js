@@ -95,10 +95,26 @@
     } catch (e) {}
   }
 
+  function _lsSet(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.warn('[GII] localStorage quota exceeded for ' + key + ' — trimming');
+      // Trim and retry: keep only the most recent 50 entries if it's an object/array
+      try {
+        var trimmed = Array.isArray(value) ? value.slice(-50)
+          : (value && typeof value === 'object' ? (function(o) {
+              var keys = Object.keys(o); if (keys.length > 50) { var t = {}; keys.slice(-50).forEach(function(k){t[k]=o[k];}); return t; } return o;
+            })(value) : value);
+        localStorage.setItem(key, JSON.stringify(trimmed));
+      } catch (e2) { /* storage genuinely full — skip silently */ }
+    }
+  }
+
   function _saveFeedback() {
-    try { localStorage.setItem(FEEDBACK_KEY, JSON.stringify(_feedback)); } catch (e) {}
+    _lsSet(FEEDBACK_KEY, _feedback);
     /* Save trade map alongside feedback so attribution survives reloads */
-    try { localStorage.setItem(TRADE_MAP_KEY, JSON.stringify(_giiTradeMap)); } catch (e) {}
+    _lsSet(TRADE_MAP_KEY, _giiTradeMap);
   }
 
   // ── agent collection ───────────────────────────────────────────────────────
@@ -633,7 +649,7 @@
         if (agentContrib[ak] && agentContrib[ak].length) _giiTradeMap[ak] = agentContrib[ak].slice();
       });
       // Persist immediately so attribution survives any page reload before the trade closes
-      try { localStorage.setItem(TRADE_MAP_KEY, JSON.stringify(_giiTradeMap)); } catch (e) {}
+      _lsSet(TRADE_MAP_KEY, _giiTradeMap);
 
       try {
         /* Route through entry agent (confluence check) if available */

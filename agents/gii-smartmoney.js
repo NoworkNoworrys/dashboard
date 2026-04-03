@@ -52,7 +52,8 @@
   }
 
   function _saveFeedback() {
-    try { localStorage.setItem(FEEDBACK_KEY, JSON.stringify(_feedback)); } catch (e) {}
+    try { localStorage.setItem(FEEDBACK_KEY, JSON.stringify(_feedback)); }
+    catch (e) { console.warn('[GII SMARTMONEY] localStorage save failed:', e.message || e); }
   }
 
   // Sequential promise queue with a gap between each call

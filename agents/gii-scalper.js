@@ -824,6 +824,7 @@
         // Add signal (replace any existing signal for this asset)
         _signals = _signals.filter(function (s) { return s.asset !== sym; });
         _signals.push(sig);
+        if (_signals.length > 200) _signals = _signals.slice(-200);
         _activeScalps[sym] = { asset: sym, bias: bestDir, signalTs: Date.now() };
         _status['note_' + sym] = 'Signal emitted: ' + bestDir.toUpperCase() + ' ' + sym + ' conf=' + sig.confidence;
         if (window.GII_SCALPER_BRAIN) {

@@ -59,7 +59,11 @@
         payload = JSON.stringify({ setupStats: _setupStats, assetStats: _assetStats });
         console.warn('[BRAIN] stat objects pruned further due to size >', Math.round(payload.length / 1024) + 'KB');
       }
-      localStorage.setItem(BRAIN_KEY, payload);
+      try {
+        localStorage.setItem(BRAIN_KEY, payload);
+      } catch (e) {
+        console.warn('[BRAIN] localStorage quota exceeded — stat objects were not saved');
+      }
     } catch (e) {}
   }
 

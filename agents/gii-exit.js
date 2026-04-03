@@ -306,10 +306,11 @@
     if (window.GII) {
       try {
         var gtiData = GII.gti();
-        if (gtiData && gtiData.value > GTI_EMERGENCY &&
+        var gtiVal0 = (gtiData && typeof gtiData.value === 'number' && isFinite(gtiData.value)) ? gtiData.value : null;
+        if (gtiVal0 !== null && gtiVal0 > GTI_EMERGENCY &&
             trade.direction === 'LONG' && RISK_ASSETS.indexOf(trade.asset) !== -1) {
           return { action: 'FORCE_CLOSE', reason: 'scalper-gti-extreme', detail:
-            'GTI ' + gtiData.value.toFixed(0) + ' is extreme — scalp risk too high' };
+            'GTI ' + gtiVal0.toFixed(0) + ' is extreme — scalp risk too high' };
         }
       } catch (e) {}
     }
@@ -359,9 +360,10 @@
     if (window.GII) {
       try {
         var gtiData = GII.gti();
-        if (gtiData && gtiData.value > GTI_EMERGENCY && dir === 'LONG' && isRisk) {
+        var gtiVal1 = (gtiData && typeof gtiData.value === 'number' && isFinite(gtiData.value)) ? gtiData.value : null;
+        if (gtiVal1 !== null && gtiVal1 > GTI_EMERGENCY && dir === 'LONG' && isRisk) {
           return { action: 'FORCE_CLOSE', reason: 'emergency-gti', detail:
-            'GTI=' + gtiData.value.toFixed(0) + ' — extreme tension, closing risk longs' };
+            'GTI=' + gtiVal1.toFixed(0) + ' — extreme tension, closing risk longs' };
         }
       } catch (e) {}
     }
@@ -432,10 +434,11 @@
     if (window.GII && trade.direction === 'LONG') {
       try {
         var gtiData = GII.gti();
+        var gtiVal2 = (gtiData && typeof gtiData.value === 'number' && isFinite(gtiData.value)) ? gtiData.value : null;
         var alignedWithTension = ['WTI','BRENT','GLD','XAU','SLV','GAS','LMT','RTX'].indexOf(trade.asset) !== -1;
-        if (gtiData && gtiData.value > 65 && alignedWithTension && pnl > 5.0) {
+        if (gtiVal2 !== null && gtiVal2 > 65 && alignedWithTension && pnl > 5.0) {
           return { action: 'RAISE_TP', reason: 'gti-rising-aligned', detail:
-            'GTI ' + gtiData.value.toFixed(0) + '% + ' + trade.asset + ' aligned — TP extended' };
+            'GTI ' + gtiVal2.toFixed(0) + '% + ' + trade.asset + ' aligned — TP extended' };
         }
       } catch (e) {}
     }

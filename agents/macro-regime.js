@@ -59,15 +59,25 @@
   var _lastPoll = 0;
 
   /* ── Persist/restore history so it survives page reloads ─────────────── */
+  var _CACHE_TTL = 86400000; // 24h
+
   function _loadHistory() {
     try {
       var raw = localStorage.getItem(STORE_KEY);
-      if (raw) _history = JSON.parse(raw);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.ts && (Date.now() - parsed.ts) < _CACHE_TTL) {
+          _history = parsed.data || [];
+        } else {
+          localStorage.removeItem(STORE_KEY);
+          _history = [];
+        }
+      }
     } catch (e) { _history = []; }
   }
 
   function _saveHistory() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(_history)); } catch (e) {}
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ ts: Date.now(), data: _history })); } catch (e) {}
   }
 
   /* ── Trend helper: % change from N periods ago ─────────────────────── */

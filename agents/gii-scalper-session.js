@@ -748,6 +748,7 @@
         // Add signal (replace any existing signal for this asset)
         _signals = _signals.filter(function (s) { return s.asset !== sym; });
         _signals.push(sig);
+        if (_signals.length > 200) _signals = _signals.slice(-200);
         _activeScalps[sym] = { asset: sym, bias: bestDir, signalTs: Date.now() };
         _status['note_' + sym] = '[SESSION] Signal: ' + bestDir.toUpperCase() + ' ' + sym + ' conf=' + sig.confidence;
         if (window.GII_SCALPER_BRAIN) {
@@ -858,7 +859,10 @@
 
   // ── init ──────────────────────────────────────────────────────────────────
 
+  var _initialized = false;
   window.addEventListener('load', function () {
+    if (_initialized) return;
+    _initialized = true;
     _loadFeedback();
     _loadCache();
     // v61: re-sync slot with EE on load to prevent 2h blackout after page refresh

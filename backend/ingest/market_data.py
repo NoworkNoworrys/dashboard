@@ -96,20 +96,30 @@ def _fetch_stooq_cached() -> Dict[str, Dict[str, Any]]:
         print(f'[MARKET] Stooq: serving cache ({len(_stooq_cache)} tickers)')
         return _stooq_cache
     result = _fetch_stooq()
+    _STALE_TTL_SECS = 3600.0   # drop prices stale for more than 1 hour
+    now_ts = datetime.datetime.now().timestamp()
     if result:
         # Merge with old cache: preserve stale prices for tickers missing from the fresh
         # result (e.g. WTI/Brent returning N/D during a futures contract roll period).
         merged = dict(_stooq_cache)
         for ticker, data in result.items():
-            data.pop('stale', None)   # clear any previous staleness flag
+            data.pop('stale', None)        # clear any previous staleness flag
+            data.pop('stale_since', None)
             merged[ticker] = data
         for ticker in list(merged.keys()):
             if ticker not in result:
-                merged[ticker] = dict(merged[ticker])
-                merged[ticker]['stale'] = True
-                print(f'[MARKET] Stooq: {ticker} missing from refresh — keeping stale price')
+                entry = dict(merged[ticker])
+                if not entry.get('stale'):
+                    entry['stale'] = True
+                    entry['stale_since'] = now_ts
+                    print(f'[MARKET] Stooq: {ticker} missing from refresh — marking stale')
+                elif now_ts - entry.get('stale_since', now_ts) > _STALE_TTL_SECS:
+                    del merged[ticker]
+                    print(f'[MARKET] Stooq: {ticker} stale >1h — dropping from cache')
+                    continue
+                merged[ticker] = entry
         _stooq_cache   = merged
-        _stooq_last_ts = datetime.datetime.now().timestamp()
+        _stooq_last_ts = now_ts
     return result or _stooq_cache
 
 

@@ -40,8 +40,8 @@ def fetch_google_trends() -> Dict[str, int]:
                 kw['allowed_methods'] = kw.pop('method_whitelist')
             _orig(self, *args, **kw)
         _retry_mod.Retry.__init__ = _patched
-    except Exception:
-        pass
+    except Exception as e:
+        print(f'[GOOGLE_TRENDS] pytrends Retry patch failed (non-fatal): {e}')
 
     pytrends = TrendReq(hl='en-US', tz=0, timeout=(10, 25), retries=1, backoff_factor=0.5)
     results: Dict[str, int] = {}

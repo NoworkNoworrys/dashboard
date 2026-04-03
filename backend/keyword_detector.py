@@ -29,7 +29,7 @@ _NEGATION_WORDS = (
     'ceasefire in ', 'end to ', 'end the ',
     'condemn ', 'condemns ', 'condemned ',
 )
-_NEGATION_WINDOW = 60  # characters to look back before the keyword
+_NEGATION_WINDOW = 20  # characters to look back before the keyword (~3-4 words, same clause only)
 
 
 def _is_negated(text: str, keyword: str, match_pos: int) -> bool:

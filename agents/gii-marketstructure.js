@@ -56,7 +56,21 @@
   }
 
   function _saveFeedback() {
-    try { localStorage.setItem(FEEDBACK_KEY, JSON.stringify(_feedback)); } catch (e) {}
+    try { localStorage.setItem(FEEDBACK_KEY, JSON.stringify(_feedback)); }
+    catch (e) { console.warn('[GII MKTSTRUCT] localStorage save failed:', e.message || e); }
+  }
+
+  function onTradeResult(trade) {
+    var asset = (trade.asset || '').toUpperCase();
+    var dir   = (trade.dir  || '').toLowerCase();
+    if (!asset || !dir) return;
+    var fbKey = asset + '_' + dir;
+    if (!_feedback[fbKey]) _feedback[fbKey] = { total: 0, correct: 0, winRate: null, lastTs: null };
+    _feedback[fbKey].total  += 1;
+    if ((trade.pnl_usd || 0) > 0) _feedback[fbKey].correct += 1;
+    _feedback[fbKey].winRate = _feedback[fbKey].correct / _feedback[fbKey].total;
+    _feedback[fbKey].lastTs  = new Date().toISOString();
+    _saveFeedback();
   }
 
   // ── order book fetch ──────────────────────────────────────────────────────
@@ -258,11 +272,12 @@
   // ── public API ────────────────────────────────────────────────────────────
 
   window.GII_AGENT_MARKETSTRUCTURE = {
-    poll:     poll,
-    signals:  function () { return _signals.slice(); },
-    status:   function () { return Object.assign({ lastPoll: _lastPollTs }, _status); },
-    accuracy: function () { return Object.assign({}, _feedback); },
-    books:    function () { return Object.assign({}, _lastBooks); }
+    poll:          poll,
+    signals:       function () { return _signals.slice(); },
+    status:        function () { return Object.assign({ lastPoll: _lastPollTs }, _status); },
+    accuracy:      function () { return Object.assign({}, _feedback); },
+    books:         function () { return Object.assign({}, _lastBooks); },
+    onTradeResult: onTradeResult
   };
 
   // ── init ──────────────────────────────────────────────────────────────────

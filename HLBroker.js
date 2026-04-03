@@ -24,6 +24,7 @@
   'use strict';
 
   var BACKEND = 'http://localhost:8765';
+  var BACKEND_WHITELIST = ['http://localhost:8765', 'http://127.0.0.1:8765'];
   var STORE_KEY = 'hl_broker_ui_v1';
 
   /* ── HL perp assets — all coins available as perpetuals on Hyperliquid ── */
@@ -361,7 +362,15 @@
   }
 
   /* ── Backend API calls ───────────────────────────────────────────────────── */
+  function _assertBackendSafe() {
+    if (BACKEND_WHITELIST.indexOf(BACKEND) === -1) {
+      console.error('[HLBroker] BLOCKED: backend URL "' + BACKEND + '" is not whitelisted — refusing to send credentials');
+      throw new Error('HLBroker: backend URL not whitelisted');
+    }
+  }
+
   async function _post(path, body) {
+    _assertBackendSafe();
     var res = await fetch(BACKEND + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -375,6 +384,7 @@
   }
 
   async function _get(path) {
+    _assertBackendSafe();
     var res = await fetch(BACKEND + path);
     if (!res.ok) throw new Error('HL backend ' + res.status);
     return res.json();

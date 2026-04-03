@@ -489,7 +489,7 @@
     if (window.GII) {
       try {
         var gtiData = GII.gti();
-        var gtiVal  = gtiData ? gtiData.value : 0;
+        var gtiVal  = (gtiData && typeof gtiData.value === 'number' && isFinite(gtiData.value)) ? gtiData.value : 0;
         /* High tension (40-75): good for oil, gold, defence longs */
         var oilGoldDef = ['WTI','BRENT','GLD','XAU','LMT','RTX','XAR','NOC'].indexOf(asset) !== -1;
         if (gtiVal >= 40 && gtiVal <= 75 && oilGoldDef && dir === 'LONG') { score += 1.0; }

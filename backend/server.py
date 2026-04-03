@@ -326,9 +326,12 @@ async def api_regime():
     """
     m = _market_cache  # snapshot — avoid race with pipeline writes
 
-    vix   = (m.get('VIX')   or {}).get('price')
-    dxy   = (m.get('DXY')   or {}).get('price')
-    us10y = (m.get('US10Y') or {}).get('price')
+    vix_data  = m.get('VIX')   or {}
+    dxy_data  = m.get('DXY')   or {}
+    us10y_data = m.get('US10Y') or {}
+    vix   = None if vix_data.get('stale')   else vix_data.get('price')
+    dxy   = None if dxy_data.get('stale')   else dxy_data.get('price')
+    us10y = None if us10y_data.get('stale') else us10y_data.get('price')
 
     # ── Regime classification ─────────────────────────────────────────────────
     if vix is None:
@@ -661,8 +664,8 @@ _ee_config_cache: dict = {}
 try:
     with open(_EE_CONFIG_FILE) as f:
         _ee_config_cache = json.load(f)
-except Exception:
-    pass
+except Exception as e:
+    print(f'[SERVER] Could not load EE config from disk: {e}')
 
 @app.post('/api/config')
 async def config_save(request: Request):
@@ -692,16 +695,46 @@ async def trades_list():
     return JSONResponse(content={'trades': trades, 'count': len(trades)})
 
 
+_VALID_STATUSES = {'OPEN', 'CLOSED'}
+_REQUIRED_TRADE_FIELDS = {'trade_id', 'asset', 'direction', 'status'}
+
+def _validate_trade(trade: dict):
+    """Return an error string if the trade is invalid, else None."""
+    if not isinstance(trade, dict):
+        return 'Trade must be a JSON object'
+    missing = _REQUIRED_TRADE_FIELDS - set(trade.keys())
+    if missing:
+        return f'Missing required fields: {sorted(missing)}'
+    if not trade.get('trade_id'):
+        return 'trade_id must be non-empty'
+    if trade.get('status') not in _VALID_STATUSES:
+        return f'Invalid status "{trade.get("status")}" — must be one of {_VALID_STATUSES}'
+    entry = trade.get('entry_price')
+    if entry is not None:
+        try:
+            p = float(entry)
+            if p <= 0 or p > 1e9:
+                return f'entry_price out of range: {p}'
+        except (ValueError, TypeError):
+            return 'entry_price must be numeric'
+    return None
+
 @app.post('/api/trades')
 async def trades_create(request: Request):
     """Insert or replace a trade (upsert by trade_id)."""
     body = await request.json()
     if isinstance(body, list):
-        # Bulk insert
+        for trade in body:
+            err = _validate_trade(trade)
+            if err:
+                return JSONResponse(content={'ok': False, 'error': err}, status_code=400)
         for trade in body:
             await asyncio.get_event_loop().run_in_executor(None, trades_store.upsert, trade)
         return JSONResponse(content={'ok': True, 'count': len(body)})
     else:
+        err = _validate_trade(body)
+        if err:
+            return JSONResponse(content={'ok': False, 'error': err}, status_code=400)
         await asyncio.get_event_loop().run_in_executor(None, trades_store.upsert, body)
         return JSONResponse(content={'ok': True, 'trade_id': body.get('trade_id')})
 

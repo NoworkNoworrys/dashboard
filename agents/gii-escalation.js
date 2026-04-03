@@ -154,14 +154,23 @@
     return n;
   }
 
+  var _CACHE_TTL = 86400000; // 24h
+
   function _save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_ladder)); } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ts: Date.now(), data: _ladder })); } catch (e) {}
   }
 
   function _load() {
     try {
-      var d = localStorage.getItem(STORAGE_KEY);
-      if (d) _ladder = JSON.parse(d);
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.ts && (Date.now() - parsed.ts) < _CACHE_TTL) {
+          _ladder = parsed.data;
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      }
     } catch (e) {}
   }
 

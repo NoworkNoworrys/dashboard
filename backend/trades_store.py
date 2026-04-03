@@ -89,8 +89,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     if extra_raw:
         try:
             d.update(json.loads(extra_raw))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f'[TRADES_STORE] Failed to parse extra field: {e}')
     return d
 
 
@@ -113,14 +113,6 @@ def upsert(trade: dict) -> None:
     rolling the trade back to OPEN in the database.
     """
     trade_id = trade.get('trade_id')
-    if trade_id and trade.get('status') == 'OPEN':
-        with _lock:
-            with _get_conn() as conn:
-                row = conn.execute(
-                    "SELECT status FROM trades WHERE trade_id = ?", [trade_id]
-                ).fetchone()
-                if row and row[0] == 'CLOSED':
-                    return   # Never downgrade CLOSED → OPEN
 
     known_set = set(_COLS)
     extra     = {k: v for k, v in trade.items() if k not in known_set}
@@ -133,6 +125,13 @@ def upsert(trade: dict) -> None:
 
     with _lock:
         with _get_conn() as conn:
+            # Atomic check-then-write: never downgrade CLOSED → OPEN
+            if trade_id and trade.get('status') == 'OPEN':
+                row = conn.execute(
+                    "SELECT status FROM trades WHERE trade_id = ?", [trade_id]
+                ).fetchone()
+                if row and row[0] == 'CLOSED':
+                    return   # Never downgrade CLOSED → OPEN
             conn.execute(
                 f"INSERT OR REPLACE INTO trades ({col_names}) VALUES ({placeholders})",
                 [values[c] for c in all_cols]

@@ -203,6 +203,15 @@
     _cooldowns[_cooldownKey(asset, bias)] = Date.now();
   }
 
+  function _pruneCooldowns() {
+    var cutoff = Date.now() - COOLDOWN_MS;
+    var keys = Object.keys(_cooldowns);
+    for (var i = 0; i < keys.length; i++) {
+      if (_cooldowns[keys[i]] < cutoff) delete _cooldowns[keys[i]];
+    }
+  }
+  setInterval(_pruneCooldowns, 3600000);
+
   // Dedup key for event+asset+bias combo
   function _dedupKey(eventId, asset, bias) {
     return eventId + '_' + asset.toUpperCase() + '_' + bias;
@@ -437,7 +446,10 @@
 
   // ── init ──────────────────────────────────────────────────────────────────
 
+  var _initialized = false;
   function _init() {
+    if (_initialized) return;
+    _initialized = true;
     console.log('[EVENT-MOMENTUM] Initialising — price snapshots every 5min, first scan in 15s');
 
     // Start snapshotting immediately so we have ~15–25 min of history by first scan

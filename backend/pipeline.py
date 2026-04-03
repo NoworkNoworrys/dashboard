@@ -101,18 +101,22 @@ _cycle_n = 0
 
 # Per-source status tracking — updated each cycle
 import time as _time
+import threading as _threading
 _source_status: dict = {}
+_source_status_lock = _threading.Lock()
 
 def _update_source(name: str, count: int, error: str = ''):
-    _source_status[name] = {
-        'last_ok':    int(_time.time() * 1000) if not error else _source_status.get(name, {}).get('last_ok', 0),
-        'last_run':   int(_time.time() * 1000),
-        'count':      count,
-        'error':      error,
-    }
+    with _source_status_lock:
+        _source_status[name] = {
+            'last_ok':    int(_time.time() * 1000) if not error else _source_status.get(name, {}).get('last_ok', 0),
+            'last_run':   int(_time.time() * 1000),
+            'count':      count,
+            'error':      error,
+        }
 
 def get_source_status() -> dict:
-    return dict(_source_status)
+    with _source_status_lock:
+        return dict(_source_status)
 
 # GDELT adaptive backoff — incremented on 429, decremented each skipped cycle.
 # When > 0, GDELT is skipped even on its scheduled cycle.
@@ -149,6 +153,22 @@ async def _run_sync(fn, *args):
     return await loop.run_in_executor(_executor, fn, *args)
 
 
+async def _run_sync_with_retry(fn, *args, max_retries: int = 2, backoff: float = 0.5):
+    """Like _run_sync but retries up to max_retries times on exception."""
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            result = await _run_sync(fn, *args)
+            if isinstance(result, Exception):
+                raise result
+            return result
+        except Exception as e:
+            last_exc = e
+            if attempt < max_retries:
+                await asyncio.sleep(backoff * (attempt + 1))
+    return last_exc  # return final exception so gather can log it
+
+
 async def _ingest_events(run_gdelt: bool = True) -> List[Dict]:
     """
     Fetch from all news sources concurrently.
@@ -166,34 +186,34 @@ async def _ingest_events(run_gdelt: bool = True) -> List[Dict]:
         run_gdelt = False
 
     tasks = [
-        _run_sync(fetch_rss),
-        _run_sync(fetch_reddit),
-        _run_sync(fetch_reliefweb),
-        _run_sync(fetch_acled),
-        _run_sync(fetch_newsapi),
-        _run_sync(fetch_eventregistry),
-        _run_sync(fetch_twitter),
-        _run_sync(fetch_sentinel),
-        _run_sync(fetch_maritime_ais),
-        _run_sync(fetch_who),
-        _run_sync(fetch_nasa_firms),
-        _run_sync(fetch_metaculus),
-        _run_sync(fetch_wikipedia_spikes),
-        _run_sync(fetch_sanctions),
-        _run_sync(fetch_unhcr),
-        _run_sync(fetch_fews),
-        _run_sync(fetch_ocha),
-        _run_sync(fetch_manifold),
-        _run_sync(fetch_iaea),
-        _run_sync(fetch_otx),
-        _run_sync(fetch_propublica),
-        _run_sync(fetch_gfw),
-        _run_sync(fetch_usgs),
-        _run_sync(fetch_gdacs),
-        _run_sync(fetch_icg),
+        _run_sync_with_retry(fetch_rss),
+        _run_sync_with_retry(fetch_reddit),
+        _run_sync_with_retry(fetch_reliefweb),
+        _run_sync_with_retry(fetch_acled),
+        _run_sync_with_retry(fetch_newsapi),
+        _run_sync_with_retry(fetch_eventregistry),
+        _run_sync_with_retry(fetch_twitter),
+        _run_sync_with_retry(fetch_sentinel),
+        _run_sync_with_retry(fetch_maritime_ais),
+        _run_sync_with_retry(fetch_who),
+        _run_sync_with_retry(fetch_nasa_firms),
+        _run_sync_with_retry(fetch_metaculus),
+        _run_sync_with_retry(fetch_wikipedia_spikes),
+        _run_sync_with_retry(fetch_sanctions),
+        _run_sync_with_retry(fetch_unhcr),
+        _run_sync_with_retry(fetch_fews),
+        _run_sync_with_retry(fetch_ocha),
+        _run_sync_with_retry(fetch_manifold),
+        _run_sync_with_retry(fetch_iaea),
+        _run_sync_with_retry(fetch_otx),
+        _run_sync_with_retry(fetch_propublica),
+        _run_sync_with_retry(fetch_gfw),
+        _run_sync_with_retry(fetch_usgs),
+        _run_sync_with_retry(fetch_gdacs),
+        _run_sync_with_retry(fetch_icg),
     ]
     if run_gdelt:
-        tasks.append(_run_sync(fetch_gdelt))
+        tasks.append(_run_sync_with_retry(fetch_gdelt))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
     events = []

@@ -114,8 +114,8 @@ def load_config():
             for k in ('wallet', 'private_key', 'testnet'):
                 if k in saved:
                     _cfg[k] = saved[k]
-    except Exception:
-        pass
+    except Exception as e:
+        print(f'[HL_BROKER] Could not load config from disk: {e}')
 
 
 def save_config():
@@ -191,8 +191,8 @@ def _portfolio_total(wallet: str = '') -> float:
                 hist = section[1].get('accountValueHistory', [])
                 if hist:
                     return float(hist[-1][1])
-    except Exception:
-        pass
+    except Exception as e:
+        print(f'[HL_BROKER] get_equity failed: {e}')
     return 0.0
 
 
@@ -366,8 +366,8 @@ def cancel_trigger_orders(coin: str) -> dict:
                 try:
                     _exchange.cancel(coin, order['oid'])
                     cancelled += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f'[HL_BROKER] cancel order failed for {coin} oid={order.get("oid")}: {e}')
         return {'ok': True, 'cancelled': cancelled}
     except Exception as e:
         return {'ok': False, 'error': str(e)}

@@ -151,6 +151,15 @@
     _cooldowns[asset + ':' + direction] = Date.now() + COOLDOWN_MS;
   }
 
+  function _pruneCooldowns() {
+    var now = Date.now();
+    var keys = Object.keys(_cooldowns);
+    for (var i = 0; i < keys.length; i++) {
+      if (_cooldowns[keys[i]] < now) delete _cooldowns[keys[i]];
+    }
+  }
+  setInterval(_pruneCooldowns, 3600000);
+
   // ── Indicator Calculations ────────────────────────────────────────────────
 
   /*

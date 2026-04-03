@@ -191,6 +191,15 @@
     _cooldowns[_cooldownKey(asset, bias)] = Date.now();
   }
 
+  function _pruneCooldowns() {
+    var cutoff = Date.now() - COOLDOWN_MS;
+    var keys = Object.keys(_cooldowns);
+    for (var i = 0; i < keys.length; i++) {
+      if (_cooldowns[keys[i]] < cutoff) delete _cooldowns[keys[i]];
+    }
+  }
+  setInterval(_pruneCooldowns, 3600000);
+
   // Format a % value with sign and one decimal place
   function _fmt(v) {
     var sign = v >= 0 ? '+' : '';

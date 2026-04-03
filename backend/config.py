@@ -51,7 +51,8 @@ try:
     with open(_uw_config_file) as _f:
         _uw_saved = _json.load(_f)
     UW_API_KEY = _uw_saved.get('uw_api_key') or os.getenv('UW_API_KEY', '')
-except Exception:
+except Exception as e:
+    print(f'[CONFIG] Could not load UW API key from disk: {e}')
     UW_API_KEY = os.getenv('UW_API_KEY', '')
 
 # ── GDELT ───────────────────────────────────────────────────────────────────

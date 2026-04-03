@@ -527,7 +527,10 @@
   };
 
   /* ── Init ──────────────────────────────────────────────────────────────── */
+  var _initialized = false;
   function init() {
+    if (_initialized) return;
+    _initialized = true;
     render();
     if (_interval) clearInterval(_interval);
     _interval = setInterval(render, REFRESH_MS);

@@ -71,7 +71,7 @@
     if (vix === null && window.GII && typeof GII.gti === 'function') {
       try {
         var _gti = GII.gti();
-        if (_gti && _gti.value != null) {
+        if (_gti && typeof _gti.value === 'number' && isFinite(_gti.value)) {
           // GTI 80+ ≈ VIX 35+, GTI 60 ≈ VIX 25, GTI 40 ≈ VIX 18
           vix = Math.round(10 + _gti.value * 0.35);
           vixSource = 'gti-estimate';
@@ -407,7 +407,7 @@
         if (!_status.vix && window.GII && typeof GII.gti === 'function') {
           try {
             var _gti = GII.gti();
-            if (_gti && _gti.value != null) {
+            if (_gti && typeof _gti.value === 'number' && isFinite(_gti.value)) {
               _status.vix       = Math.round(10 + _gti.value * 0.35);
               _status.vixSource = 'gti-estimate';
             }
