@@ -8,6 +8,7 @@ Read operations (account state, prices) use direct HTTP to avoid the same crash.
 """
 import json
 import os
+import time
 import threading
 import requests
 from typing import Optional
@@ -35,6 +36,7 @@ _exchange: Optional[object] = None
 # Serialize concurrent order placements — prevents race where two signals both
 # pass the margin pre-check before either has committed margin on HL.
 _order_lock = threading.Lock()
+_last_order_ts: float = 0.0   # rate-limit throttle — 1.5s min gap between orders
 
 # Cache of per-asset size decimals: {'BTC': 5, 'SOL': 2, 'DOGE': 0, ...}
 _sz_decimals: dict = {}
@@ -231,6 +233,14 @@ def place_order(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> 
 
 
 def _place_order_locked(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> dict:
+    # Rate-limit throttle: 1.5s min gap between orders to avoid HL 429 errors.
+    # Already inside _order_lock so no concurrency issue.
+    global _last_order_ts
+    elapsed = time.time() - _last_order_ts
+    if elapsed < 1.5:
+        time.sleep(1.5 - elapsed)
+    _last_order_ts = time.time()
+
     try:
         # Get current mid price — xyz: perps are not in allMids, use l2Book instead
         if coin.startswith('xyz:'):

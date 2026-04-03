@@ -46,14 +46,14 @@
     auto_start:            true,
     broker:                'SIMULATION',
     max_siglog:            200,
-    cooldown_ms:           60000,
+    cooldown_ms:           180000,       // 3 min per-asset cooldown — quality over quantity
     // ── Core risk parameters (Morgan's live settings — these are the standard) ─
-    min_confidence:        55,           // minimum signal confidence to trade
+    min_confidence:        68,           // raised from 55 — only higher-conviction signals
     virtual_balance:       1000,         // placeholder — overwritten by live broker equity sync
     risk_per_trade_pct:    10,           // 10% per trade: sized for small $26 HL account
     stop_loss_pct:         2.5,          // 2.5% stop distance
     take_profit_ratio:     3.0,          // 3.0R target (raised from 2.5 — partial TP at 70% = 2.1R vs old 1.25R)
-    max_open_trades:       12,
+    max_open_trades:       5,            // focused positions — $85 account
     max_per_region:        6,
     max_per_sector:        6,
     max_exposure_pct:      45,
@@ -396,6 +396,9 @@
     'DAL':true,  'UAL':true,   'DIA':true,  'EEM':true,  'FXI':true,
     'AMD':true,  'INDA':true,  'COPX':true, 'XME':true,
     'URA':true,  'EWZ':true,   'EWJ':true,  'SOYB':true, 'XLE':true,
+    // Stale-price assets — unreliable HL feeds, 0% WR across 30+ trades
+    'MAVIA':true, 'GALA':true, 'CRV':true, '2Z':true,
+    'JTO':true,   'KAS':true,  'FTT':true, 'GMX':true,
   };
 
   /* ── Correlation groups — assets within each group are treated as equivalent
@@ -3895,6 +3898,70 @@
       }
       if (!sigs.length) return;
     }
+
+    // ── Quality Gate ────────────────────────────────────────────────────────
+    // Filters signals to only the best trades before Phase 1 scoring.
+    // Fewer, smarter, better-sized trades — quality over quantity.
+    var _QG_EQUITY_PERPS = {
+        'MSTR':true, 'INTC':true, 'PLTR':true, 'COIN':true,
+        'MSFT':true, 'AMZN':true, 'MU':true,   'CRWV':true,
+        'AAPL':true, 'META':true, 'TSLA':true, 'NVDA':true,
+        'GOOG':true, 'GOOGL':true,'SLV':true,  'GOLD':true
+    };
+
+    sigs = sigs.filter(function (sig) {
+        var _qgAsset    = normaliseAsset(sig.asset);
+        var _qgSrcCount = sig.srcCount || 1;
+        var _qgConf     = sig.conf || sig.confidence || 0;
+        var _qgIsScalper = sig.reason && sig.reason.indexOf('SCALPER') !== -1;
+        var _qgDir      = (sig.dir || 'LONG').toLowerCase();
+
+        // Rule 1: Solo scalper needs 75%+ confidence
+        if (_qgIsScalper && _qgSrcCount < 2 && _qgConf < 75) {
+            _logSignal(sig, 'SKIPPED', 'Quality gate: solo scalper below 75% conf (' + _qgConf + '%)');
+            return false;
+        }
+
+        // Rule 2: Equity perps need multi-source agreement
+        if (_QG_EQUITY_PERPS[_qgAsset] && _qgSrcCount < 2) {
+            _logSignal(sig, 'SKIPPED', 'Quality gate: equity perp ' + _qgAsset + ' needs 2+ sources');
+            return false;
+        }
+
+        // Rule 3: Block proven losers via brain feedback
+        if (window.GII_SCALPER_BRAIN) {
+            var _qgFb = GII_SCALPER_BRAIN.inheritFeedback(_qgAsset);
+            if (_qgFb && _qgFb[_qgDir] && _qgFb[_qgDir].total >= 8 && _qgFb[_qgDir].winRate === 0) {
+                _logSignal(sig, 'SKIPPED', 'Quality gate: 0% WR over ' + _qgFb[_qgDir].total + ' trades on ' + _qgAsset + ' ' + _qgDir);
+                return false;
+            }
+        }
+
+        // Rule 4: Small account — tighter position limit
+        var _qgBal = _getEffectiveBalance();
+        var _qgOpenCount = openTrades().length;
+        if (_qgBal < 100 && _qgOpenCount >= 3) {
+            _logSignal(sig, 'SKIPPED', 'Quality gate: small account ($' + _qgBal.toFixed(0) + ') — max 3 positions');
+            return false;
+        }
+
+        // Rule 5: Cap crypto positions — prioritise edge assets (stocks, commodities, gold)
+        var _qgSector = EE_SECTOR_MAP[_qgAsset];
+        if (_qgSector === 'crypto') {
+            var _qgCryptoOpen = openTrades().filter(function (t) {
+                return EE_SECTOR_MAP[normaliseAsset(t.asset)] === 'crypto';
+            }).length;
+            if (_qgCryptoOpen >= 2 && _qgConf < 80 && _qgSrcCount < 2) {
+                _logSignal(sig, 'SKIPPED', 'Quality gate: 2 crypto already open — need 80%+ conf or 2+ sources');
+                return false;
+            }
+        }
+
+        return true;
+    });
+
+    if (!sigs.length) return;
+    // ── End Quality Gate ────────────────────────────────────────────────────
 
     _lastSignals = sigs;                 // always cache — re-scan loop needs these
 
