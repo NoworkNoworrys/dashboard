@@ -84,6 +84,8 @@ app.add_middleware(
 # Each connected SSE client gets its own asyncio.Queue.
 _clients: Set[asyncio.Queue] = set()
 _market_cache: dict = {}          # Latest market prices, updated every cycle
+_market_cache_ts: float = 0.0     # Unix timestamp (seconds) of last market update
+_MARKET_STALE_SECS: float = 300.0 # Flag prices as stale after 5 minutes
 
 
 def broadcast_event(evt: dict):
@@ -100,8 +102,10 @@ def broadcast_event(evt: dict):
 
 def broadcast_market(prices: dict):
     """Called by pipeline to push updated market prices to all SSE clients."""
-    global _market_cache
+    global _market_cache, _market_cache_ts
+    import time as _time_mod
     _market_cache = prices
+    _market_cache_ts = _time_mod.time()
     msg = json.dumps(prices)
     dead = set()
     for q in _clients:
@@ -176,8 +180,23 @@ async def api_events(limit: int = 100):
 
 @app.get('/api/market')
 async def api_market():
-    """Return latest cached market prices."""
-    return JSONResponse(content=_market_cache)
+    """Return latest cached market prices with freshness metadata.
+    Each entry includes a ts (ms epoch) and stale flag so the frontend
+    can distinguish fresh data from a cached snapshot that's gone cold."""
+    import time as _time_mod
+    now = _time_mod.time()
+    age_secs = now - _market_cache_ts if _market_cache_ts else None
+    is_stale = (age_secs is None) or (age_secs > _MARKET_STALE_SECS)
+    ts_ms = int(_market_cache_ts * 1000) if _market_cache_ts else None
+    # Annotate each price entry with the shared update timestamp and stale flag.
+    # The pipeline updates all tickers in a single batch so they share one ts.
+    annotated = {}
+    for sym, entry in _market_cache.items():
+        if isinstance(entry, dict):
+            annotated[sym] = dict(entry, ts=ts_ms, stale=is_stale)
+        else:
+            annotated[sym] = {'price': entry, 'ts': ts_ms, 'stale': is_stale}
+    return JSONResponse(content=annotated)
 
 
 @app.get('/api/learning')

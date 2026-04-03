@@ -120,7 +120,7 @@
     var dir    = (trade.dir || trade.direction || 'long').toLowerCase();
     if (dir !== 'long' && dir !== 'short') dir = 'long';
     var pnl    = trade.pnl_usd !== undefined ? trade.pnl_usd : (trade.pnl || trade.profit || 0);
-    var won    = pnl > 0;
+    var won    = pnl >= 0;  // break-even (pnl=0) counts as non-loss; strict > was deflating win-rate
 
     // Setup-level stats
     var sector    = (meta && meta.sector)    || 'unknown';
@@ -217,8 +217,9 @@
     });
 
     if (total === 0 || sameDir === 0) return 0;
-    // Strength = fraction of same-sector signals that agree, capped at 0.80
-    return Math.min(0.80, (sameDir / Math.max(1, total)) * 0.80);
+    // Strength = fraction of same-sector signals that agree, capped at 0.80.
+    // No extra * 0.80 multiplier — that was halving the alignment bonus unintentionally.
+    return Math.min(0.80, sameDir / Math.max(1, total));
   }
 
   // ── analytics helpers ─────────────────────────────────────────────────────

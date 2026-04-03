@@ -971,10 +971,12 @@
     _writeQueue.push({ op: op, tradeId: tradeId, data: data, ts: Date.now() });
     // #20: Cap queue size — if backend is offline for a long time, don't let
     // the queue grow unbounded. Keep newest items, drop oldest.
-    var _WQ_MAX = 200;
+    var _WQ_MAX = 500;  // raised from 200 — allows longer backend outages without data loss
     if (_writeQueue.length > _WQ_MAX) {
       _writeQueue = _writeQueue.slice(-_WQ_MAX);
-      log('WARN', 'Write queue capped at ' + _WQ_MAX + ' items — oldest entries dropped', 'amber');
+      log('WARN', 'Write queue capped at ' + _WQ_MAX + ' items — oldest entries dropped', 'red');
+    } else if (_writeQueue.length > Math.floor(_WQ_MAX * 0.8)) {
+      log('WARN', 'Write queue at ' + _writeQueue.length + '/' + _WQ_MAX + ' — backend may be offline', 'amber');
     }
     _saveWriteQueue();
   }
@@ -1179,14 +1181,17 @@
                  t.venue === 'ALPACA';
         });
         // T1-B: auto-purge phantom trades on startup — OPEN trades stuck in PENDING_FILL
-        // for >5 min. These are orders that were sent but never confirmed (page crash, timeout).
+        // for >7 min. These are orders that were sent but never confirmed (page crash, timeout).
         // They block asset slots and corrupt analytics indefinitely.
-        var _phantomCutoff = Date.now() - 300000;
+        // 7 min (not 5): slow page reloads inflate apparent age (local clock vs timestamp_open).
+        // An order 4:58 old + 30s reload lag appears 5:28 → would be wrongly purged at 5 min.
+        // Extra 2-minute buffer ensures only genuinely abandoned orders are cleared.
+        var _phantomCutoff = Date.now() - 420000;  // 7 minutes
         _trades.forEach(function (t) {
           if (t.status === 'OPEN' &&
               (t.broker_status === 'PENDING_FILL' || !t.broker_status) &&
               new Date(t.timestamp_open).getTime() < _phantomCutoff) {
-            log('SYSTEM', t.asset + ' phantom trade purged on startup (stuck PENDING_FILL, >5min old)', 'amber');
+            log('SYSTEM', t.asset + ' phantom trade purged on startup (stuck PENDING_FILL, >7min old)', 'amber');
             closeTrade(t.trade_id, t.entry_price || 0.01, 'PHANTOM-PURGE');
           }
         });
@@ -1194,11 +1199,11 @@
         // T1-C: also run phantom purge every 5 min so stuck trades don't persist
         // between page reloads (startup purge only catches them on next load otherwise).
         setInterval(function () {
-          var cutoff = Date.now() - 300000;
+          var cutoff = Date.now() - 420000;  // 7 min — matches startup purge threshold
           openTrades().forEach(function (t) {
             if ((t.broker_status === 'PENDING_FILL' || !t.broker_status) &&
                 new Date(t.timestamp_open).getTime() < cutoff) {
-              log('SYSTEM', t.asset + ' phantom trade purged (stuck PENDING_FILL, >5min old)', 'amber');
+              log('SYSTEM', t.asset + ' phantom trade purged (stuck PENDING_FILL, >7min old)', 'amber');
               closeTrade(t.trade_id, t.entry_price || 0.01, 'PHANTOM-PURGE');
             }
           });
@@ -2974,12 +2979,34 @@
         return;
       }
       var _hlSide = trade.direction === 'LONG' ? 'buy' : 'sell';
-      var _hlLev  = trade.leverage ? Math.floor(trade.leverage) : 1;
+      var _hlLev  = trade.leverage ? Math.round(trade.leverage) : 1;  // round not floor — 1.75x → 2x, not 1x
+      // 45s watchdog: if neither onFill nor onFail fires (network partition, HL unresponsive),
+      // mark the trade as BROKER_REJECTED instead of leaving it stuck in PENDING_FILL forever.
+      var _hlCallbackFired = false;
+      var _hlWatchdog = setTimeout(function () {
+        if (_hlCallbackFired) return;
+        log('HL', '⚠ Order timeout (45s) for ' + trade.asset + ' — no fill/reject received, marking REJECTED', 'red');
+        trade.broker_status   = 'REJECTED';
+        trade.broker_error    = 'Order timed out after 45s — no broker confirmation';
+        trade.status          = 'CLOSED';
+        trade.close_reason    = 'BROKER_REJECTED';
+        trade.timestamp_close = new Date().toISOString();
+        _cfg.virtual_balance += (trade.open_commission || 0);
+        delete _cooldown[normaliseAsset(trade.asset) + '_' + (trade.direction || 'LONG')];
+        saveTrades();
+        saveCfg();
+        _apiPatchTrade(trade.trade_id, {
+          status: 'CLOSED', close_reason: 'BROKER_REJECTED',
+          broker_error: trade.broker_error, timestamp_close: trade.timestamp_close
+        });
+        renderUI();
+      }, 45000);
       HLBroker.placeOrderWithConfirmation(
         trade.asset, null, _hlSide,
         // Fix #19: cloid = idempotency key — HL rejects a second order with the same cloid
         { notional: trade.size_usd, leverage: _hlLev, cloid: trade.trade_id },
         /* onFill */ function (fillPrice, pos) {
+          _hlCallbackFired = true; clearTimeout(_hlWatchdog);
           trade.broker_status     = 'FILLED';
           trade.broker_fill_price = fillPrice;
           if (fillPrice > 0 && isFinite(fillPrice)) trade.entry_price = fillPrice;
@@ -3016,6 +3043,7 @@
           renderUI();
         },
         /* onFail */ function (reason) {
+          _hlCallbackFired = true; clearTimeout(_hlWatchdog);
           trade.broker_status   = 'REJECTED';
           trade.broker_error    = 'Order ' + reason;
           trade.status          = 'CLOSED';
@@ -3039,6 +3067,7 @@
         // broker_status already set to PENDING_FILL before save — just log
         log('HL', trade.asset + ' order submitted — awaiting fill', 'cyan');
       }).catch(function (e) {
+        _hlCallbackFired = true; clearTimeout(_hlWatchdog);  // cancel watchdog; catch handles it
         trade.broker_status   = 'REJECTED';
         trade.broker_error    = e.message || 'unknown error';
         trade.status          = 'CLOSED';
@@ -3332,14 +3361,10 @@
     trade.timestamp_close = new Date().toISOString();
     trade.close_reason    = reason;
 
-    // Cancel broker-side trigger orders when closing locally.
-    // Prevents phantom SL/TP triggers from firing after the position is closed.
-    if (trade.venue === 'HL' && window.HLBroker && HLBroker.isConnected()) {
-      HLBroker.cancelTriggerOrders(trade.asset).catch(function () {});
-    }
-
     // Guard: corrupted or missing close price (NaN, Infinity, 0, negative) must not
     // propagate into P&L. Reject the close and log — the monitor loop will retry.
+    // IMPORTANT: validate price BEFORE cancelling broker trigger orders so that
+    // if we revert to OPEN, the position still has its broker-side SL/TP protection.
     var rawClosePrice = parseFloat(closePrice);
     if (!isFinite(rawClosePrice) || rawClosePrice <= 0) {
       log('TRADE', trade.asset + ' closeTrade: invalid closePrice (' + closePrice + ') — close aborted, will retry', 'amber');
@@ -3347,6 +3372,13 @@
       trade.timestamp_close = null;
       trade.close_reason    = null;
       return;
+    }
+
+    // Cancel broker-side trigger orders AFTER price validation succeeds.
+    // If we cancelled first and then aborted on bad price, the position would
+    // revert to OPEN but with no broker-side SL/TP — completely unprotected.
+    if (trade.venue === 'HL' && window.HLBroker && HLBroker.isConnected()) {
+      HLBroker.cancelTriggerOrders(trade.asset).catch(function () {});
     }
 
     // Reality check 2 — exit slippage: adjust fill price for spread + market-order slippage.
@@ -3425,9 +3457,13 @@
     } else {
       // Tier B: warn (but don't correct) if P&L still > 10× theoretical max after passing side check
       // (trailing stop can legitimately exceed 2× by riding past original TP, so threshold is 10×)
-      // Use original full units (×2 if partial TP has already halved them) for the theoretical max
-      // so the check isn't artificially loosened on partial-close trades.
-      var fullUnits = trade.partial_tp_taken ? trade.units * 2 : trade.units;
+      // Use original full units for the theoretical max so the check isn't artificially
+      // loosened on partial-close trades. Recover original from stored partial fraction;
+      // ×2 assumed 50% partial which is wrong if partial_tp_frac was 25%.
+      var _partialFrac = trade.partial_tp_frac || 0.50;  // fraction taken at partial TP
+      var fullUnits = trade.partial_tp_taken
+        ? trade.units / (1 - _partialFrac)  // e.g. 75% remaining → /0.75 = original
+        : trade.units;
       var theoreticalMax = Math.abs(fullUnits * (trade.take_profit - trade.entry_price));
       if (theoreticalMax > 0 && Math.abs(trade.pnl_usd) > theoreticalMax * 10) {
         log('AUDIT',
@@ -3682,10 +3718,14 @@
   function _computeSignalScore(sig) {
     var base = Math.max(0, (sig.conf || 0) / 100);
 
-    // EV multiplier
+    // EV multiplier — gradient in both directions so ranking differentiates weak/strong signals.
+    // Positive EV: +8% per unit up to +24% at EV=3.
+    // Negative EV: smooth penalty down to 0.50 at EV=-6 (flat 0.88 was treating EV=-0.5 same as EV=-5).
     var evMult = 1.0;
     if (sig._ev != null && isFinite(sig._ev)) {
-      evMult = sig._ev > 0 ? (1 + Math.min(sig._ev, 3) * 0.08) : 0.88;
+      evMult = sig._ev >= 0
+        ? (1 + Math.min(sig._ev, 3) * 0.08)
+        : Math.max(0.50, 1 + sig._ev * 0.08);  // EV=-1 → 0.92, EV=-3 → 0.76, EV=-6 → 0.50
     }
 
     // Source quality tier
@@ -3744,6 +3784,12 @@
       if (_now - _lastSeen < 30000) return false;  // seen in last 30s — skip
       _sigDedupCache[_ddKey] = _now;
       return true;
+    });
+    // Prune dedup cache entries older than 60s — prevents unbounded growth over long sessions.
+    // _cooldown does its own cleanup; dedup cache had none before this fix.
+    var _ddPruneCutoff = _now - 60000;
+    Object.keys(_sigDedupCache).forEach(function (k) {
+      if (_sigDedupCache[k] < _ddPruneCutoff) delete _sigDedupCache[k];
     });
     if (!sigs.length) return;
 
@@ -4034,6 +4080,32 @@
           ' selected (scores: ' + _ranked.map(function(s){ return s.asset+' '+s._score; }).join(', ') + ')', 'green');
         _readySigs = _ranked;
       }
+    }
+
+    // Sector cap enforcement across the batch: canExecute() checks sector count
+    // against currently-open trades but can't see other signals in the same batch
+    // that are also about to open. Filter ranked signals so the combined count of
+    // (open in sector) + (selected in this batch for that sector) stays within cap.
+    if (_cfg.max_per_sector && _readySigs.length > 1) {
+      var _batchSectorCount = {};  // sector → number of signals already selected in batch
+      var _filtered = [];
+      _readySigs.forEach(function (s) {
+        var _sec = EE_SECTOR_MAP[normaliseAsset(s.asset)];
+        if (_sec && _cfg.max_per_sector) {
+          var _openInSec = openTrades().filter(function (t) {
+            return EE_SECTOR_MAP[normaliseAsset(t.asset)] === _sec;
+          }).length;
+          var _batchInSec = _batchSectorCount[_sec] || 0;
+          if (_openInSec + _batchInSec >= _cfg.max_per_sector) {
+            _logSignal(s, 'SKIPPED', 'Batch sector cap: ' + _sec + ' already at ' +
+              _cfg.max_per_sector + ' (' + _openInSec + ' open + ' + _batchInSec + ' in batch)');
+            return;
+          }
+        }
+        _batchSectorCount[_sec || ''] = (_batchSectorCount[_sec || ''] || 0) + 1;
+        _filtered.push(s);
+      });
+      _readySigs = _filtered;
     }
 
     // ── Phase 3: execute selected signals ─────────────────────────────────────
@@ -4724,6 +4796,7 @@
             var partialComm = (closedUnits * adjPartialClose) * _getCosts(trade.asset).commission;
             partialPnl = +(partialPnl - partialComm).toFixed(2);
             trade.partial_tp_taken  = true;
+            trade.partial_tp_frac   = _partialFrac;  // store so corruption check can recover original units
             trade.partial_tp_price  = +adjPartialClose.toFixed(6);
             trade.partial_pnl_usd   = partialPnl;
             trade.costs_usd         = +((trade.costs_usd || 0) + partialComm).toFixed(4);
