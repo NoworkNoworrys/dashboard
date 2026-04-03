@@ -4486,9 +4486,16 @@
           return;
         }
         // Build lookup of HL assets
+        // Strip 'xyz:' prefix from HL equity perp coin names (e.g. 'xyz:MSTR' → 'MSTR')
+        // so they match the EE's stored asset names during reconciliation.
+        function _hlCoinNorm(raw) {
+          var s = String(raw || '');
+          if (s.toLowerCase().indexOf('xyz:') === 0) s = s.substring(4);
+          return normaliseAsset(s);
+        }
         var hlAssets = {};
         hlPositions.forEach(function (p) {
-          var key = normaliseAsset(p.coin || p.asset || '');
+          var key = _hlCoinNorm(p.coin || p.asset || '');
           if (key) hlAssets[key] = p;
         });
         // Step 1: Close EE trades that no longer exist on HL
@@ -4502,7 +4509,7 @@
         // Step 2: Import HL positions not tracked in EE
         var imported = 0;
         hlPositions.forEach(function (p) {
-          var key = normaliseAsset(p.coin || p.asset || '');
+          var key = _hlCoinNorm(p.coin || p.asset || '');
           if (!key) return;
           // Already tracked?
           var eeMatch = openTrades().some(function (t) { return normaliseAsset(t.asset) === key; });
