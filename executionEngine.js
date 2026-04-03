@@ -660,6 +660,7 @@
   var COINGECKO_SOURCES = {
     'XAU':  'pax-gold',    // PAX Gold ≈ spot gold price
     'GOLD': 'pax-gold',
+    'GLD':  'pax-gold',    // GLD signals route to spot gold (same as XAU/GOLD) — prevents ETF/spot mix-up
     'PAXG': 'pax-gold',
     'XAUT': 'tether-gold'  // Tether Gold: alternative gold token
   };
@@ -679,7 +680,7 @@
     'NATGAS':  'NG=F',
     'COPPER':  'HG=F',   // Copper futures
     'GDX':     'GDX',    // VanEck Gold Miners ETF
-    'GLD':     'GLD',    // SPDR Gold Shares
+    // GLD removed — routes to CoinGecko PAX Gold (spot price) to prevent ETF/spot mix-up
     'SLV':     'SLV',    // iShares Silver Trust
     'SPY':     'SPY',
     'QQQ':     'QQQ',
@@ -2951,6 +2952,24 @@
         trade.close_reason = 'INSUFFICIENT_SIZE';
         trade.status = 'CLOSED';
         _logSignal(sig, 'CLOSED', 'HL minimum order size: $' + trade.size_usd.toFixed(2) + ' <= $10');
+        saveTrades();
+        return;
+      }
+      // Pre-flight margin check: HL available margin must cover the order.
+      // Margin required ≈ notional / leverage. Catches "Insufficient margin"
+      // rejections before they happen, saving a round-trip to HL's API.
+      var _hlStatus = HLBroker.status();
+      var _hlAvailable = (_hlStatus && _hlStatus.available != null) ? _hlStatus.available : Infinity;
+      var _hlLevPre = trade.leverage ? Math.max(1, Math.floor(trade.leverage)) : 1;
+      var _marginRequired = trade.size_usd / _hlLevPre;
+      if (_hlAvailable < _marginRequired * 1.05) {  // 5% buffer
+        _flagTrade(sig, 'Insufficient HL margin: need ~$' + _marginRequired.toFixed(2) +
+          ' but only $' + _hlAvailable.toFixed(2) + ' available');
+        trade.broker_status = 'REJECTED';
+        trade.broker_error  = 'Pre-flight: insufficient margin ($' + _hlAvailable.toFixed(2) + ' available, ~$' + _marginRequired.toFixed(2) + ' needed)';
+        trade.close_reason  = 'BROKER_REJECTED';
+        trade.status        = 'CLOSED';
+        _logSignal(sig, 'SKIPPED', 'HL margin insufficient: $' + _hlAvailable.toFixed(2) + ' < $' + _marginRequired.toFixed(2));
         saveTrades();
         return;
       }
