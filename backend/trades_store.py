@@ -2,6 +2,7 @@
 Trades Store — SQLite persistence for EE paper and live trades.
 Separate from events.db so the two databases don't interfere.
 """
+from __future__ import annotations
 import json
 import os
 import sqlite3

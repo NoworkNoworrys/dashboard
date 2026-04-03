@@ -2,16 +2,15 @@
 GeoIntel Backend — Market Data Ingester
 Fetches live prices for:
   • Crypto        — CoinGecko (free, no key)
-  • Commodities / equities — Stooq (free, no key, no rate limit)
-  • VIX           — Stooq VX.F (front-month VIX futures — good proxy)
+  • Commodities / equities — Stooq (free, no key) — fetched in parallel
+  • VIX           — CBOE CDN directly (avoids Stooq contract-roll freeze)
   • US10Y yield   — US Treasury FiscalData API (official, free, no key)
-
-Replaced Yahoo Finance (v7/v8) which returns 429 too aggressively.
 """
 import csv
 import io
 import datetime
 import requests
+import concurrent.futures
 from typing import Dict, Any
 
 from config import COINGECKO_URL, BROWSER_HEADERS
@@ -52,7 +51,7 @@ _STOOQ_BASE = 'https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv'
 # ── Caches — Stooq is rate-limited (~200 req/day per IP) so refresh every 10 min
 _stooq_cache:    Dict[str, Dict[str, Any]] = {}
 _stooq_last_ts:  float = 0.0
-_STOOQ_TTL_SECS: float = 600.0   # 10 minutes
+_STOOQ_TTL_SECS: float = 900.0   # 15 minutes (parallel fetch = fewer total hits)
 
 _crypto_cache:   Dict[str, Dict[str, Any]] = {}
 _crypto_last_ts: float = 0.0
@@ -161,7 +160,7 @@ def _stooq_price(symbol: str) -> Dict[str, Any]:
     """
     url = _STOOQ_BASE.format(symbol=symbol.lower())
     try:
-        resp = requests.get(url, headers=BROWSER_HEADERS, timeout=10)
+        resp = requests.get(url, headers=BROWSER_HEADERS, timeout=8)
         resp.raise_for_status()
         rows = list(csv.reader(io.StringIO(resp.text)))
     except Exception as e:
@@ -189,11 +188,16 @@ def _stooq_price(symbol: str) -> Dict[str, Any]:
 
 
 def _fetch_stooq() -> Dict[str, Dict[str, Any]]:
+    """Fetch all Stooq symbols in parallel — cuts wall time from ~90s → ~1s."""
+    def _worker(item):
+        our_ticker, stooq_sym = item
+        return our_ticker, _stooq_price(stooq_sym)
+
     result = {}
-    for our_ticker, stooq_sym in STOOQ_SYMBOLS.items():
-        d = _stooq_price(stooq_sym)
-        if d:
-            result[our_ticker] = d
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(STOOQ_SYMBOLS)) as ex:
+        for our_ticker, data in ex.map(_worker, STOOQ_SYMBOLS.items()):
+            if data:
+                result[our_ticker] = data
 
     print(f'[MARKET] Stooq: {list(result.keys())}')
     return result

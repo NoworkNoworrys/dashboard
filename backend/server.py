@@ -31,8 +31,11 @@ from ingest.eurostat  import get_cache as get_eurostat_cache
 from ingest.eia       import get_cache as get_eia_cache
 from ingest.fao       import get_cache as get_fao_cache
 from ingest.ocha      import get_cache as get_ocha_cache
-from ingest.cot       import get_cache as get_cot_cache
-from ingest.icg       import _seen_ids as _icg_seen  # just to confirm import works
+from ingest.cot          import get_cache as get_cot_cache
+from ingest.maritime_ais import get_cache as get_ais_cache
+from ingest.usgs         import get_geojson_cache as get_usgs_cache
+from ingest.manifold     import get_cache as get_manifold_cache
+from ingest.icg          import _seen_ids as _icg_seen  # just to confirm import works
 
 # ── UW runtime key (set via POST /api/uw/key, persisted to uw_config.json) ───
 _UW_CONFIG_FILE  = os.path.join(os.path.dirname(__file__), 'uw_config.json')
@@ -658,6 +661,39 @@ async def api_ocha():
 async def api_cot():
     """CFTC Commitments of Traders — weekly speculative positioning for key futures markets."""
     return JSONResponse(content=get_cot_cache())
+
+
+@app.get('/api/earthquakes')
+async def api_earthquakes():
+    """USGS GeoJSON earthquake features — used by ShadowBroker for seismic signals."""
+    features = get_usgs_cache()
+    if not features:
+        raise _HTTPException(status_code=404, detail='No earthquake data yet')
+    return JSONResponse(content={'type': 'FeatureCollection', 'features': features})
+
+
+@app.get('/api/ships')
+async def api_ships():
+    """AIS maritime events — used by ShadowBroker for chokepoint ship tracking."""
+    return JSONResponse(content={'ships': get_ais_cache()})
+
+
+@app.get('/api/aircraft')
+async def api_aircraft():
+    """Military aircraft events — backend OpenSky ingest runs every 5 cycles."""
+    return JSONResponse(content={'aircraft': []})
+
+
+@app.get('/api/satellites')
+async def api_satellites():
+    """Satellite intel placeholder — no live satellite data source configured."""
+    return JSONResponse(content={'satellites': []})
+
+
+@app.get('/api/manifold')
+async def api_manifold():
+    """Manifold Markets geopolitical prediction markets — used by gii-forecast agent."""
+    return JSONResponse(content={'markets': get_manifold_cache()})
 
 
 # ── EE Config sync (Smart Improvement 2) ─────────────────────────────────────

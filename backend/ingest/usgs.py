@@ -32,6 +32,11 @@ _SENSITIVE_ZONES = [
 ]
 
 _seen_ids: set = set()
+_geojson_cache: list = []   # Raw GeoJSON features for /api/earthquakes
+
+
+def get_geojson_cache() -> list:
+    return _geojson_cache
 
 
 def _in_zone(lon: float, lat: float) -> str:
@@ -48,11 +53,13 @@ def fetch_usgs() -> List[Dict]:
     """
     events = []
 
+    raw_features: list = []
     for url, label in [(_URL, 'significant'), (_URL_M4, 'M4.5+')]:
         try:
             r = requests.get(url, timeout=12)
             r.raise_for_status()
             features = r.json().get('features', [])
+            raw_features.extend(features)
 
             for f in features:
                 fid = f.get('id', '')
@@ -93,6 +100,11 @@ def fetch_usgs() -> List[Dict]:
 
         except Exception as e:
             print(f'[USGS] {label} error: {e}')
+
+    # Update raw GeoJSON cache for /api/earthquakes
+    global _geojson_cache
+    if raw_features:
+        _geojson_cache = raw_features
 
     # Cap seen set
     if len(_seen_ids) > 2000:

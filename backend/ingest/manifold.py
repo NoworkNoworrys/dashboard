@@ -22,6 +22,11 @@ _GEO_TERMS = [
 ]
 
 _seen_ids: set = set()
+_market_cache: List[Dict] = []   # Raw markets for /api/manifold
+
+
+def get_cache() -> List[Dict]:
+    return _market_cache
 
 
 def fetch_manifold() -> List[Dict]:
@@ -29,7 +34,9 @@ def fetch_manifold() -> List[Dict]:
     Fetch top geopolitical prediction markets.
     Returns events for markets with significant recent probability shifts.
     """
+    global _market_cache
     events = []
+    fresh_markets: List[Dict] = []
     try:
         # Search for geopolitical markets
         for term in _GEO_TERMS[:5]:  # limit to 5 terms to avoid rate limiting
@@ -72,6 +79,13 @@ def fetch_manifold() -> List[Dict]:
                     evt['signal'] = min(100, evt.get('signal', 50) + 15)
                 events.append(evt)
                 _seen_ids.add(mid)
+                fresh_markets.append({
+                    'id': mid, 'question': question,
+                    'probability': prob, 'volume': volume,
+                })
+
+        if fresh_markets:
+            _market_cache = (_market_cache + fresh_markets)[-200:]
 
         # Cap seen set size
         if len(_seen_ids) > 500:

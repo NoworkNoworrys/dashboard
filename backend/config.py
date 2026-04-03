@@ -132,7 +132,7 @@ COINGECKO_URL = (
     '?ids=bitcoin,ethereum'
     '&vs_currencies=usd'
     '&include_24hr_change=true'
-    '&include_1hr_change=true'
+    '&include_1h_change=true'
     '&precision=2'
 )
 
