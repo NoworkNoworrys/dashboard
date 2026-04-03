@@ -2597,7 +2597,7 @@
 
       var _icCapUSD = _effectiveBal * 0.15;
       var _icAtCap  = window.ICRiskEngine
-                        ? ICRiskEngine.isAtMaxICExposure(_cfg.virtual_balance, _openICUSD)
+                        ? ICRiskEngine.isAtMaxICExposure(_effectiveBal, _openICUSD)
                         : (_openICUSD >= _icCapUSD);   // fallback: raw calculation
 
       if (_icAtCap) {
@@ -2713,6 +2713,17 @@
             _EXCHANGE_MIN_NOTIONAL + ', would need ' + _bridgeLev + '× lev (max ' + _assetMaxLev + '×)', 'amber');
         return null;
       }
+    }
+
+    // Post-bridge reality check: the leverage bridge runs after reality check 6
+    // (MAX_LEVERAGE cap), so a tiny position on a small account could end up with
+    // effective leverage above the cap once the bridge bumps the notional to $14.
+    // Reject rather than silently exceed the ceiling.
+    if (sig._leverageBridged && _effectiveBal > 0 && sizeUsd / _effectiveBal > MAX_LEVERAGE) {
+      log('RISK', sig.asset + ' rejected — bridge raised effective leverage ' +
+          (sizeUsd / _effectiveBal).toFixed(1) + '× (cap ' + MAX_LEVERAGE +
+          '×) on $' + _effectiveBal.toFixed(0) + ' balance', 'amber');
+      return null;
     }
 
     // Step 3: Final post-rounding check — if rounding dropped us below minimum,
@@ -4317,13 +4328,13 @@
         // so session P&L tracking stays meaningful.
         // Allow update on the very first poll (prev === null) so the stale
         // manually-set value is replaced immediately on page load.
-        // Glitch guard: reject equity updates that change the balance by more than 20%
+        // Glitch guard: reject equity updates that change the balance by more than 33%
         // in a single polling cycle — this is almost certainly a bad API response or
         // temporary data error rather than a real account event. Log it and skip.
-        // 20% is tight enough to catch glitches (real equity doesn't move 20%+ per poll)
-        // but loose enough for normal trading fluctuations. If equity genuinely moves
-        // >20% (large PnL swing), the guard will log a warning and clear on the next poll.
-        var _glitchGuard = prev === null || Math.abs(total - prev) < Math.max(total, prev) * 0.20;
+        // 33% allows real large-drawdown sessions to pass (a prior false positive was a
+        // $4,159→$2,218 real correction, a 47% drop, which 20% would have blocked).
+        // Real API glitches produce values near zero or wildly high, not 33-60%.
+        var _glitchGuard = prev === null || Math.abs(total - prev) < Math.max(total, prev) * 0.33;
         if (_glitchGuard) {
           _cfg.virtual_balance = total;
           saveCfg();
@@ -4617,22 +4628,31 @@
       var sessionLossPct = _monEffectiveStart > 0 ? (_monRealisedPnl / _monEffectiveStart * 100) : 0;
       if (sessionLossPct < -_cfg.daily_loss_limit_pct) {
         if (!_dailyLimitHalted) {
-          _cfg.enabled = false;
-          _dailyLimitHalted = true;
-          // Don't saveCfg() — pause is session-only; reload starts fresh
-          log('RISK', 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached (' +
-            sessionLossPct.toFixed(1) + '%) — no new trades until recovery', 'red');
-          _notify('⚠ Daily Loss Limit Hit',
-            'Session P&L: ' + sessionLossPct.toFixed(1) + '% — paused for new entries. Existing trades run to TP/SL.',
-            'ee-daily-limit');
-          // Existing open trades are left to run to their natural TP/SL —
-          // force-closing mid-trade locks in losses and can turn recoverable
-          // drawdowns into confirmed ones. The stop-loss on each trade IS the
-          // real risk-management tool.
-          renderUI();
+          if (!_cfg.enabled) {
+            // Execution was already manually paused — log but don't set _dailyLimitHalted.
+            // If we did, recovery would auto-resume over the user's explicit choice.
+            log('RISK', 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached (' +
+              sessionLossPct.toFixed(1) + '%) — execution already paused manually', 'amber');
+          } else {
+            _cfg.enabled = false;
+            _dailyLimitHalted = true;
+            // Don't saveCfg() — pause is session-only; reload starts fresh
+            log('RISK', 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached (' +
+              sessionLossPct.toFixed(1) + '%) — no new trades until recovery', 'red');
+            _notify('⚠ Daily Loss Limit Hit',
+              'Session P&L: ' + sessionLossPct.toFixed(1) + '% — paused for new entries. Existing trades run to TP/SL.',
+              'ee-daily-limit');
+            // Existing open trades are left to run to their natural TP/SL —
+            // force-closing mid-trade locks in losses and can turn recoverable
+            // drawdowns into confirmed ones. The stop-loss on each trade IS the
+            // real risk-management tool.
+            renderUI();
+          }
         }
       } else if (_dailyLimitHalted) {
-        // Session P&L has recovered above the loss limit — auto-resume execution.
+        // Session P&L has recovered above the loss limit — auto-resume.
+        // _dailyLimitHalted is only ever set true when WE disabled execution
+        // (not when the user did), so this cannot override a manual disable.
         _cfg.enabled = true;
         _dailyLimitHalted = false;
         log('RISK', 'Daily loss limit recovered — session P&L now ' + sessionLossPct.toFixed(1) + '% — execution resumed', 'green');
