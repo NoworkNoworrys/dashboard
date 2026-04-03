@@ -2752,7 +2752,7 @@
       partial_pnl_usd:      null,    // P&L banked from partial close
       // ────────────────────────────────────────────────────────────────────────
       venue:            sig._venue || 'HL',  // 'HL' | 'ALPACA' — which platform executed
-      broker:           _cfg.mode === 'LIVE' ? _cfg.broker : 'SIMULATION',
+      broker:           _cfg.mode === 'LIVE' ? (sig._venue || _cfg.broker) : 'SIMULATION',
       // Broker integration stubs — set by adapter on live execution
       broker_order_id:  null,
       broker_status:    null,

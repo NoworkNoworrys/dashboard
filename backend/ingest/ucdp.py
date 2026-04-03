@@ -7,6 +7,7 @@ API docs: https://ucdpapi.pcr.uu.se/
 Data: georeferenced events with date, country, parties involved, fatality estimates.
 Refreshed in batch — called once at startup then every 6h with macro data.
 """
+import os
 import requests
 from typing import List, Dict
 from datetime import datetime, timedelta
@@ -14,6 +15,9 @@ from datetime import datetime, timedelta
 from keyword_detector import build_event
 
 UCDP_URL = 'https://ucdpapi.pcr.uu.se/api/gedevents/25.1'
+# UCDP now requires a free API token — register at https://ucdpapi.pcr.uu.se/
+# Set UCDP_API_TOKEN in your .env or environment to enable this source.
+_TOKEN = os.environ.get('UCDP_API_TOKEN', '')
 
 # In-memory cache — updated by fetch_ucdp(), read by get_cache()
 _cache: List[Dict] = []
@@ -30,6 +34,10 @@ def fetch_ucdp() -> List[Dict]:
     end   = datetime.utcnow()
     start = end - timedelta(days=90)
 
+    if not _TOKEN:
+        print('[UCDP] skipped — no UCDP_API_TOKEN set (register free at https://ucdpapi.pcr.uu.se/)')
+        return []
+
     try:
         r = requests.get(
             UCDP_URL,
@@ -38,6 +46,7 @@ def fetch_ucdp() -> List[Dict]:
                 'EndDate':   end.strftime('%Y-%m-%d'),
                 'pagesize':  100,
             },
+            headers={'x-ucdp-access-token': _TOKEN},
             timeout=20,
         )
         r.raise_for_status()

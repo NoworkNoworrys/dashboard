@@ -22,9 +22,9 @@ _BASE = 'https://data-api.ecb.europa.eu/service/data'
 # flowRef/key → friendly label
 _SERIES = {
     ('EXR', 'D.USD.EUR.SP00.A'):                    'eur_usd',
-    ('FM',  'B.U2.EUR.RT0.BB.1000.B10L14.0.R'):      'ecb_main_rate',
+    ('FM',  'B.U2.EUR.4F.KR.DFR.LEV'):               'ecb_main_rate',
     ('ICP', 'M.U2.N.000000.4.ANR'):                  'euro_hicp_yoy',
-    ('BSI', 'M.U2.N.MFI.L.A20.A.1.U2.2240.Z01.E'):  'm3_growth',
+    ('BSI', 'M.U2.Y.V.M30.X.I.U2.2300.Z01.A'):      'm3_growth',
     ('YC',  'B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y'):    'de_bund_10y',
 }
 
