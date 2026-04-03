@@ -286,7 +286,9 @@
     var lr = _clamp(0.3 + avgConf * 3.2, 0.3, 3.5);
     // Reliability blends LR toward 1.0; discount further reduces deviation from neutral
     var adjustedLR = 1.0 + (lr - 1.0) * reliability * (1.0 - avgDiscount);
-    return _clamp(adjustedLR, 0.3, 3.5);
+    var result = _clamp(adjustedLR, 0.3, 3.5);
+    if (!isFinite(result) || isNaN(result)) return 1.0; // neutral — don't corrupt the Bayesian chain
+    return result;
   }
 
   function _bayesianUpdate(region, signals) {
@@ -308,6 +310,10 @@
     // Normalise
     var denom = priorProduct + altProduct;
     var posterior = denom > 0 ? _clamp(priorProduct / denom, 0.02, 0.97) : prior;
+    if (!isFinite(posterior) || isNaN(posterior)) {
+      console.warn('[GII] Bayesian update produced NaN for region ' + region + ' — using prior');
+      posterior = prior;
+    }
 
     // Apply regime floor
     if (_gtiFloor > 0) posterior = Math.max(posterior, _gtiFloor / 100);
@@ -794,8 +800,8 @@
       fb.fp      = (fb.fp      || 0) * decayFactor;
       fb.total   = (fb.total   || 0) * decayFactor;
       if (fb.total < 0.5) {
-        // so few effective samples left — reset to neutral
-        delete _feedback[key];
+        // Marked for deletion — actual removal below (with minimum-retention guard)
+        fb._decayed = true;
         changed = true;
         return;
       }
@@ -804,6 +810,20 @@
       fb.reputation = _clamp(fb.winRate * (1 - fb.fpr * 0.5), 0.10, 1.0);
       changed = true;
     });
+    // Keep the 10 most-recently-updated entries even if fully decayed (minimum retention)
+    var _allEntries = Object.keys(_feedback).map(function(k) {
+      return { key: k, ts: _feedback[k].lastTs || '' };
+    }).sort(function(a, b) { return b.ts.localeCompare(a.ts); });
+    var _protectedKeys = {};
+    _allEntries.slice(0, 10).forEach(function(e) { _protectedKeys[e.key] = true; });
+    Object.keys(_feedback).forEach(function(k) {
+      if (_feedback[k]._decayed && !_protectedKeys[k]) {
+        delete _feedback[k];
+      } else if (_feedback[k]._decayed) {
+        delete _feedback[k]._decayed;  // protected — keep but clean up flag
+      }
+    });
+
     // v60: hard cap — keep only top-400 entries by total to prevent unbounded growth
     var fbKeys = Object.keys(_feedback);
     if (fbKeys.length > 400) {

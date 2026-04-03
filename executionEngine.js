@@ -269,12 +269,12 @@
       var dir = f.direction === 'LONG' ? '<span style="color:#4fc">▲ LONG</span>'
                                        : '<span style="color:#f88">▼ SHORT</span>';
       return '<div class="ee-flag-row">' +
-        '<span class="ee-flag-ts">'   + ts               + '</span>' +
-        '<span class="ee-flag-asset">'+ f.asset          + '</span>' +
-        '<span class="ee-flag-dir">'  + dir              + '</span>' +
-        '<span class="ee-flag-conf">' + f.confidence     + '%</span>' +
-        '<span class="ee-flag-src">'  + (f.signalSource || '—').substring(0,18) + '</span>' +
-        '<span class="ee-flag-why">'  + f.hlReason       + '</span>' +
+        '<span class="ee-flag-ts">'   + ts                                           + '</span>' +
+        '<span class="ee-flag-asset">'+ _esc(f.asset)                                + '</span>' +
+        '<span class="ee-flag-dir">'  + dir                                          + '</span>' +
+        '<span class="ee-flag-conf">' + _esc(String(f.confidence))                   + '%</span>' +
+        '<span class="ee-flag-src">'  + _esc((f.signalSource || '—').substring(0,18))+ '</span>' +
+        '<span class="ee-flag-why">'  + _esc(f.hlReason)                             + '</span>' +
         '</div>';
     }).join('') : '<div class="ee-flag-empty">No flagged trades yet — all signals so far are on HL</div>';
   }
@@ -315,11 +315,11 @@
           : '<span style="color:#f88">▼ SHORT</span>';
         var scoreColor = c.score >= 4 ? '#4fc' : c.score >= 2.5 ? '#fc4' : '#aaa';
         return '<div class="ee-pw-row">' +
-          '<span class="ee-pw-asset">' + (i + 1) + '. ' + c.asset + '</span>' +
+          '<span class="ee-pw-asset">' + (i + 1) + '. ' + _esc(c.asset) + '</span>' +
           '<span class="ee-pw-dir">' + dirHtml + '</span>' +
           '<span class="ee-pw-score" style="color:' + scoreColor + '">' + c.score.toFixed(2) + '</span>' +
           '<span class="ee-pw-agents" style="color:#888">' + c.agentCount + '</span>' +
-          '<span class="ee-pw-reason">' + (c.reason || '').substring(0, 60) + '</span>' +
+          '<span class="ee-pw-reason">' + _esc((c.reason || '').substring(0, 60)) + '</span>' +
           '</div>';
       }).join('');
     }
@@ -999,22 +999,19 @@
             // keep item for retry
           }
           _saveWriteQueue();
-          _writeQueueBusy = false;
           if (_writeQueue.length) setTimeout(_flushWriteQueue, 2000); // back off on error
           return;
         }
         _writeQueue.shift();
         _saveWriteQueue();
-        _writeQueueBusy = false;
         if (_writeQueue.length) setTimeout(_flushWriteQueue, 200);
         else log('SYSTEM', 'Backend write queue flushed ✓', 'dim');
       })
       .catch(function () {
-        _writeQueueBusy = false;
         // Will retry next time _flushWriteQueue() is called (on reconnect or next write)
       })
       .finally(function () {
-        // Safety net: ensure busy flag is always cleared even if .then()/.catch() throws
+        // Single authoritative clear — runs after .then() or .catch() completes
         _writeQueueBusy = false;
       });
   }
@@ -1131,11 +1128,12 @@
             }).catch(function () {})
           : Promise.resolve();
 
-        // Flush any write queue that survived a reload
-        _loadWriteQueue();
-        setTimeout(_flushWriteQueue, 3000);
-
-        return cfgFetch.then(function () { return _apiFetch('/api/trades'); });
+        return cfgFetch.then(function () {
+          // Flush any write queue that survived a reload — after config is applied
+          _loadWriteQueue();
+          setTimeout(_flushWriteQueue, 3000);
+          return _apiFetch('/api/trades');
+        });
       })
       .then(function (r) {
         // H2 fix: guard against malformed JSON from backend (e.g. maintenance page returning

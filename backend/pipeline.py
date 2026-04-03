@@ -463,10 +463,10 @@ async def _pipeline_cycle():
     # Compute regime multiplier from live VIX
     mult = _regime_multiplier(market)
     regime_label = (
-        'CRISIS'       if mult >= 1.20 else
-        'RISK_OFF'     if mult >= 1.10 else
-        'RISK_ON'      if mult <  1.00 else
-        'NEUTRAL'
+        'CRISIS'   if mult <= 0.80 else   # VIX>=30 -> mult=0.75
+        'RISK_OFF' if mult <= 0.95 else   # VIX 20-30 -> mult=0.90
+        'RISK_ON'  if mult >= 1.05 else   # VIX<15 -> mult=1.10
+        'NEUTRAL'                          # VIX 15-20 -> mult=1.00
     )
 
     # Process and broadcast new events

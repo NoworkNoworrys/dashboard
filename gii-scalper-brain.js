@@ -78,7 +78,7 @@
   // ── helpers ───────────────────────────────────────────────────────────────
 
   function _setupKey(sector, setupType, gtiRegime) {
-    return (sector || 'unknown') + '_' + (setupType || 'unknown') + '_' + (gtiRegime || 'normal');
+    return (sector || 'unknown') + '|' + (setupType || 'unknown') + '|' + (gtiRegime || 'normal');
   }
 
   function _assetKey(asset, dir) {

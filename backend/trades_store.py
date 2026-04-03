@@ -46,8 +46,15 @@ CREATE TABLE IF NOT EXISTS trades (
 """
 
 
+_conn: sqlite3.Connection | None = None
+
 def _get_conn() -> sqlite3.Connection:
-    return sqlite3.connect(_DB_PATH, check_same_thread=False)
+    global _conn
+    if _conn is None:
+        _conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        _conn.execute("PRAGMA journal_mode=WAL")
+        _conn.execute("PRAGMA busy_timeout=5000")
+    return _conn
 
 
 def init_db():
@@ -194,12 +201,17 @@ def export_json() -> list:
 
 def do_backup() -> tuple:
     """Write a timestamped JSON backup. Returns (path, trade_count)."""
+    import glob
     Path(_BACKUP_DIR).mkdir(parents=True, exist_ok=True)
     trades = export_json()
     ts     = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     path   = os.path.join(_BACKUP_DIR, f'trades_backup_{ts}.json')
     with open(path, 'w') as fh:
         json.dump({'ts': ts, 'count': len(trades), 'trades': trades}, fh, indent=2)
+    # Keep only the 30 most recent backups to prevent unbounded growth
+    backups = sorted(glob.glob(os.path.join(_BACKUP_DIR, 'trades_backup_*.json')))
+    while len(backups) > 30:
+        os.remove(backups.pop(0))
     return path, len(trades)
 
 

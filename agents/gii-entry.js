@@ -166,6 +166,7 @@
   var MAX_TRADES_PER_EVENT = 3;
 
   /* ── STATE ──────────────────────────────────────────────────────────────── */
+  var _initialized  = false;
   var _queue        = [];   // pending signals awaiting scoring
   var _approved     = [];   // last 50 approved signals (audit log)
   var _rejected     = [];   // last 50 rejected signals (audit log)
@@ -1055,6 +1056,8 @@
 
   /* ── INIT ───────────────────────────────────────────────────────────────── */
   window.addEventListener('load', function () {
+    if (_initialized) return;
+    _initialized = true;
     setTimeout(function () {
       _processQueue();
       setInterval(function () {

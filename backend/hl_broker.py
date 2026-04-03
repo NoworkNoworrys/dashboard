@@ -266,8 +266,9 @@ def _place_order_locked(coin: str, is_buy: bool, size_usd: float, leverage: int 
         # Always set leverage before placing — resets any stale leverage on the account
         try:
             _exchange.update_leverage(lev, coin, is_cross=True)
-        except Exception:
-            pass  # non-fatal
+        except Exception as e:
+            print(f'[HL_BROKER] WARNING: leverage update failed for {coin} lev={lev}: {e}')
+            return {'ok': False, 'error': f'Leverage update failed for {coin}: {e}'}
 
         # Coin quantity = full notional ÷ price, rounded to HL's required decimal places
         decimals = _sz_decimals.get(coin, 5)

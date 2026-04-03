@@ -64,13 +64,10 @@ _extra = [o.strip() for o in os.getenv('EXTRA_CORS_ORIGINS', '').split(',') if o
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        'null',                                         # file:// pages (Chrome/Firefox)
         'http://localhost',
-        # 'http://localhost:3008',                      # removed — no preview servers on this project
         'http://localhost:8080',                        # user's main dashboard link
         'http://localhost:8765',
         'http://127.0.0.1',
-        'http://127.0.0.1:3008',
         'http://127.0.0.1:8080',
         'http://127.0.0.1:8765',
         'https://megamorgs807-dev.github.io',          # GitHub Pages live dashboard
@@ -165,6 +162,7 @@ async def serve_dashboard():
 @app.get('/api/events')
 async def api_events(limit: int = 100):
     """Return recent events from the database."""
+    limit = min(limit, 1000)
     store = get_store()
     events = await asyncio.get_event_loop().run_in_executor(
         None, store.get_recent, limit
@@ -184,6 +182,7 @@ async def api_learning(limit: int = 200):
     Return events enriched with learning metadata for the LRN panel.
     Includes computed metrics: signal distribution, region breakdown, top keywords.
     """
+    limit = min(limit, 1000)
     store = get_store()
     events = await asyncio.get_event_loop().run_in_executor(
         None, store.get_recent, limit
@@ -500,6 +499,8 @@ async def uw_poll_now():
 @app.get('/api/uw/flow-alerts')
 async def uw_flow_alerts(limit: int = 50, hours: int = 24):
     """Recent unusual options flow alerts (sorted newest first)."""
+    limit = min(limit, 500)
+    hours = min(hours, 720)
     uw = get_uw_store()
     data = await asyncio.get_event_loop().run_in_executor(
         None, lambda: uw.get_flow_alerts(limit=limit, hours=hours)
@@ -510,6 +511,8 @@ async def uw_flow_alerts(limit: int = 50, hours: int = 24):
 @app.get('/api/uw/darkpool')
 async def uw_darkpool(limit: int = 30, hours: int = 24):
     """Recent dark pool prints on tracked assets (> $2M)."""
+    limit = min(limit, 500)
+    hours = min(hours, 720)
     uw = get_uw_store()
     data = await asyncio.get_event_loop().run_in_executor(
         None, lambda: uw.get_darkpool(limit=limit, hours=hours)
@@ -520,6 +523,8 @@ async def uw_darkpool(limit: int = 30, hours: int = 24):
 @app.get('/api/uw/congress')
 async def uw_congress(limit: int = 20, days: int = 90):
     """Recent congressional trades in geopolitically relevant sectors."""
+    limit = min(limit, 500)
+    days  = min(days, 365)
     uw = get_uw_store()
     data = await asyncio.get_event_loop().run_in_executor(
         None, lambda: uw.get_congress(limit=limit, days=days)
@@ -530,6 +535,7 @@ async def uw_congress(limit: int = 20, days: int = 90):
 @app.get('/api/uw/tide')
 async def uw_tide(hours: int = 8):
     """Market tide time series — net call/put premium over last N hours."""
+    hours = min(hours, 720)
     uw = get_uw_store()
     data = await asyncio.get_event_loop().run_in_executor(
         None, lambda: uw.get_tide(hours=hours)
@@ -923,14 +929,24 @@ async def hl_disconnect():
 # http://localhost:8765/ as well as http://localhost:8080/
 from fastapi import HTTPException as _HTTPException
 
+_BLOCKED_FILENAMES = {'hl_config.json', '.env', 'trades.db', 'events.db', 'uw_data.db'}
+
 @app.get('/{filename:path}')
 async def serve_asset(filename: str):
     """Serve any static file from the project root (JS, CSS, etc.)."""
     if not filename or '..' in filename:
         raise _HTTPException(status_code=404)
     path = os.path.join(_PROJECT_ROOT, filename)
-    if os.path.isfile(path):
-        return FileResponse(path)
+    # Resolve symlinks and verify the path stays inside the project root
+    real_path    = os.path.realpath(path)
+    project_real = os.path.realpath(_PROJECT_ROOT)
+    if not real_path.startswith(project_real + os.sep) and real_path != project_real:
+        raise _HTTPException(status_code=404)
+    # Block sensitive files regardless of path
+    if os.path.basename(real_path) in _BLOCKED_FILENAMES:
+        raise _HTTPException(status_code=404)
+    if os.path.isfile(real_path):
+        return FileResponse(real_path)
     raise _HTTPException(status_code=404)
 
 

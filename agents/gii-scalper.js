@@ -70,6 +70,7 @@
 
   // ── private state ─────────────────────────────────────────────────────────
 
+  var _initialized   = false;
   var _signals      = [];      // max 1 — scalper emits at most one signal per cycle
   var _status       = {};
   var _accuracy     = {};      // per-direction accuracy tracking
@@ -732,9 +733,9 @@
 
         _status['error_' + sym] = null;
 
-        // Cache for UI display
-        _cache[sym + '_5m']  = c5m.slice(-100);
-        _cache[sym + '_15m'] = c15m.slice(-48);
+        // Cache for UI display (trimmed to 20 bars to limit localStorage usage)
+        _cache[sym + '_5m']  = c5m.slice(-20);
+        _cache[sym + '_15m'] = c15m.slice(-20);
         _saveCache();
 
         var ind = _computeIndicators(c5m, c15m);
@@ -927,6 +928,8 @@
   // ── init ──────────────────────────────────────────────────────────────────
 
   window.addEventListener('load', function () {
+    if (_initialized) return;
+    _initialized = true;
     _loadFeedback();
     _loadCache();
     // v61: re-sync slot with EE on load to prevent 2h blackout after page refresh

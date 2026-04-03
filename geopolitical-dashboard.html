@@ -11139,6 +11139,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.GII_AGENT_SCALPER && typeof GII_AGENT_SCALPER.onTradeResult === 'function') GII_AGENT_SCALPER.onTradeResult(trade);
     if (window.GII_AGENT_SCALPER_SESSION && typeof GII_AGENT_SCALPER_SESSION.onTradeResult === 'function') GII_AGENT_SCALPER_SESSION.onTradeResult(trade);
     if (window.GII_SCRAPER_MANAGER && typeof GII_SCRAPER_MANAGER.onTradeResult === 'function') GII_SCRAPER_MANAGER.onTradeResult(trade);
+    if (window.GII_AGENT_POLYMARKET && typeof GII_AGENT_POLYMARKET.onTradeResult === 'function') GII_AGENT_POLYMARKET.onTradeResult(trade);
+    if (window.GII_AGENT_TECHNICALS && typeof GII_AGENT_TECHNICALS.onTradeResult === 'function') GII_AGENT_TECHNICALS.onTradeResult(trade);
+    if (window.GII_AGENT_OPTIMIZER && typeof GII_AGENT_OPTIMIZER.onTradeResult === 'function') GII_AGENT_OPTIMIZER.onTradeResult(trade);
     /* IC Risk Engine — recalc rolling metrics whenever any IC trade closes (TP, SL, or gii-exit) */
     if (window.ICRiskEngine && (trade.source || '').toLowerCase() === 'ic') {
       try { ICRiskEngine.onICTradeClosed(); } catch (e) {}
@@ -13623,15 +13626,15 @@ function _modalKeyHandler(e) {
 <!-- Polymarket Integration — prediction market consensus → IC pipeline (paper trading only) -->
 <script src="polymarket.js?v=15"></script>
 
-<!-- TickTrader credentials bootstrap — pre-loaded before adapter so auto-connect fires -->
+<!-- TickTrader credentials bootstrap — loaded from localStorage (set via broker connect UI) -->
 <script>
-window._TT_BOOTSTRAP = {
-  brokerUrl:   'https://ttlivewebapi.fxopen.net:8443',
-  tokenId:     '3c67e919-dfd6-481a-8f04-368dfc80b79c',
-  tokenKey:    '3Bymmg3r9Nf4TRmn',
-  tokenSecret: 'C34THNyYTkskYnZPsCDBnhGC2xNmFSy8ASGY7p7szWyjP5YN5FHjBbstsz4m9jqb',
-  demo:        true
-};
+window._TT_BOOTSTRAP = (function(){
+  try {
+    var stored = localStorage.getItem('tt_bootstrap_v1');
+    if (stored) return JSON.parse(stored);
+  } catch(e) {}
+  return { brokerUrl: 'https://ttlivewebapi.fxopen.net:8443', tokenId: '', tokenKey: '', tokenSecret: '', demo: true };
+})();
 </script>
 <!-- TickTrader Broker adapter — forex majors via any TickTrader-powered broker -->
 <script src="agents/ticktrader-broker.js?v=5"></script>
@@ -13644,16 +13647,14 @@ window._TT_BOOTSTRAP = {
 
 <!-- OANDA Rates agent — real-time FX rates via OANDA v20 API.
      Loaded before executionEngine so _fetchFrankfurter can use OANDA_RATES. -->
-<!-- OANDA credentials bootstrap — pre-seeds localStorage so both scripts auto-connect -->
+<!-- OANDA credentials bootstrap — only seeds defaults if not already configured -->
 <script>
 (function(){
-  // Always seed the correct OANDA demo credentials (overwrites old/expired tokens)
-  localStorage.setItem('oanda_rates_cfg_v1', JSON.stringify({
-    token:     'ae80a50cdb2658c5cf09d767e601f88f-cae8134dd71695cd56a5ba426dcb02ad',
-    accountId: '101-004-38877183-001',
-    demo:      true,
-    connected: false
-  }));
+  if (!localStorage.getItem('oanda_rates_cfg_v1')) {
+    localStorage.setItem('oanda_rates_cfg_v1', JSON.stringify({
+      token: '', accountId: '', demo: true, connected: false
+    }));
+  }
 })();
 </script>
 <script src="agents/oanda-rates.js?v=3"></script>

@@ -192,7 +192,6 @@
   }
 
   function _pct(v) { return (v * 100).toFixed(0) + '%'; }
-  function _esc(s) { return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   // ── trade DB cache (fetched from /api/trades every 30s) ───────────────────
   var _tradeCache = { open: null, closed: null, total: null, lastFetch: 0 };

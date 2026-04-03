@@ -12,6 +12,8 @@ secrets/
 
 # Backups
 backups/
+backend/ee_config_backup.json
+*_backup.json
 
 # Claude internal
 .claude/
