@@ -2969,8 +2969,12 @@
     // Abort if the assigned venue's broker is no longer connected at execution
     // time (e.g. disconnected between venue assignment and here). Refund the
     // open commission so the virtual balance stays clean.
+    // Mirror the venue-router's simulation fallback: if EE is in simulation/paper mode,
+    // allow HL even when equity is 0 (testnet, unfunded account) — the venue router
+    // already granted HL via this same path; the final guard must respect it too.
     var _brokerReady = (
-      (trade.venue === 'HL'         && window.HLBroker    && HLBroker.isConnected())    ||
+      (trade.venue === 'HL'         && window.HLBroker    &&
+          (HLBroker.isConnected() || (_cfg.broker === 'SIMULATION' && HLBroker.status && HLBroker.status().connected))) ||
       (trade.venue === 'ALPACA'     && window.AlpacaBroker && AlpacaBroker.isConnected()) ||
       (trade.venue === 'OANDA'      && window.OANDABroker  && OANDABroker.isConnected())  ||
       (trade.venue === 'TICKTRADER' && window.TTBroker     && TTBroker.isConnected())
@@ -3767,7 +3771,10 @@
     });
     return Object.keys(groups).map(function (k) {
       var g = groups[k];
-      if (g.length === 1) return g[0];
+      // Always return a copy — the forEach normalisation step mutates sig in place
+      // (uppercases dir, stamps _confOrig, etc.). Returning the original reference
+      // for single-signal groups would corrupt the agent's own signal object.
+      if (g.length === 1) return Object.assign({}, g[0]);
       // Pick the signal with the highest confidence as the base
       var best = g.reduce(function (a, b) {
         return ((b.conf || b.confidence || 0) > (a.conf || a.confidence || 0)) ? b : a;
@@ -3923,7 +3930,7 @@
       if (sig._signalTs && sig.ts) {
         var _arrivalAge = (Date.now() - sig._signalTs) / 60000;  // age in minutes
         if (_arrivalAge > 2) {  // only decay if > 2 min old (avoid penalising normal latency)
-          var _arrivalDecay = Math.max(0.70, 1.0 - (_arrivalAge / 60));  // 0→1.0, 10→0.83, 15→0.75, 30→0.50
+          var _arrivalDecay = Math.max(0.70, 1.0 - (_arrivalAge / 60));  // 0→1.0, 10→0.83, 15→0.75, ≥18min→0.70 (floor)
           sig._confOrig  = sig.conf;  // preserve for floor checks
           sig.conf       = Math.round((sig.conf       || 60) * _arrivalDecay);
           sig.confidence = Math.round((sig.confidence || 60) * _arrivalDecay);
@@ -5034,7 +5041,7 @@
           } catch(e) {}
           if (!_giiExitAlive) {
             var _fbTrailPct = 0.02;  // 2% trail distance
-            var _fbTrail    = trade.entry_price * _fbTrailPct;
+            var _fbTrail    = price * _fbTrailPct;  // 2% of CURRENT price, not entry — keeps trail tight on big runners
             var _fbNewSL    = isLong ? price - _fbTrail : price + _fbTrail;
             if ((isLong  && _fbNewSL > trade.stop_loss && _fbNewSL < trade.take_profit) ||
                 (!isLong && _fbNewSL < trade.stop_loss && _fbNewSL > trade.take_profit)) {

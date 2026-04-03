@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS trades (
     broker_status     TEXT,
     broker_fill_price REAL,
     broker_error      TEXT,
+    total_pnl_usd     REAL,
     extra             TEXT
 )
 """
@@ -68,6 +69,7 @@ def init_db():
             migrations = [
                 ("broker_fill_price", "REAL"),
                 ("broker_error",      "TEXT"),
+                ("total_pnl_usd",     "REAL"),
             ]
             for col, col_type in migrations:
                 if col not in existing:
@@ -82,12 +84,14 @@ _COLS = [
     'take_profit', 'close_price', 'units', 'size_usd', 'mode',
     'status', 'pnl_pct', 'pnl_usd', 'close_reason', 'region',
     'reason', 'broker', 'broker_order_id', 'broker_status', 'broker_fill_price', 'broker_error',
+    'total_pnl_usd',
 ]
 
 _PATCH_ALLOWED = {
     'status', 'close_price', 'timestamp_close', 'pnl_pct', 'pnl_usd',
     'close_reason', 'broker_order_id', 'broker_status', 'broker_fill_price',
     'confidence', 'stop_loss', 'take_profit', 'entry_price', 'broker_error',
+    'total_pnl_usd',
 }
 
 
