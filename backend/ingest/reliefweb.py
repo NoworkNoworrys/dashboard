@@ -9,13 +9,16 @@ API docs: https://apidoc.rwlabs.org/
 Note: Uses POST with a JSON body — the GET variant URL-encodes bracket params
 in a way ReliefWeb rejects with 403.
 """
+import os
 import requests
 from typing import List, Dict
 
 from keyword_detector import build_event
 
 
-RELIEFWEB_URL = 'https://api.reliefweb.int/v1/reports'
+RELIEFWEB_URL = 'https://api.reliefweb.int/v2/reports'
+# v2 requires a registered appname — request one at https://apidoc.reliefweb.int/parameters#appname
+_APPNAME = os.environ.get('RELIEFWEB_APPNAME', '')
 
 
 def fetch_reliefweb() -> List[Dict]:
@@ -24,9 +27,13 @@ def fetch_reliefweb() -> List[Dict]:
     Returns a list of event dicts ready for EventStore.
     Uses simple GET — no bracket-syntax fields filter to avoid encoding issues.
     """
+    if not _APPNAME:
+        print('[RELIEFWEB] skipped — no RELIEFWEB_APPNAME set (register at https://apidoc.reliefweb.int/)')
+        return []
+
     try:
         r = requests.post(
-            RELIEFWEB_URL + '?appname=geodash&slim=1',
+            RELIEFWEB_URL + f'?appname={_APPNAME}&slim=1',
             json={
                 'limit': 20,
                 'sort': ['date.created:desc'],

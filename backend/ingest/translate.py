@@ -31,7 +31,8 @@ _MAX_RPM = 20   # conservative limit
 # Daily character quota (MyMemory anonymous = 1000 chars/day per IP)
 _daily_chars: int = 0
 _daily_reset_date: str = ''
-_DAILY_LIMIT: int = 900   # stay under 1000 limit
+_DAILY_LIMIT: int = 9000  # 10k with email param, stay under
+_quota_warned: bool = False
 
 
 def _rate_ok() -> bool:
@@ -45,13 +46,16 @@ def _rate_ok() -> bool:
 
 def _quota_ok(char_count: int) -> bool:
     """Return True and deduct from daily quota if enough chars remain."""
-    global _daily_chars, _daily_reset_date
+    global _daily_chars, _daily_reset_date, _quota_warned
     today = datetime.date.today().isoformat()
     if _daily_reset_date != today:
         _daily_chars = 0
         _daily_reset_date = today
+        _quota_warned = False
     if _daily_chars + char_count > _DAILY_LIMIT:
-        print(f'[TRANSLATE] Daily quota exhausted ({_daily_chars}/{_DAILY_LIMIT} chars used) — skipping')
+        if not _quota_warned:
+            print(f'[TRANSLATE] Daily quota exhausted ({_daily_chars}/{_DAILY_LIMIT} chars used) — skipping until tomorrow')
+            _quota_warned = True
         return False
     _daily_chars += char_count
     return True
@@ -96,6 +100,7 @@ def translate(text: str, src_lang: str, dest_lang: str = 'en') -> Optional[str]:
             params={
                 'q':        text,
                 'langpair': f'{src_lang}|{dest_lang}',
+                'de':       'geodash@localhost',
             },
             timeout=8
         )

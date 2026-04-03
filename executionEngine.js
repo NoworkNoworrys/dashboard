@@ -1008,7 +1008,8 @@
         else log('SYSTEM', 'Backend write queue flushed ✓', 'dim');
       })
       .catch(function () {
-        // Will retry next time _flushWriteQueue() is called (on reconnect or next write)
+        // Retry after 30s backoff — prevents queue stalling if backend is briefly offline
+        if (_writeQueue.length) setTimeout(_flushWriteQueue, 30000);
       })
       .finally(function () {
         // Single authoritative clear — runs after .then() or .catch() completes
@@ -3927,6 +3928,15 @@
           (_cfg.broker === 'SIMULATION' && HLBroker.status && HLBroker.status().connected)
       );
       if (_hlConnectedCheck) {
+        // Deduplicate aliases: if another signal in this batch already targets
+        // the same HL coin, skip to prevent double-booking (e.g. GLD + XAU → PAXG).
+        var _hlInfo = HLBroker.assetInfo(_asset);
+        var _hlCoinKey = (_hlInfo && _hlInfo.hlCoin) ? _hlInfo.hlCoin : _asset;
+        if (_pendingOpen[_hlCoinKey]) {
+          _flagTrade(sig, 'Skipped — alias collision: another signal targets the same HL coin (' + _hlCoinKey + ')');
+          _logSignal(sig, 'SKIPPED', 'HL alias collision: ' + _hlCoinKey);
+          return;
+        }
         _venue = 'HL';
       } else if (_isHLNative) {
         /* Asset is HL-only but HL is momentarily disconnected — skip, do not

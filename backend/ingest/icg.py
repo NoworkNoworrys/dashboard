@@ -15,6 +15,7 @@ import requests
 import xml.etree.ElementTree as ET
 from typing import List, Dict
 
+from config import BROWSER_HEADERS
 from keyword_detector import build_event
 
 _RSS_URLS = [
@@ -43,7 +44,7 @@ def fetch_icg() -> List[Dict]:
             r = requests.get(
                 url,
                 timeout=15,
-                headers={'User-Agent': 'GeoDash/1.0', 'Accept': 'application/rss+xml, */*'},
+                headers=BROWSER_HEADERS,
             )
             r.raise_for_status()
             root = ET.fromstring(r.content)

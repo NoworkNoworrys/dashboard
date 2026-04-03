@@ -37,7 +37,7 @@ def fetch_fews() -> List[Dict]:
             f'{_BASE}/ipcphase/',
             params={
                 'format': 'json',
-                'phase': '3,4,5',      # Crisis, Emergency, Famine only
+                'phase__gte': '3',     # Crisis (3), Emergency (4), Famine (5)
                 'ordering': '-end_date',
                 'page_size': '20',
             },

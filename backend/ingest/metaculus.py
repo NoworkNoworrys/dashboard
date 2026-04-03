@@ -8,10 +8,14 @@ API docs: https://www.metaculus.com/api2/
 Tracks questions tagged: geopolitics, military, nuclear, conflict, economics
 High-probability or rapidly-moving forecasts are surfaced as events.
 """
+import os
 import requests
 from typing import List, Dict
 
 from keyword_detector import build_event
+
+# Metaculus now requires an API token — set METACULUS_API_TOKEN in .env
+_TOKEN = os.environ.get('METACULUS_API_TOKEN', '')
 
 _BASE_URL = 'https://www.metaculus.com/api/questions/'
 
@@ -28,6 +32,10 @@ def fetch_metaculus() -> List[Dict]:
     Surfaces questions where community probability is high (>70%)
     or has moved significantly.
     """
+    if not _TOKEN:
+        print('[METACULUS] skipped — no METACULUS_API_TOKEN set')
+        return []
+
     events = []
     seen_ids: set = set()
 
@@ -41,7 +49,10 @@ def fetch_metaculus() -> List[Dict]:
                     'order_by': '-activity',
                     'limit':    20,
                 },
-                headers={'Accept': 'application/json'},
+                headers={
+                    'Accept': 'application/json',
+                    'Authorization': f'Token {_TOKEN}',
+                },
                 timeout=12,
             )
             r.raise_for_status()

@@ -35,6 +35,7 @@ from ingest.cot          import get_cache as get_cot_cache
 from ingest.maritime_ais import get_cache as get_ais_cache
 from ingest.usgs         import get_geojson_cache as get_usgs_cache
 from ingest.manifold     import get_cache as get_manifold_cache
+from ingest.ecb          import get_cache as get_ecb_cache
 from ingest.icg          import _seen_ids as _icg_seen  # just to confirm import works
 
 # ── UW runtime key (set via POST /api/uw/key, persisted to uw_config.json) ───
@@ -661,6 +662,11 @@ async def api_ocha():
 async def api_cot():
     """CFTC Commitments of Traders — weekly speculative positioning for key futures markets."""
     return JSONResponse(content=get_cot_cache())
+
+@app.get('/api/ecb')
+async def api_ecb():
+    """ECB monetary data — exchange rates, policy rates, inflation, M3, Bund yield."""
+    return JSONResponse(content=get_ecb_cache())
 
 
 @app.get('/api/earthquakes')

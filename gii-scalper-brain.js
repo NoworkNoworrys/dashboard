@@ -226,7 +226,7 @@
   function _rebuildTopSetups() {
     var entries = Object.keys(_setupStats).map(function (k) {
       var s    = _setupStats[k];
-      var parts = k.split('_');
+      var parts = k.split('|');
       return { key: k, sector: parts[0], setupType: parts[1], regime: parts[2],
                total: s.total, wr: s.wr, boost: _wrBoost(s.wr, s.total) };
     }).filter(function (e) { return e.total >= MIN_RECORDS; });
