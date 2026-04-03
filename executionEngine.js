@@ -616,6 +616,7 @@
   var _showAllClosed        = false; // UI toggle: show all closed trades vs capped at 25
   var _closedSessionOnly    = true;  // UI toggle: show only this-session closed trades (default: session view)
   var _sessionStartBalance  = null;  // balance at session start — for daily loss limit
+  var _dailyLimitHalted     = false; // true when execution was auto-paused by the daily loss limit
   var _lossStreak           = { long: 0, short: 0 };  // v61: per-direction streak — long losses don't penalise short sizing
   var _fillLatencies        = [];   // rolling last-20 signal-to-fill latencies (ms) for Alpaca orders
   var _winStreak            = { long: 0, short: 0 };  // symmetric to _lossStreak — 3 consecutive wins → +15% size
@@ -1602,7 +1603,10 @@
 
     // 0. Backend market cache — privacy-safe, no corsproxy needed (H4)
     //    Covers WTI, BRENT, GLD, LMT, TSM, SPY, BTC, ETH, etc.
-    if (_apiOnline && _backendPrices[token] !== undefined) {
+    //    Skip entries that the backend itself flagged as stale (e.g. futures roll period,
+    //    source outage) — fall through to the next live price source instead.
+    if (_apiOnline && _backendPrices[token] !== undefined &&
+        _stalePriceSymbols.indexOf(token) === -1) {
       _cacheSet(token, _backendPrices[token]);
       _feedOk('backend');
       cb(_backendPrices[token]);
@@ -1696,7 +1700,11 @@
       } catch (e) {}
     }
 
-    if (sig.conf < _cfg.min_confidence)
+    // Use original (un-decayed) confidence for threshold checks.
+    // Age decay reflects lower expected value and is applied to sig.conf for scoring,
+    // but floors/gates calibrated against fresh signals should use the un-decayed value.
+    var _sigConfForFloor = sig._confOrig !== undefined ? sig._confOrig : sig.conf;
+    if (_sigConfForFloor < _cfg.min_confidence)
       return { ok: false, reason: 'Conf ' + sig.conf + '% < threshold ' + _cfg.min_confidence + '%' };
 
     // T2-A: attribution-adjusted confidence floor.
@@ -1712,20 +1720,23 @@
       if      (_attrWr < 0.35) _adjFloor = Math.min(80, _adjFloor + 15);  // very poor WR: raise bar
       else if (_attrWr < 0.45) _adjFloor = Math.min(75, _adjFloor + 8);   // below avg: raise bar
       else if (_attrWr > 0.60) _adjFloor = Math.max(45, _adjFloor - 5);   // hot asset: relax slightly
-      if (sig.conf < _adjFloor) {
+      // Use original (un-decayed) conf for attribution floor — floor calibrated against fresh signals.
+      var _ceConfForAttr = sig._confOrig !== undefined ? sig._confOrig : sig.conf;
+      if (_ceConfForAttr < _adjFloor) {
         // Store the adjusted floor on sig so _logSignal can show it
         sig._attrAdjFloor = _adjFloor;
         sig._attrWr       = _attrWr;
       }
     })();
-    if (sig._attrAdjFloor && sig.conf < sig._attrAdjFloor) {
+    if (sig._attrAdjFloor && (sig._confOrig !== undefined ? sig._confOrig : sig.conf) < sig._attrAdjFloor) {
       return { ok: false, reason: 'Conf ' + sig.conf + '% < attribution floor ' + sig._attrAdjFloor + '% (' + Math.round((sig._attrWr || 0) * 100) + '% hist. WR in current regime)' };
     }
 
     // Per-asset confidence floor: poor historical performers require higher conviction.
+    // Use original (un-decayed) conf — the floor was calibrated against fresh signals.
     var _assetFloor = EE_ASSET_CONF_FLOOR[normaliseAsset(sig.asset)];
-    if (_assetFloor && sig.conf < _assetFloor) {
-      return { ok: false, reason: sig.asset + ' requires conf ≥' + _assetFloor + '% (poor hist. WR) — got ' + sig.conf + '%' };
+    if (_assetFloor && _sigConfForFloor < _assetFloor) {
+      return { ok: false, reason: sig.asset + ' requires conf ≥' + _assetFloor + '% (poor hist. WR) — got ' + _sigConfForFloor + '%' };
     }
 
     // Confirmation gate: any specialist source at min_confidence passes solo.
@@ -1881,8 +1892,13 @@
       var _sessionTs2 = _sessionStart ? new Date(_sessionStart).getTime() : 0;
       var _realisedPnl = _trades
         .filter(function (t) {
+          // Exclude BROKER_REJECTED and phantom/stale-timeout closes — these never
+          // represented real filled positions and should not count against the daily limit.
           return t.status === 'CLOSED' && t.timestamp_close &&
-                 new Date(t.timestamp_close).getTime() >= _sessionTs2;
+                 new Date(t.timestamp_close).getTime() >= _sessionTs2 &&
+                 t.close_reason !== 'BROKER_REJECTED' &&
+                 t.close_reason !== 'STALE-PRICE-TIMEOUT' &&
+                 t.close_reason !== 'PHANTOM';
         })
         .reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
       var sessionLossPct = _effectiveStart > 0 ? (_realisedPnl / _effectiveStart * 100) : 0;
@@ -1944,8 +1960,11 @@
             var ev0 = _eventMatches[0];
             var minsAway = Math.round(ev0.days * 24 * 60);
             var _evImp = ev0.importance || 0;
-            // Risk reduction instead of blocking: higher importance = more reduction
-            sig._eventRiskMult = _evImp >= 5 ? 0.50 : _evImp >= 4 ? 0.70 : 0.80;
+            // Risk reduction instead of blocking: higher importance = more reduction.
+            // Use Math.min so that if ECON_CALENDAR gate (above) already set a stricter
+            // multiplier (e.g. 0.50), we never loosen it here — always keep the tightest.
+            var _evMult = _evImp >= 5 ? 0.50 : _evImp >= 4 ? 0.70 : 0.80;
+            sig._eventRiskMult = Math.min(sig._eventRiskMult || 1.0, _evMult);
             sig._eventLabel = ev0.label ? ev0.label.substring(0, 45) : 'upcoming event';
             sig._eventMinsAway = minsAway;
             // Log the reduction but let the trade through
@@ -2006,10 +2025,10 @@
 
     // Signal age check: if the signal carries a timestamp and it is older than
     // 15 minutes, reject. The market has already moved on — we're chasing.
-    // T3-E: scalper signals get a 5-min age gate (was fully exempt).
-    // Scalp theses (momentum, breakout, RSI extreme) decay within minutes;
-    // a 20-min-old scalp signal is not just stale — it's likely a reversal risk.
-    var _isScalperForAge = sig.reason && (sig.reason.indexOf('SCALPER') === 0 || sig.reason.indexOf('GII:') === 0 || sig.reason.indexOf('GII-ROUTING:') !== -1);
+    // T3-E: scalper signals (SCALPER prefix or GII: prefix) get a 5-min age gate.
+    // GII-ROUTING: is intentionally excluded — it routes IC/macro signals through the GII
+    // stack, which have longer-lived theses and should use the standard 15-min gate.
+    var _isScalperForAge = sig.reason && (sig.reason.indexOf('SCALPER') === 0 || sig.reason.indexOf('GII:') === 0);
     var _maxAgeMs = _isScalperForAge ? 5 * 60 * 1000 : 15 * 60 * 1000;
     if (sig.ts && (Date.now() - sig.ts) > _maxAgeMs) {
       return { ok: false, reason: 'Signal stale — ' + Math.round((Date.now() - sig.ts) / 60000) + 'min old (>' + (_maxAgeMs / 60000) + 'min threshold for ' + (_isScalperForAge ? 'scalper' : 'IC') + ')' };
@@ -2876,6 +2895,23 @@
     var dir = sig.dir === 'SHORT' ? 'SHORT' : 'LONG';
     var adjustedEntry = _adjustedEntryPrice(sig.asset, entryPrice, dir);
 
+    // Stale price SL widening: if the price we're using is more than 2 minutes old,
+    // add a buffer to the stop to account for unknown market movement since the last
+    // good price. Only applied when routing to HL (live broker) — simulation is unaffected.
+    var _stalePriceAge = _priceCacheTs[normaliseAsset(sig.asset)]
+      ? (Date.now() - _priceCacheTs[normaliseAsset(sig.asset)])
+      : 0;
+    var _stalePriceWiden = 0;
+    if (_stalePriceAge > 120000 && sig._venue === 'HL') {  // > 2 min stale on live venue
+      // Add 0.3% per minute of staleness, capped at 1.5%
+      _stalePriceWiden = Math.min(0.015, (_stalePriceAge / 60000) * 0.003);
+      sig = Object.assign({}, sig, {
+        stopPct: ((sig.stopPct || _cfg.stop_loss_pct) * (1 + _stalePriceWiden))
+      });
+      log('TRADE', sig.asset + ' SL widened +' + (_stalePriceWiden * 100).toFixed(1) +
+        '% for stale price (' + Math.round(_stalePriceAge / 60000) + 'min old)', 'amber');
+    }
+
     var trade = buildTrade(sig, adjustedEntry);
 
     // Snapshot world state at trade-open time so we can attribute wins/losses
@@ -2902,8 +2938,6 @@
       log('TRADE', sig.asset + ' ' + dir + ' skipped — risk budget exhausted by open positions (0 units available)', 'amber');
       return;
     }
-    // M7 fix: log TRADED only after confirming units > 0 (trade will actually open)
-    _logSignal(sig, 'TRADED', null);
 
     // Store raw (pre-slippage) price for audit display
     trade.raw_entry_price    = +entryPrice.toFixed(6);
@@ -2938,6 +2972,11 @@
       return;
     }
 
+    // Log TRADED only here — after all guards pass (units > 0, liquidity ok,
+    // commission deducted, broker connected). Prevents spurious TRADED entries
+    // in the signal log for trades that are immediately aborted.
+    _logSignal(sig, 'TRADED', null);
+
     // Mark as PENDING_FILL before saving so phantom purge can identify
     // stuck trades even if the page crashes before the fill callback fires.
     if (trade.venue === 'HL' || trade.venue === 'ALPACA' || trade.venue === 'OANDA' || trade.venue === 'TICKTRADER') {
@@ -2964,10 +3003,17 @@
       // Margin required ≈ notional / leverage. Catches "Insufficient margin"
       // rejections before they happen, saving a round-trip to HL's API.
       var _hlStatus = HLBroker.status();
-      var _hlAvailable = (_hlStatus && _hlStatus.available != null) ? _hlStatus.available : Infinity;
+      // If status() returns null or available is missing, we cannot verify margin.
+      // Log a warning and skip the pre-flight (the 45s watchdog handles actual rejections).
+      // Do NOT default to Infinity — that silently bypasses the check with no trace.
+      var _hlStatusOk = _hlStatus && typeof _hlStatus.available === 'number' && isFinite(_hlStatus.available);
+      if (!_hlStatusOk) {
+        log('HL', '⚠ Pre-flight margin check skipped — HLBroker.status() unavailable (margin unverified)', 'amber');
+      }
+      var _hlAvailable = _hlStatusOk ? _hlStatus.available : null;
       var _hlLevPre = trade.leverage ? Math.max(1, Math.floor(trade.leverage)) : 1;
       var _marginRequired = trade.size_usd / _hlLevPre;
-      if (_hlAvailable < _marginRequired * 1.05) {  // 5% buffer
+      if (_hlAvailable !== null && _hlAvailable < _marginRequired * 1.05) {  // 5% buffer
         _flagTrade(sig, 'Insufficient HL margin: need ~$' + _marginRequired.toFixed(2) +
           ' but only $' + _hlAvailable.toFixed(2) + ' available');
         trade.broker_status = 'REJECTED';
@@ -3007,9 +3053,30 @@
         { notional: trade.size_usd, leverage: _hlLev, cloid: trade.trade_id },
         /* onFill */ function (fillPrice, pos) {
           _hlCallbackFired = true; clearTimeout(_hlWatchdog);
+          // Guard: HL SDK occasionally returns {fresh: true, price: undefined} on
+          // the position-poll path. Treat undefined/NaN/0 fills as a failure rather
+          // than propagating NaN into trade price fields and crashing .toFixed() calls.
+          var _validFill = typeof fillPrice === 'number' && isFinite(fillPrice) && fillPrice > 0;
+          if (!_validFill) {
+            log('HL', '⚠ Fill callback received invalid price (' + fillPrice + ') for ' +
+              trade.asset + ' — treating as rejection', 'red');
+            trade.broker_status   = 'REJECTED';
+            trade.broker_error    = 'Fill received invalid price: ' + fillPrice;
+            trade.status          = 'CLOSED';
+            trade.close_reason    = 'BROKER_REJECTED';
+            trade.timestamp_close = new Date().toISOString();
+            _cfg.virtual_balance += (trade.open_commission || 0);
+            delete _cooldown[normaliseAsset(trade.asset) + '_' + (trade.direction || 'LONG')];
+            saveTrades(); saveCfg();
+            _apiPatchTrade(trade.trade_id, {
+              status: 'CLOSED', close_reason: 'BROKER_REJECTED',
+              broker_error: trade.broker_error, timestamp_close: trade.timestamp_close
+            });
+            renderUI(); return;
+          }
           trade.broker_status     = 'FILLED';
           trade.broker_fill_price = fillPrice;
-          if (fillPrice > 0 && isFinite(fillPrice)) trade.entry_price = fillPrice;
+          trade.entry_price = fillPrice;
           // Update size/units to actual fill (backend may have capped the notional).
           // Direct SDK fill returns pos.fillSize; position-poll path returns pos.size.
           var _actualSz = pos ? (pos.fillSize > 0 ? pos.fillSize : Math.abs(pos.size || 0)) : 0;
@@ -3751,11 +3818,14 @@
     if (_now - _sigRateWindow > 10000) { _sigRateWindow = _now; _sigRateCount = 0; }
     // A16: trim to the remaining quota rather than dropping the entire batch —
     // if 48 signals have passed and a batch of 5 arrives, 2 are legitimate.
+    // Sort by confidence descending first so the weakest signals are dropped, not
+    // the highest-conviction ones (which may include coordinated multi-leg signals).
     var _quota = Math.max(0, _SIG_RATE_LIMIT - _sigRateCount);
     if (sigs.length > _quota) {
+      sigs = sigs.slice().sort(function (a, b) { return (b.conf || 0) - (a.conf || 0); })
+                         .slice(0, _quota);
       log('SYSTEM', '⚠ Signal rate limit — accepting ' + _quota + '/' + sigs.length +
-        ' signal(s) this window (' + _sigRateCount + '/' + _SIG_RATE_LIMIT + ' used)', 'warn');
-      sigs = sigs.slice(0, _quota);
+        ' highest-confidence signal(s) this window (' + _sigRateCount + '/' + _SIG_RATE_LIMIT + ' used)', 'warn');
     }
     _sigRateCount += sigs.length;
 
@@ -3776,18 +3846,20 @@
     sigs = _fuseSignals(sigs);
 
     // Fix #16: Cross-batch dedup — reject signals for asset+direction combos
-    // that were already processed in the last 30 seconds. Prevents the same
+    // that were already processed in the last 90 seconds. Prevents the same
     // signal arriving in two rapid batches from opening duplicate trades.
+    // 90s = 30s dedup window + 60s cooldown_ms — closing the gap where a signal
+    // older than 30s but still within the cooldown could bypass the dedup check
+    // and submit a duplicate entry attempt.
     sigs = sigs.filter(function (s) {
       var _ddKey = normaliseAsset(s.asset) + '|' + (s.dir || 'LONG');
       var _lastSeen = _sigDedupCache[_ddKey] || 0;
-      if (_now - _lastSeen < 30000) return false;  // seen in last 30s — skip
+      if (_now - _lastSeen < 90000) return false;  // seen in last 90s — skip
       _sigDedupCache[_ddKey] = _now;
       return true;
     });
-    // Prune dedup cache entries older than 60s — prevents unbounded growth over long sessions.
-    // _cooldown does its own cleanup; dedup cache had none before this fix.
-    var _ddPruneCutoff = _now - 60000;
+    // Prune dedup cache entries older than 180s (2× the 90s dedup window).
+    var _ddPruneCutoff = _now - 180000;
     Object.keys(_sigDedupCache).forEach(function (k) {
       if (_sigDedupCache[k] < _ddPruneCutoff) delete _sigDedupCache[k];
     });
@@ -3833,10 +3905,15 @@
       // Fix #17: Proportional confidence decay on first arrival.
       // A 14-minute-old signal at 60% has lower expected value than a fresh 60%.
       // Decay linearly: 100% at age 0, 85% at 10 min, 75% at 15 min.
+      // We preserve the original conf in sig._confOrig so that per-asset confidence
+      // FLOORS and the global min_confidence gate are checked against the un-decayed
+      // value — the decay reflects lower expected value but should not cause a signal
+      // to fail a floor that was calibrated against fresh (undecayed) confidence values.
       if (sig._signalTs && sig.ts) {
         var _arrivalAge = (Date.now() - sig._signalTs) / 60000;  // age in minutes
         if (_arrivalAge > 2) {  // only decay if > 2 min old (avoid penalising normal latency)
           var _arrivalDecay = Math.max(0.70, 1.0 - (_arrivalAge / 60));  // 0→1.0, 10→0.83, 15→0.75, 30→0.50
+          sig._confOrig  = sig.conf;  // preserve for floor checks
           sig.conf       = Math.round((sig.conf       || 60) * _arrivalDecay);
           sig.confidence = Math.round((sig.confidence || 60) * _arrivalDecay);
         }
@@ -4090,19 +4167,19 @@
       var _batchSectorCount = {};  // sector → number of signals already selected in batch
       var _filtered = [];
       _readySigs.forEach(function (s) {
-        var _sec = EE_SECTOR_MAP[normaliseAsset(s.asset)];
-        if (_sec && _cfg.max_per_sector) {
-          var _openInSec = openTrades().filter(function (t) {
-            return EE_SECTOR_MAP[normaliseAsset(t.asset)] === _sec;
-          }).length;
-          var _batchInSec = _batchSectorCount[_sec] || 0;
-          if (_openInSec + _batchInSec >= _cfg.max_per_sector) {
-            _logSignal(s, 'SKIPPED', 'Batch sector cap: ' + _sec + ' already at ' +
-              _cfg.max_per_sector + ' (' + _openInSec + ' open + ' + _batchInSec + ' in batch)');
-            return;
-          }
+        // Fall back to 'unknown' so unmapped assets are capped as a group —
+        // previously, undefined sector skipped the cap check entirely (bypass).
+        var _sec = EE_SECTOR_MAP[normaliseAsset(s.asset)] || 'unknown';
+        var _openInSec = openTrades().filter(function (t) {
+          return (EE_SECTOR_MAP[normaliseAsset(t.asset)] || 'unknown') === _sec;
+        }).length;
+        var _batchInSec = _batchSectorCount[_sec] || 0;
+        if (_openInSec + _batchInSec >= _cfg.max_per_sector) {
+          _logSignal(s, 'SKIPPED', 'Batch sector cap: ' + _sec + ' already at ' +
+            _cfg.max_per_sector + ' (' + _openInSec + ' open + ' + _batchInSec + ' in batch)');
+          return;
         }
-        _batchSectorCount[_sec || ''] = (_batchSectorCount[_sec || ''] || 0) + 1;
+        _batchSectorCount[_sec] = (_batchSectorCount[_sec] || 0) + 1;
         _filtered.push(s);
       });
       _readySigs = _filtered;
@@ -4240,12 +4317,13 @@
         // so session P&L tracking stays meaningful.
         // Allow update on the very first poll (prev === null) so the stale
         // manually-set value is replaced immediately on page load.
-        // Fix #2: Use symmetric guard — compare change against the LARGER of the two values
-        // so large downward corrections (e.g. recovering from an inflated cached value) are
-        // allowed through. Previous: Math.abs(total-prev) < total*0.5 blocked drops >50% of
-        // the NEW value, meaning a correction from $4,159→$2,218 was permanently stuck.
-        // New: allow changes up to 60% of whichever value is bigger (symmetrical).
-        var _glitchGuard = prev === null || Math.abs(total - prev) < Math.max(total, prev) * 0.6;
+        // Glitch guard: reject equity updates that change the balance by more than 20%
+        // in a single polling cycle — this is almost certainly a bad API response or
+        // temporary data error rather than a real account event. Log it and skip.
+        // 20% is tight enough to catch glitches (real equity doesn't move 20%+ per poll)
+        // but loose enough for normal trading fluctuations. If equity genuinely moves
+        // >20% (large PnL swing), the guard will log a warning and clear on the next poll.
+        var _glitchGuard = prev === null || Math.abs(total - prev) < Math.max(total, prev) * 0.20;
         if (_glitchGuard) {
           _cfg.virtual_balance = total;
           saveCfg();
@@ -4521,27 +4599,43 @@
     // Fix #6 (monitor): match canExecute() — use realised P&L from closed trades only,
     // not the virtual_balance delta which includes unrealised open-trade fluctuations.
     var _monEffectiveStart = _sessionStartBalance || _cfg.virtual_balance;
-    if (_monEffectiveStart && _cfg.daily_loss_limit_pct > 0 && _cfg.enabled) {
+    // Run the daily loss limit check when enabled OR when it was the limit that halted us
+    // (so we can detect recovery and auto-resume within the same session).
+    if (_monEffectiveStart && _cfg.daily_loss_limit_pct > 0 && (_cfg.enabled || _dailyLimitHalted)) {
       var _monSessionTs = _sessionStart ? new Date(_sessionStart).getTime() : 0;
       var _monRealisedPnl = _trades
         .filter(function (t) {
+          // Exclude BROKER_REJECTED and phantom/stale-timeout closes — they never
+          // represented real filled positions and should not count against the daily limit.
           return t.status === 'CLOSED' && t.timestamp_close &&
-                 new Date(t.timestamp_close).getTime() >= _monSessionTs;
+                 new Date(t.timestamp_close).getTime() >= _monSessionTs &&
+                 t.close_reason !== 'BROKER_REJECTED' &&
+                 t.close_reason !== 'STALE-PRICE-TIMEOUT' &&
+                 t.close_reason !== 'PHANTOM';
         })
         .reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
       var sessionLossPct = _monEffectiveStart > 0 ? (_monRealisedPnl / _monEffectiveStart * 100) : 0;
       if (sessionLossPct < -_cfg.daily_loss_limit_pct) {
-        _cfg.enabled = false;
-        // Don't saveCfg() — pause is session-only; reload starts fresh
-        log('RISK', 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached (' +
-          sessionLossPct.toFixed(1) + '%) — no new trades until tomorrow', 'red');
-        _notify('⚠ Daily Loss Limit Hit',
-          'Session P&L: ' + sessionLossPct.toFixed(1) + '% — paused for new entries. Existing trades run to TP/SL.',
-          'ee-daily-limit');
-        // Existing open trades are left to run to their natural TP/SL —
-        // force-closing mid-trade locks in losses and can turn recoverable
-        // drawdowns into confirmed ones. The stop-loss on each trade IS the
-        // real risk-management tool.
+        if (!_dailyLimitHalted) {
+          _cfg.enabled = false;
+          _dailyLimitHalted = true;
+          // Don't saveCfg() — pause is session-only; reload starts fresh
+          log('RISK', 'Daily loss limit -' + _cfg.daily_loss_limit_pct + '% reached (' +
+            sessionLossPct.toFixed(1) + '%) — no new trades until recovery', 'red');
+          _notify('⚠ Daily Loss Limit Hit',
+            'Session P&L: ' + sessionLossPct.toFixed(1) + '% — paused for new entries. Existing trades run to TP/SL.',
+            'ee-daily-limit');
+          // Existing open trades are left to run to their natural TP/SL —
+          // force-closing mid-trade locks in losses and can turn recoverable
+          // drawdowns into confirmed ones. The stop-loss on each trade IS the
+          // real risk-management tool.
+          renderUI();
+        }
+      } else if (_dailyLimitHalted) {
+        // Session P&L has recovered above the loss limit — auto-resume execution.
+        _cfg.enabled = true;
+        _dailyLimitHalted = false;
+        log('RISK', 'Daily loss limit recovered — session P&L now ' + sessionLossPct.toFixed(1) + '% — execution resumed', 'green');
         renderUI();
       }
     }
@@ -4674,8 +4768,11 @@
     // ever traded. Entries are safe to remove once the cooldown window has elapsed.
     (function () {
       var _cdNow = Date.now();
+      // Prune at 3× base cooldown — the adaptive multiplier caps at 3× (VIX > 35 + loss streak).
+      // Pruning at 1× base was deleting entries while canExecute could still be blocking
+      // them at a higher adaptive multiple, allowing premature re-entry.
       Object.keys(_cooldown).forEach(function (k) {
-        if (_cdNow - (_cooldown[k] || 0) > _cfg.cooldown_ms) {
+        if (_cdNow - (_cooldown[k] || 0) > _cfg.cooldown_ms * 3) {
           delete _cooldown[k];
         }
       });
@@ -4727,24 +4824,17 @@
             ? (Date.now() - _priceCacheTs[normaliseAsset(trade.asset)])
             : (Date.now() - new Date(trade.timestamp_open || 0).getTime());
           if (_cacheAge > _PRICE_STALE_TIMEOUT) {
-            // Fix #10: use worst-case price on stale force-close.
-            // The cached price could be 29 min old. Using entry_price would fake
-            // a breakeven. Instead, use whichever is worse for the trade direction
-            // to be conservative about uncertain market conditions.
+            // Use the last known cached price. The previous "worst-case" logic
+            // used Math.min(cache, entry) for longs and Math.max for shorts —
+            // this always penalised the trade, converting profitable positions
+            // into breakevens/losses. The cached price (even if ~30 min stale)
+            // is the best available information; use it as-is.
             var _cached = _priceCache[normaliseAsset(trade.asset)] || 0;
-            var _entry  = trade.entry_price || 0;
-            var _fallback;
-            if (_cached > 0 && _entry > 0) {
-              _fallback = (trade.direction === 'LONG')
-                ? Math.min(_cached, _entry)    // worst case for LONG = lower price
-                : Math.max(_cached, _entry);   // worst case for SHORT = higher price
-            } else {
-              _fallback = _cached || _entry;
-            }
+            var _fallback = _cached || trade.entry_price || 0;
             log('TRADE', trade.asset + ' STALE-PRICE-TIMEOUT: no fresh price for ' +
-                Math.round(_cacheAge / 60000) + 'min — closing at worst-case $' +
-                (_fallback || 0).toFixed(2) + ' (cache=$' + _cached.toFixed(2) + ', entry=$' + _entry.toFixed(2) + ')', 'amber');
-            closeTrade(trade.trade_id, _fallback || trade.entry_price || 0, 'STALE-PRICE-TIMEOUT');
+                Math.round(_cacheAge / 60000) + 'min — closing at last known $' +
+                (_fallback || 0).toFixed(2), 'amber');
+            closeTrade(trade.trade_id, _fallback, 'STALE-PRICE-TIMEOUT');
           }
           renderUI(); return;
         }
@@ -4800,6 +4890,26 @@
             trade.partial_tp_price  = +adjPartialClose.toFixed(6);
             trade.partial_pnl_usd   = partialPnl;
             trade.costs_usd         = +((trade.costs_usd || 0) + partialComm).toFixed(4);
+
+            // Settle any accrued funding BEFORE reducing size_usd — funding for periods
+            // up to partial TP should be charged on the full position, not the reduced one.
+            var _ptpFundingCosts = _getCosts(trade.asset);
+            if (_ptpFundingCosts.funding8h > 0) {
+              var _ptpAge     = tradeAgeMs / 3600000;
+              var _ptpDue     = Math.floor(_ptpAge / 8);
+              var _ptpPaid    = trade.funding_periods_paid || 0;
+              if (_ptpDue > _ptpPaid) {
+                var _ptpFund = trade.size_usd * _ptpFundingCosts.funding8h * (_ptpDue - _ptpPaid);
+                trade.funding_periods_paid = _ptpDue;
+                trade.costs_usd = +((trade.costs_usd || 0) + _ptpFund).toFixed(4);
+                trade.funding_cost_usd = +((trade.funding_cost_usd || 0) + _ptpFund).toFixed(4);
+                _cfg.virtual_balance -= _ptpFund;
+                saveCfg();
+                log('COST', trade.asset + ' partial-TP funding settle ×' + (_ptpDue - _ptpPaid) +
+                  ' periods  -$' + _num(_ptpFund), 'dim');
+              }
+            }
+
             trade.units             = +(trade.units * (1 - _partialFrac)).toFixed(6);
             trade.size_usd          = +(trade.units * trade.entry_price).toFixed(2); // v48 fix: use entry price, not live price
             // #19: If remaining notional is below broker minimum after partial close,
@@ -4974,7 +5084,12 @@
         // closing a profitable trade as STOP_LOSS instead of TAKE_PROFIT.
         // Checking TP first and skipping the trail update avoids the race entirely.
         var _tpAlreadyHit = isLong ? price >= trade.take_profit : price <= trade.take_profit;
-        if (_cfg.trailing_stop_enabled && trade.trailing_stop_active && !_tpAlreadyHit) {
+        // Also trail when the trade has individually entered trail mode (e.g. after break-even),
+        // even if the global trailing_stop_enabled config is off.
+        // The config flag controls whether NEW trades start with trailing; once a trade has
+        // hit break-even its trailing_stop_active flag enables trailing independently.
+        var _trailActive = _cfg.trailing_stop_enabled || (trade.trailing_stop_active && trade.break_even_done);
+        if (_trailActive && !_tpAlreadyHit) {
           var trailDist = trade.entry_price * (_cfg.trailing_stop_pct / 100);
           if (isLong) {
             var newHigh = Math.max(price, trade.highest_price || price);

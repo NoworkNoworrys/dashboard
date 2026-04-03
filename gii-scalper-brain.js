@@ -120,7 +120,13 @@
     var dir    = (trade.dir || trade.direction || 'long').toLowerCase();
     if (dir !== 'long' && dir !== 'short') dir = 'long';
     var pnl    = trade.pnl_usd !== undefined ? trade.pnl_usd : (trade.pnl || trade.profit || 0);
-    var won    = pnl >= 0;  // break-even (pnl=0) counts as non-loss; strict > was deflating win-rate
+    // Skip recording for broker-rejected / phantom / zero-fill trades (pnl exactly 0).
+    // These never represented a real position and would inflate the "total" denominator
+    // while making break-even appear as wins. Genuine break-evens are effectively impossible
+    // (price would have to return to exact entry after fees), so pnl === 0 safely flags
+    // non-trades. Real trades with pnl close to 0 will have small non-zero values.
+    if (pnl === 0) return;
+    var won    = pnl > 0;  // strictly positive pnl = win; negative = loss; 0 skipped above
 
     // Setup-level stats
     var sector    = (meta && meta.sector)    || 'unknown';
