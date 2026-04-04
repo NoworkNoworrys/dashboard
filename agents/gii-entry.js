@@ -542,6 +542,54 @@
       } catch (e) {}
     }
 
+    // ── TA Scanner (technicals-agent.js) — broad HL asset TA confirmation ─────
+    // This agent scans all HL assets for RSI/MACD/BB signals but does NOT
+    // generate standalone trades. It only adds/subtracts confluence weight here.
+    if (window.GII_AGENT_TA_SCANNER && typeof GII_AGENT_TA_SCANNER.signals === 'function') {
+      try {
+        var _taSigs = GII_AGENT_TA_SCANNER.signals();
+        for (var _tai = 0; _tai < _taSigs.length; _tai++) {
+          var _taS = _taSigs[_tai];
+          if (String(_taS.asset).toUpperCase() === asset && (_taS.confidence || 0) >= 55) {
+            var _taDir = String(_taS.bias || _taS.dir || '').toUpperCase();
+            if (_taDir === dir) {
+              score += _dynAgentWeight('GII_AGENT_TA_SCANNER', 0.8);
+              categories.ta_scanner = true;
+              agentsFor.push('ta-scanner');
+            } else if (_taDir && _taDir !== dir) {
+              score -= _dynAgentWeight('GII_AGENT_TA_SCANNER', 0.8) * 0.8;
+              agentsAgainst.push('ta-scanner');
+            }
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // ── Market Observer — anomaly/structure confirmation ───────────────────────
+    // Detects volume spikes, unusual moves, momentum shifts. Adds confirmation
+    // weight when market structure aligns with the geo thesis.
+    if (window.GII_AGENT_MARKET_OBSERVER && typeof GII_AGENT_MARKET_OBSERVER.observations === 'function') {
+      try {
+        var _moObs = GII_AGENT_MARKET_OBSERVER.observations();
+        for (var _moi = 0; _moi < _moObs.length; _moi++) {
+          var _mo = _moObs[_moi];
+          if (String(_mo.asset).toUpperCase() === asset && (_mo.score || 0) >= 50) {
+            var _moDir = String(_mo.direction || '').toUpperCase();
+            if (_moDir === dir) {
+              score += _dynAgentWeight('GII_AGENT_MARKET_OBSERVER', 0.6);
+              categories.market_structure = true;
+              agentsFor.push('market-observer');
+            } else if (_moDir && _moDir !== dir) {
+              score -= _dynAgentWeight('GII_AGENT_MARKET_OBSERVER', 0.6) * 0.8;
+              agentsAgainst.push('market-observer');
+            }
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+
     var categoryCount = Object.keys(categories).length;
 
     // Net agent ratio gate: if more agents oppose than support, cap the score.

@@ -556,14 +556,13 @@
         ' · ' + signal.reasoning);
     }
 
-    // ── Send to Execution Engine ──────────────────────────────────────────
-    if (newSignals.length && window.EE && typeof EE.onSignals === 'function') {
-      try {
-        EE.onSignals(newSignals);
-      } catch (e) {
-        console.warn('[TA] EE.onSignals error:', e);
-      }
-    }
+    // ── Advisor mode: DO NOT fire into EE.onSignals() ──────────────────
+    // The TA agent is a CONFIRMER, not a signal generator. Its signals are
+    // stored in _signals[] and queried by gii-entry.js during confluence
+    // scoring. Firing directly into EE caused 100+ crypto trades/day with
+    // zero geopolitical edge — the system's edge comes from geo agents,
+    // and TA confirms timing only.
+    // (Previously: EE.onSignals(newSignals) — removed)
 
     // Prepend new signals to the running list (most recent first)
     for (var k = 0; k < newSignals.length; k++) {

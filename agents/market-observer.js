@@ -508,9 +508,13 @@
     eligible.forEach(function(o){ _eeInjected.push(o.id); });
     _status.eeSignalsTotal += signals.length;
 
-    try { EE.onSignals(signals); } catch(e){
-      console.warn('[MO] EE.onSignals error:', e);
-    }
+    // Advisor mode: store signals for consultation but DO NOT fire into EE.
+    // Market observer detects anomalies (volume spikes, unusual moves) but should
+    // only contribute to confluence scoring, not generate standalone trades.
+    // The geo agents (conflict, sanctions, energy, etc.) provide the trading edge;
+    // market observer confirms market structure alignment.
+    // (Previously: EE.onSignals(signals) — removed)
+    _status.advisorSignals = signals;  // available for consultation queries
   }
 
   // ── render ───────────────────────────────────────────────────────────────────
