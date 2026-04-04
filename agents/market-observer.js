@@ -142,11 +142,27 @@
     var now = Date.now();
     if (now - _lastListBuild < 3600000 && _tradeableList.length) return _tradeableList;
     _lastListBuild = now;
+
+    // Respect EE blocked sectors — skip crypto if blocked
+    var _blockedSectors = [];
+    try {
+      var _eeCfg = window.EE && typeof EE.getConfig === 'function' ? EE.getConfig() : {};
+      if (_eeCfg.blocked_sectors) {
+        _blockedSectors = String(_eeCfg.blocked_sectors).toLowerCase().split(',').map(function(s){return s.trim();});
+      }
+    } catch(e) {}
+
+    function _isBlocked(a) {
+      if (!_blockedSectors.length) return false;
+      var sec = (window.EE_SECTOR_MAP && EE_SECTOR_MAP[a]) || 'crypto';
+      return _blockedSectors.indexOf(sec.toLowerCase()) !== -1;
+    }
+
     var list = [];
     // HL assets — available = covered + fresh price
     if (window.HLFeed) {
       HLFeed.coverage().forEach(function (a) {
-        if (HLFeed.isAvailable(a)) list.push({ asset:a, venue:'HL' });
+        if (HLFeed.isAvailable(a) && !_isBlocked(a)) list.push({ asset:a, venue:'HL' });
       });
     }
     // Alpaca — only if connected

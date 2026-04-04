@@ -415,7 +415,25 @@
     _status.lastScan = Date.now();
     _status.online   = true;
 
-    var list = _buildAssetList();
+    var rawList = _buildAssetList();
+
+    // Filter out blocked sectors (e.g. crypto) — respects EE config.
+    // Assets not in EE_SECTOR_MAP default to 'crypto' since the vast majority
+    // of HL's 300+ unnamed perps are crypto tokens. Only scan non-blocked assets.
+    var _blockedSectors = [];
+    try {
+      var _eeCfg = window.EE && typeof EE.getConfig === 'function' ? EE.getConfig() : {};
+      if (_eeCfg.blocked_sectors) {
+        _blockedSectors = String(_eeCfg.blocked_sectors).toLowerCase().split(',').map(function(s){return s.trim();});
+      }
+    } catch(e) {}
+    var list = rawList;
+    if (_blockedSectors.length) {
+      list = rawList.filter(function (a) {
+        var sec = (window.EE_SECTOR_MAP && EE_SECTOR_MAP[a]) || 'crypto';
+        return _blockedSectors.indexOf(sec.toLowerCase()) === -1;
+      });
+    }
     _status.assetsScanned = list.length;
 
     var newSignals = [];

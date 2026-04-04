@@ -575,6 +575,15 @@
 
   // Outer scan: refresh funding if needed, then run analysis
   function _scan() {
+    // Skip entirely if crypto sector is blocked in EE config
+    try {
+      var _csCfg = window.EE && typeof EE.getConfig === 'function' ? EE.getConfig() : {};
+      if (_csCfg.blocked_sectors && String(_csCfg.blocked_sectors).toLowerCase().indexOf('crypto') !== -1) {
+        _status.note = 'Crypto sector blocked — scan skipped';
+        return;
+      }
+    } catch(e) {}
+
     var now = Date.now();
 
     // Collect fresh price samples before analysis

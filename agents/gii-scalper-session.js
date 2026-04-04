@@ -807,7 +807,19 @@
       return;
     }
 
-    SCALPER_ASSETS.forEach(function (sym) { _pollAsset(sym, gtiM); });
+    // Respect EE blocked sectors — skip crypto assets if blocked
+    var _ssBlocked = [];
+    try {
+      var _ssCfg = window.EE && typeof EE.getConfig === 'function' ? EE.getConfig() : {};
+      if (_ssCfg.blocked_sectors) _ssBlocked = String(_ssCfg.blocked_sectors).toLowerCase().split(',').map(function(s){return s.trim();});
+    } catch(e) {}
+    SCALPER_ASSETS.forEach(function (sym) {
+      if (_ssBlocked.length) {
+        var _ssSec = (window.EE_SECTOR_MAP && EE_SECTOR_MAP[sym]) || 'crypto';
+        if (_ssBlocked.indexOf(_ssSec.toLowerCase()) !== -1) return;
+      }
+      _pollAsset(sym, gtiM);
+    });
   }
 
   // ── trade result feedback ─────────────────────────────────────────────────
