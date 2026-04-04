@@ -372,7 +372,9 @@
      VIX (CBOE Volatility Index) is a spot index — cannot be bought/sold directly.
      VXX (iPath S&P 500 VIX Short-Term Futures ETN) is the standard retail proxy.  */
   var ASSET_REMAP = {
-    'VIX':  'VXX'   // volatility index → tradeable VIX ETN
+    'VIX':  'VXX',  // volatility index → tradeable VIX ETN
+    'GLD':  'PAXG', // GLD ETF ($427) can't trade on HL — route to PAXG (1oz gold perp, $4646)
+    'XAU':  'PAXG', // same — gold signals route to the tradeable PAXG perp
   };
 
   /* ── Known no-venue assets — silenced at pipeline entry ─────────────────────
@@ -399,9 +401,6 @@
     // Stale-price assets — unreliable HL feeds, 0% WR across 30+ trades
     'MAVIA':true, 'GALA':true, 'CRV':true, '2Z':true,
     'JTO':true,   'KAS':true,  'FTT':true, 'GMX':true,
-    // GLD — price routing still broken (entry stamped at ~4664 perp units, not ~429 spot).
-    // 0% WR across 22 trades, -$100.51 total. Block until price routing is fixed.
-    'GLD':true,
   };
 
   /* ── Correlation groups — assets within each group are treated as equivalent
@@ -3905,11 +3904,10 @@
     // ── Quality Gate ────────────────────────────────────────────────────────
     // Filters signals to only the best trades before Phase 1 scoring.
     // Fewer, smarter, better-sized trades — quality over quantity.
+    // Only assets with proven 0% WR from single sources need multi-source agreement.
+    // Other equity perps can trade on single-source signals now that the xyz: recon fix is live.
     var _QG_EQUITY_PERPS = {
-        'MSTR':true, 'INTC':true, 'PLTR':true, 'COIN':true,
-        'MSFT':true, 'AMZN':true, 'MU':true,   'CRWV':true,
-        'AAPL':true, 'META':true, 'TSLA':true, 'NVDA':true,
-        'GOOG':true, 'GOOGL':true,'SLV':true,  'GOLD':true
+        'INTC':true, 'MSTR':true, 'COIN':true
     };
 
     sigs = sigs.filter(function (sig) {

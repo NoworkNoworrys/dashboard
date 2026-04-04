@@ -294,7 +294,7 @@
     'xyz:BRENTOIL': ['BRENT', 'BRENTOIL'],
     'xyz:CL':       ['WTI', 'WTIOIL', 'CRUDE', 'OIL', 'CL'],
     'xyz:SILVER':   ['SILVER', 'SLV', 'XAG'],
-    'xyz:GOLD':     ['GOLD', 'GLD'],
+    'xyz:GOLD':     ['GOLD'],          // GLD removed — GLD is the ETF ($427), not gold/oz ($4662). GLD routes to PAXG via ASSET_REMAP.
     'xyz:NATGAS':   ['NATGAS'],
     'xyz:SP500':    ['SP500'],
     'xyz:XYZ100':   ['XYZ100'],
