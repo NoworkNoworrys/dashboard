@@ -1460,6 +1460,83 @@
   /* Mark safe-mode stub as superseded — real entry is live */
   window._ENTRY_DEGRADED = false;
 
+  /* ── DASHBOARD UI — Entry Intelligence Status Bar ──────────────────────── */
+  function _renderEntryUI() {
+    var el = document.getElementById('entryStatusBar');
+    if (!el) return;
+
+    var s = _stats;
+    var mode = window._ENTRY_DEGRADED ? 'SAFE-STUB' : 'LIVE';
+    var modeColor = mode === 'LIVE' ? '#00e676' : '#ff1744';
+
+    /* Health indicator */
+    var healthy = (Date.now() - _lastProcessedAt) < POLL_MS * 2.5;
+    var healthIcon = healthy ? '<span style="color:#00e676">&#9679;</span>' : '<span style="color:#ff1744">&#9679;</span>';
+
+    /* Last approved signal */
+    var lastApprStr = '—';
+    if (_approved.length) {
+      var la = _approved[0];
+      var ago = Math.round((Date.now() - la.ts) / 60000);
+      lastApprStr = '<span style="color:#00e676">' + la.asset + ' ' + la.dir + '</span>' +
+        ' <span style="color:var(--dim)">score=' + la.score + ' conf=' + la.conf +
+        (la.fastPath ? ' [FAST]' : '') + ' ' + ago + 'm ago</span>';
+    }
+
+    /* Last rejected signal */
+    var lastRejStr = '—';
+    if (_rejected.length) {
+      var lr = _rejected[0];
+      var rejAgo = Math.round((Date.now() - lr.ts) / 60000);
+      lastRejStr = '<span style="color:#ff5252">' + lr.asset + ' ' + (lr.dir || '') + '</span>' +
+        ' <span style="color:var(--dim)">' + (lr.reason || '').substring(0, 55) + ' ' + rejAgo + 'm ago</span>';
+    }
+
+    /* Shadow log count */
+    var shadowCount = _shadowLog.length;
+    var shadowApproved = _shadowLog.filter(function (s) { return s.wouldApprove; }).length;
+
+    /* Queue depth */
+    var qd = _queue.length;
+
+    el.innerHTML =
+      '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px">' +
+        '<span style="color:#40c4ff;font-size:10px;font-weight:700;letter-spacing:.04em">ENTRY BRAIN</span>' +
+        healthIcon +
+        '<span style="font-size:9px;color:' + modeColor + ';font-weight:600">' + mode + '</span>' +
+        '<span style="font-size:9px;color:var(--dim)">approved <b style="color:#00e676">' + s.approved + '</b></span>' +
+        '<span style="font-size:9px;color:var(--dim)">rejected <b style="color:#ff5252">' + s.rejected + '</b></span>' +
+        '<span style="font-size:9px;color:var(--dim)">vetoed <b style="color:#ffab40">' + s.vetoed + '</b></span>' +
+        '<span style="font-size:9px;color:var(--dim)">queue <b>' + qd + '</b></span>' +
+        (shadowCount > 0 ? '<span style="font-size:9px;color:var(--dim)">shadow <b style="color:#b388ff">' + shadowApproved + '/' + shadowCount + '</b> would-approve</span>' : '') +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:4px;font-size:9px">' +
+        '<span>Last approved: ' + lastApprStr + '</span>' +
+        '<span>Last rejected: ' + lastRejStr + '</span>' +
+      '</div>';
+  }
+
+  function _injectEntryUI() {
+    if (document.getElementById('entryStatusBar')) return;
+    /* Insert after gatekeeper bar if present, otherwise as second child of eeWrap */
+    var eeWrap = document.getElementById('eeWrap');
+    if (!eeWrap) return;
+    var bar = document.createElement('div');
+    bar.id = 'entryStatusBar';
+    bar.style.cssText =
+      'padding:6px 12px;background:rgba(64,196,255,0.05);border:1px solid rgba(64,196,255,0.18);' +
+      'border-radius:6px;margin-bottom:8px;line-height:1.6;';
+    var gkBar = document.getElementById('gkStatusBar');
+    if (gkBar && gkBar.nextSibling) {
+      eeWrap.insertBefore(bar, gkBar.nextSibling);
+    } else if (gkBar) {
+      eeWrap.appendChild(bar);
+    } else {
+      eeWrap.insertBefore(bar, eeWrap.firstChild);
+    }
+    _renderEntryUI();
+  }
+
   /* ── INIT ───────────────────────────────────────────────────────────────── */
   window.addEventListener('load', function () {
     if (_initialized) return;
@@ -1470,6 +1547,14 @@
         _lastPoll = Date.now();
         _processQueue();
       }, POLL_MS);
+
+      /* Inject and keep alive the dashboard UI panel */
+      _injectEntryUI();
+      setInterval(function () {
+        if (!document.getElementById('entryStatusBar')) _injectEntryUI();
+        _renderEntryUI();
+      }, 5000);  // refresh every 5s
+
       console.log('[GII-ENTRY] Entry intelligence hub online');
     }, INIT_DELAY_MS);
   });
