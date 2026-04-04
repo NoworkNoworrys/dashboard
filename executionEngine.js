@@ -3068,7 +3068,25 @@
     _apiPostTrade(trade);   // async push to SQLite (fire-and-forget)
 
     // ── Fire HL order if this trade is routed to Hyperliquid ─────────────
+    if (trade.venue === 'HL' && !(window.HLBroker && HLBroker.isConnected())) {
+      // HL was connected during venue routing but disconnected/equity-zeroed
+      // before openTrade ran (async gap). Clean up immediately instead of
+      // leaving the trade stuck in PENDING_FILL for phantom-purge.
+      _cfg.virtual_balance += (trade.open_commission || 0);
+      saveCfg();
+      trade.broker_status   = 'REJECTED';
+      trade.broker_error    = 'HL disconnected between routing and execution';
+      trade.status          = 'CLOSED';
+      trade.close_reason    = 'BROKER_REJECTED';
+      trade.timestamp_close = new Date().toISOString();
+      delete _cooldown[normaliseAsset(trade.asset) + '_' + (trade.direction || 'LONG')];
+      saveTrades();
+      log('HL', '⚠ ' + trade.asset + ' aborted — HL disconnected during async price fetch gap', 'red');
+      renderUI();
+      return;
+    }
     if (trade.venue === 'HL' && window.HLBroker && HLBroker.isConnected()) {
+      log('HL', '▶ Sending order: ' + trade.asset + ' ' + trade.direction + ' $' + trade.size_usd.toFixed(2) + ' lev=' + (trade.leverage || 1), 'cyan');
       // HL requires orders > $10 notional (exactly $10 gets rejected). Skip if undersized.
       if (trade.size_usd <= 10) {
         _flagTrade(sig, 'Order undersized: $' + trade.size_usd.toFixed(2) + ' <= HL minimum $10 (needs > $10)');
@@ -3235,9 +3253,9 @@
           renderUI();
         }
       ).then(function (result) {
+        log('HL', '◀ Order response for ' + trade.asset + ': ok=' + (result && result.ok) +
+          ' fillPrice=' + (result && result.fillPrice) + ' error=' + (result && result.error), 'cyan');
         if (!result || !result.ok) return;
-        // broker_status already set to PENDING_FILL before save — just log
-        log('HL', trade.asset + ' order submitted — awaiting fill', 'cyan');
       }).catch(function (e) {
         _hlCallbackFired = true; clearTimeout(_hlWatchdog);  // cancel watchdog; catch handles it
         trade.broker_status   = 'REJECTED';
