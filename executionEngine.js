@@ -5091,7 +5091,36 @@
 
       // F33: stagger fetches by 100 ms per trade to avoid rate-limit bursts
       // (e.g. 12 open trades → last fetch starts at 1.1 s, well within 15 s cycle)
-      setTimeout(function () { fetchPrice(trade.asset, function (price) {
+      setTimeout(function () {
+
+      // HL-venue price guard: when a trade was filled on HL, ONLY use HL prices
+      // for monitoring. Backend/Yahoo prices can be for a completely different
+      // instrument (e.g. SLV ETF at $65 vs HL silver perp at $72). Using the
+      // wrong price source causes instant phantom stop-outs with huge fake losses.
+      var _useHLOnly = trade.venue === 'HL' && trade.broker_fill_price > 0;
+      var _hlMonitorPrice = null;
+      if (_useHLOnly && window.HLFeed && typeof HLFeed.getPrice === 'function') {
+        var _hlP = HLFeed.getPrice(normaliseAsset(trade.asset));
+        if (_hlP && _hlP.price > 0) _hlMonitorPrice = _hlP.price;
+      }
+
+      // For HL trades: use HL price only; skip fetchPrice entirely to avoid
+      // contamination from different-instrument fallback sources.
+      var _monitorPriceFn = _useHLOnly
+        ? function (cb) {
+            if (_hlMonitorPrice) {
+              _cacheSet(normaliseAsset(trade.asset), _hlMonitorPrice);
+              cb(_hlMonitorPrice);
+            } else {
+              // HL price unavailable — do NOT fall back to Yahoo/backend.
+              // Use last known HL-sourced cache or null (skip this cycle).
+              var _lastHL = _priceCache[normaliseAsset(trade.asset)];
+              cb(_lastHL || null);
+            }
+          }
+        : function (cb) { fetchPrice(trade.asset, cb); };
+
+      _monitorPriceFn(function (price) {
         // Use cached price as display fallback so unrealised P&L always renders
         var displayPrice = price || _priceCache[normaliseAsset(trade.asset)] || null;
         if (displayPrice) _livePrice[trade.trade_id] = displayPrice;
@@ -5497,7 +5526,7 @@
         if (hitTP)      closeTrade(trade.trade_id, trade.take_profit, 'TAKE_PROFIT');
         else if (hitSL) closeTrade(trade.trade_id, isLong ? Math.min(price, trade.stop_loss) : Math.max(price, trade.stop_loss), 'STOP_LOSS');
         else            renderUI();
-      }); }, _monIdx * 100); // closes fetchPrice callback + setTimeout (F33 stagger)
+      }); }, _monIdx * 100); // closes price callback + setTimeout (F33 stagger)
     });
   }
 
