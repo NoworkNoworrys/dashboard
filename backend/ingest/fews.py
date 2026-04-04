@@ -34,8 +34,9 @@ def fetch_fews() -> List[Dict]:
     events = []
     try:
         # ipcphasecountry/ is the current active endpoint (ipcphase/ may return 500)
+        url = f'{_BASE}/ipcphasecountry/'
         r = requests.get(
-            f'{_BASE}/ipcphasecountry/',
+            url,
             params={
                 'format': 'json',
                 'phase__gte': '3',     # Crisis (3), Emergency (4), Famine (5)
@@ -44,8 +45,15 @@ def fetch_fews() -> List[Dict]:
             },
             timeout=20,
         )
-        r.raise_for_status()
-        results = r.json().get('results', [])
+        if r.status_code != 200:
+            print(f'[FEWS NET] HTTP {r.status_code} from {url} — returning empty data')
+            return events
+        try:
+            data = r.json()
+        except ValueError:
+            print(f'[FEWS NET] Invalid JSON response from {url} — returning empty data')
+            return events
+        results = data.get('results', [])
         for item in results[:10]:
             country = item.get('country', {})
             country_name = country.get('name', 'Unknown') if isinstance(country, dict) else str(country)

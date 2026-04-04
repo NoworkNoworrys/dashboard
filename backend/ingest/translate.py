@@ -127,7 +127,7 @@ def translate(text: str, src_lang: str, dest_lang: str = 'en') -> Optional[str]:
 def translate_entry(title: str, desc: str, src_lang: str) -> tuple:
     """
     Translate title only — descriptions are skipped to conserve the
-    MyMemory anonymous quota (900 chars/day).  Keyword matching runs on
+    MyMemory quota (9000 chars/day with email param).  Keyword matching runs on
     the title which carries the actionable signal; descriptions are kept
     in their original language for reference only.
 
