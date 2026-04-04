@@ -399,6 +399,9 @@
     // Stale-price assets — unreliable HL feeds, 0% WR across 30+ trades
     'MAVIA':true, 'GALA':true, 'CRV':true, '2Z':true,
     'JTO':true,   'KAS':true,  'FTT':true, 'GMX':true,
+    // GLD — price routing still broken (entry stamped at ~4664 perp units, not ~429 spot).
+    // 0% WR across 22 trades, -$100.51 total. Block until price routing is fixed.
+    'GLD':true,
   };
 
   /* ── Correlation groups — assets within each group are treated as equivalent
