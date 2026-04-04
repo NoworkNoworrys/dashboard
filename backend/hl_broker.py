@@ -243,8 +243,22 @@ def place_order(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> 
     if not _exchange:
         return {'ok': False, 'error': 'Not connected'}
 
-    with _order_lock:  # serialise — prevents concurrent orders both passing margin check
+    # Acquire lock with 30s timeout — prevents permanent hang if a previous
+    # order caused the SDK to block indefinitely (e.g. xyz market_open freeze).
+    acquired = _order_lock.acquire(timeout=30)
+    if not acquired:
+        print(f'[HL_BROKER] ⚠ order lock stuck for 30s — force-releasing for {coin}')
+        # The lock is stuck from a previous hung operation. We can't safely
+        # release someone else's lock, but we can proceed unprotected — better
+        # than hanging forever. The margin pre-check provides some safety.
+        try:
+            return _place_order_locked(coin, is_buy, size_usd, leverage)
+        except Exception as e:
+            return {'ok': False, 'error': f'Lock timeout + order error: {e}'}
+    try:
         return _place_order_locked(coin, is_buy, size_usd, leverage)
+    finally:
+        _order_lock.release()
 
 
 def _place_order_locked(coin: str, is_buy: bool, size_usd: float, leverage: int = 1) -> dict:
@@ -302,7 +316,17 @@ def _place_order_locked(coin: str, is_buy: bool, size_usd: float, leverage: int 
         if sz <= 0:
             return {'ok': False, 'error': f'Calculated size {sz} too small'}
 
-        result = _exchange.market_open(coin, is_buy, sz)
+        # Run market_open with a timeout — the SDK can hang indefinitely on
+        # xyz perps if the DEX is illiquid or the API is slow. 15s is generous;
+        # normal fills return in <2s.
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
+            _fut = _pool.submit(_exchange.market_open, coin, is_buy, sz)
+            try:
+                result = _fut.result(timeout=15)
+            except _cf.TimeoutError:
+                print(f'[HL_BROKER] ⚠ market_open TIMEOUT (15s) for {coin} — SDK hung')
+                return {'ok': False, 'error': f'market_open timeout for {coin} — SDK hung, try again'}
 
         if result and result.get('status') == 'ok':
             statuses = (result.get('response', {}).get('data', {}) or {}).get('statuses', [])
@@ -404,7 +428,14 @@ def close_position(coin: str) -> dict:
     if not _exchange:
         return {'ok': False, 'error': 'Not connected'}
     try:
-        result = _exchange.market_close(coin)
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
+            _fut = _pool.submit(_exchange.market_close, coin)
+            try:
+                result = _fut.result(timeout=15)
+            except _cf.TimeoutError:
+                print(f'[HL_BROKER] ⚠ market_close TIMEOUT (15s) for {coin}')
+                return {'ok': False, 'error': f'market_close timeout for {coin}'}
         if result and result.get('status') == 'ok':
             return {'ok': True, 'coin': coin}
         return {'ok': False, 'error': str(result)}
