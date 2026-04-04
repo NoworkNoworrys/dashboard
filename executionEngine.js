@@ -2168,6 +2168,19 @@
       takeProfit = dir === 'LONG' ? entryPrice + tpDist_ : entryPrice - tpDist_;
     }
 
+    // Minimum stop floor: no stop closer than 0.3% of entry price.
+    // Prevents trades where spread + commissions > stop distance, which
+    // guarantees a loss regardless of direction. Common with scalper ATR stops.
+    var _minSlDist = entryPrice * 0.003;  // 0.3% absolute floor
+    if (slDist_ < _minSlDist) {
+      log('RISK', '⚠ SL floor for ' + sig.asset + ' — stop ' +
+        (slDist_ / entryPrice * 100).toFixed(3) + '% < 0.3% min — widened to 0.3%', 'warn');
+      slDist_ = _minSlDist;
+      tpDist_ = slDist_ * sigTpRatio;
+      stopLoss   = dir === 'LONG' ? entryPrice - slDist_ : entryPrice + slDist_;
+      takeProfit = dir === 'LONG' ? entryPrice + tpDist_ : entryPrice - tpDist_;
+    }
+
     // Position sizing: base risk scaled by signal impact strength
     // sig.impactMult: GTI size reduction (0.45–1.0) OR event impact (0.5–2.0)
     // Floor lowered to 0.1 so GTI extreme-tension 0.45 passes through correctly

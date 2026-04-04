@@ -657,8 +657,11 @@
     conf = _round2(conf);
     _lastEntryType = setup.entryType;
 
-    var stopDist   = ind.atr5 * 2.0;
-    var targetDist = ind.atr5 * 3.5;  // ~1.75:1 R:R minimum
+    // Minimum stop = 0.5% of price — ATR on short timeframes can be so small
+    // that the stop is tighter than the spread + commissions, guaranteeing a loss.
+    var minStopDist = ind.price * 0.005;  // 0.5% floor
+    var stopDist   = Math.max(ind.atr5 * 2.5, minStopDist);
+    var targetDist = stopDist * 1.75;  // ~1.75:1 R:R minimum
 
     return {
       source:        'scalper',
