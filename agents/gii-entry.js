@@ -25,11 +25,10 @@
 
   /* Minimum confluence score to approve entry */
   var MIN_SCORE_GEO    = 4.0;   // IC geopolitical trades — threshold for OSINT-driven signals
-  var MIN_SCORE_GII    = 8.0;   // GII multi-agent trades — raised from 4.0 to 8.0.
-                                 // Audit finding: GII confluence score has zero predictive power
-                                 // across all score bands (4-5: 10.6% WR; 8+: 12.5% WR).
-                                 // At 8.0 floor + asset restriction, GII acts as a high-bar
-                                 // confirmation filter rather than an independent trade generator.
+  var MIN_SCORE_GII    = 5.0;   // GII multi-agent trades — lowered from 8.0 to 5.0.
+                                 // 8.0 was too restrictive — almost no non-crypto xyz trades
+                                 // passed. Dynamic weights from audit fix now make the score
+                                 // more meaningful, so a lower bar is safer than before.
   var MIN_SCORE_SCALPER = 3.0;  // Scalper trades
 
   /* IC-adjacent assets: the only assets where geopolitical/OSINT catalysts
@@ -48,7 +47,7 @@
   };
 
   /* Minimum number of distinct agent categories that must agree */
-  var MIN_CATEGORIES = 3;   /* raised from 2 → 3: requires genuine multi-source confluence */
+  var MIN_CATEGORIES = 2;   /* lowered from 3 → 2: more trades get through for xyz testing */
 
   /* Minimum ms between approvals for the same asset (prevents runaway re-fire
      after a trade closes and the same escalation chain immediately re-queues) */
