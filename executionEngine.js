@@ -68,6 +68,7 @@
     daily_profit_target_pct: 0,          // T4-C: 0 = disabled; set e.g. 5 to pause new trades after +5% session gain
     event_gate_enabled:     true,        // block new trades 30min before major events
     event_gate_hours:       0.5,
+    blocked_sectors:        '',           // comma-separated sectors to block (e.g. 'crypto' or 'crypto,forex')
   };
 
   /* ── Sector map — used for max_per_sector concentration cap ──────────────── */
@@ -1788,8 +1789,16 @@
     // and block all subsequent unrelated signals. Concentration risk is already handled
     // by max_per_sector (below) and the correlation guard agent.
 
-    // Sector concentration cap: prevent overloading a single sector (energy, crypto, etc.)
+    // Blocked sectors: completely block trading in named sectors (e.g. 'crypto').
+    // Set via EE config: blocked_sectors = 'crypto' or 'crypto,forex' (comma-separated).
     var sector = EE_SECTOR_MAP[normaliseAsset(sig.asset)];
+    if (sector && _cfg.blocked_sectors) {
+      var _blockedList = String(_cfg.blocked_sectors).toLowerCase().split(',').map(function(s){return s.trim();});
+      if (_blockedList.indexOf(sector.toLowerCase()) !== -1)
+        return { ok: false, reason: 'Sector blocked: ' + sector };
+    }
+
+    // Sector concentration cap: prevent overloading a single sector (energy, crypto, etc.)
     if (sector && _cfg.max_per_sector) {
       var sectorOpen = open.filter(function (t) { return EE_SECTOR_MAP[normaliseAsset(t.asset)] === sector; }).length;
       if (sectorOpen >= _cfg.max_per_sector)
