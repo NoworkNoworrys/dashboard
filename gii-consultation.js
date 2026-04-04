@@ -184,7 +184,12 @@
 
     if (!matches.length) return { vote: 'abstain', weight: 0, reason: 'no view on ' + asset, ts: null };
 
-    var best   = matches[0];
+    // Pick highest-confidence match (not just most-recent) for best signal quality
+    var best = matches.reduce(function (a, b) {
+      var ca = a.confidence || a.conf || 0;
+      var cb = b.confidence || b.conf || 0;
+      return cb > ca ? b : a;
+    });
     var sigDir = ((best.bias || best.dir || '')).toLowerCase();
     var conf   = best.confidence || best.conf || 0;
     if (conf > 1) conf /= 100;
@@ -301,7 +306,12 @@
 
     var entryVotes   = {};
     var recheckVotes = {};
-    (entryResult.opinions   || []).forEach(function (o) { entryVotes[o.agent]   = o.vote; });
+    // Handle both full evaluate result (opinions[]) and snapshot (votes dict keyed by agent name)
+    var entryOps = entryResult.opinions ||
+      Object.keys(entryResult.votes || {}).map(function (a) {
+        return Object.assign({ agent: a }, entryResult.votes[a]);
+      });
+    entryOps.forEach(function (o) { entryVotes[o.agent]   = o.vote; });
     (recheckResult.opinions || []).forEach(function (o) { recheckVotes[o.agent] = o.vote; });
 
     // Count thesis flips: supported at entry, now opposing
@@ -393,7 +403,9 @@
       t.avgLeadMinutes  = t.totalLeadMs / t.totalVotes / 60000;
 
       // ── Calibration update ──
-      var conf = v.weight;
+      // v.weight is effective weight (result.weight * dynamicBaseWeight), which can exceed 1.0.
+      // Clamp to [0, 1] so band keys ("60-70" etc.) stay consistent with _calibrateWeight lookups.
+      var conf = Math.min(1.0, v.weight);
       if (conf > 0.01) {
         if (!_calibration[agentName]) _calibration[agentName] = {};
         var band = (Math.floor(conf * 10) * 10) + '-' + (Math.floor(conf * 10) * 10 + 10);
