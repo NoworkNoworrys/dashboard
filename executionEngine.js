@@ -3889,7 +3889,10 @@
   var _sigRateWindow = 0;   // start of current 10s window
   var _sigRateCount  = 0;   // signals processed in current window
   var _SIG_RATE_LIMIT = 50; // max signals per 10s before throttling
-  var _scalperPaused = false; // when true, scalper signals are dropped at intake
+  // Persist scalper pause state across reloads — previously reset to false on every page load
+  var _scalperPaused = (function () {
+    try { return localStorage.getItem('geodash_scalper_paused_v1') === 'true'; } catch(e) { return false; }
+  })();
 
   // T2-B: signal fusion — when multiple independent agents agree on the same asset+direction
   // within a single batch, merge them into the highest-confidence signal with a confidence
@@ -7388,20 +7391,23 @@
     /* ── Backend connectivity status (readable from outside the closure) ── */
     isBackendOnline: function () { return _apiOnline; },
 
-    /* ── Scalper pause / resume ── */
+    /* ── Scalper pause / resume (persisted to localStorage) ── */
     pauseScalper: function () {
       _scalperPaused = true;
+      try { localStorage.setItem('geodash_scalper_paused_v1', 'true'); } catch(e) {}
       log('CONFIG', '⏸ Scalper PAUSED — scalper signals will be dropped. GII/IC/TA signals still active.', 'amber');
       renderUI();
     },
     resumeScalper: function () {
       _scalperPaused = false;
+      try { localStorage.setItem('geodash_scalper_paused_v1', 'false'); } catch(e) {}
       log('CONFIG', '▶ Scalper RESUMED — all signal sources active.', 'green');
       renderUI();
     },
     scalperPaused: function () { return _scalperPaused; },
     toggleScalper: function () {
       _scalperPaused = !_scalperPaused;
+      try { localStorage.setItem('geodash_scalper_paused_v1', String(_scalperPaused)); } catch(e) {}
       log('CONFIG', _scalperPaused
         ? '⏸ Scalper PAUSED — focusing on GII/IC/TA signals only'
         : '▶ Scalper RESUMED — all signal sources active', _scalperPaused ? 'amber' : 'green');
