@@ -3149,7 +3149,30 @@
           }
           trade.broker_status     = 'FILLED';
           trade.broker_fill_price = fillPrice;
+          // Recalculate SL/TP when actual fill price differs from the expected entry.
+          // Without this, SL/TP stay anchored to the pre-fill mid price, and if the
+          // fill price is significantly different (e.g. $209.09 vs $209.77), the stop
+          // can end up on the WRONG SIDE of entry — instant guaranteed loss.
+          var _oldEntry = trade.entry_price;
           trade.entry_price = fillPrice;
+          if (_oldEntry && Math.abs(fillPrice - _oldEntry) > 0.0001) {
+            var _slDist = Math.abs(_oldEntry - (trade.stop_loss || _oldEntry));
+            var _tpDist = Math.abs((trade.take_profit || _oldEntry) - _oldEntry);
+            if (_slDist > 0) {
+              trade.stop_loss = trade.direction === 'LONG'
+                ? fillPrice - _slDist
+                : fillPrice + _slDist;
+            }
+            if (_tpDist > 0) {
+              trade.take_profit = trade.direction === 'LONG'
+                ? fillPrice + _tpDist
+                : fillPrice - _tpDist;
+            }
+            log('HL', trade.asset + ' SL/TP recalculated for fill price: SL $' +
+              (trade.stop_loss || 0).toFixed(4) + ' TP $' + (trade.take_profit || 0).toFixed(4) +
+              ' (fill shifted ' + ((fillPrice - _oldEntry) >= 0 ? '+' : '') +
+              (fillPrice - _oldEntry).toFixed(4) + ' from mid)', 'dim');
+          }
           // Update size/units to actual fill (backend may have capped the notional).
           // Direct SDK fill returns pos.fillSize; position-poll path returns pos.size.
           var _actualSz = pos ? (pos.fillSize > 0 ? pos.fillSize : Math.abs(pos.size || 0)) : 0;
@@ -3171,6 +3194,8 @@
             broker_status:     'FILLED',
             broker_fill_price: fillPrice,
             entry_price:       trade.entry_price,
+            stop_loss:         trade.stop_loss,
+            take_profit:       trade.take_profit,
             fill_latency_ms:   trade.fill_latency_ms || null
           });
           log('HL', trade.asset + ' FILLED @ $' + fillPrice.toFixed(4) +
