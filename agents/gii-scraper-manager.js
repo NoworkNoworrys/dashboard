@@ -835,8 +835,8 @@
           source:          'scraper-manager',
           scalper:         true
         }], 'scraper-manager'); } catch (e) {}
-      } else if (window.EE && typeof EE.onSignals === 'function') {
-        try { EE.onSignals([sig]); } catch (e) {}
+      } else {
+        console.error('[SCRAPER MGR] GII_ENTRY missing — signal dropped for ' + sig.asset);
       }
 
     }).catch(function () {});

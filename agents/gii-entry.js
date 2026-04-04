@@ -19,17 +19,52 @@
   'use strict';
 
   /* ── CONFIG ─────────────────────────────────────────────────────────────── */
-  var POLL_MS       = 60 * 1000;   // process queue every 60s
+  var POLL_MS       = 15 * 1000;   // process queue every 15s (was 60s — P0 latency fix)
   var INIT_DELAY_MS = 12 * 1000;   // wait for other agents to boot
   var QUEUE_TTL_MS  = 8 * 60 * 1000; // discard pending signals older than 8 min
+  var QUEUE_MAX     = 200;         // hard cap on queue depth (P2 unbounded queue fix)
 
-  /* Minimum confluence score to approve entry */
-  var MIN_SCORE_GEO    = 4.0;   // IC geopolitical trades — threshold for OSINT-driven signals
-  var MIN_SCORE_GII    = 5.0;   // GII multi-agent trades — lowered from 8.0 to 5.0.
-                                 // 8.0 was too restrictive — almost no non-crypto xyz trades
-                                 // passed. Dynamic weights from audit fix now make the score
-                                 // more meaningful, so a lower bar is safer than before.
-  var MIN_SCORE_SCALPER = 3.0;  // Scalper trades
+  /* Minimum confluence score to approve entry — source-aware tiers (Option 2) */
+  var MIN_SCORE_GEO     = 4.0;   // IC geopolitical trades — threshold for OSINT-driven signals
+  var MIN_SCORE_GII     = 5.0;   // GII multi-agent trades
+  var MIN_SCORE_SCALPER = 2.5;   // Scalper trades — fast path, already technically vetted
+  var MIN_SCORE_STANDALONE = 3.5; // Standalone agent signals (momentum, correlation, etc.)
+  var MIN_SCORE_FLOW    = 3.0;   // High-quality flow data (uw-intelligence)
+
+  /* ── AGENT CORRELATION GROUPS (P1-A) ───────────────────────────────────────
+     Agents within the same group share data sources or use near-identical logic.
+     During scoring, only the strongest vote within a group counts — rest are
+     zeroed out to prevent false consensus from correlated inputs.              */
+  var AGENT_CORR_GROUPS = [
+    ['GII_AGENT_SCALPER', 'GII_AGENT_SCALPER_SESSION'],              // same strategy, different hours
+    ['GII_AGENT_TECHNICALS', 'GII_AGENT_TA_SCANNER'],                // both compute TA from same feeds
+    ['GII_AGENT_MOMENTUM', 'GII_AGENT_MARKET_OBSERVER'],             // both price-momentum from HLFeed
+    ['GII_AGENT_ENERGY', 'GII_AGENT_CONFLICT', 'GII_AGENT_SANCTIONS'], // geopolitical cluster
+  ];
+
+  /* ── AGENT DATA SOURCE TAGS (P1-A) ────────────────────────────────────────
+     Maps agents to their primary data source. Used to calculate source diversity
+     multiplier — multiple agents from the same source count as thin consensus.  */
+  var AGENT_DATA_SOURCES = {
+    'GII_AGENT_SCALPER':          'cryptocompare',
+    'GII_AGENT_SCALPER_SESSION':  'cryptocompare',
+    'GII_AGENT_TECHNICALS':       'hlfeed',
+    'GII_AGENT_TA_SCANNER':       'hlfeed',
+    'GII_AGENT_MOMENTUM':         'hlfeed',
+    'GII_AGENT_MARKET_OBSERVER':  'hlfeed',
+    'GII_AGENT_CORRELATION':      'hlfeed',
+    'GII_AGENT_SMARTMONEY':       'hlfeed',
+    'GII_AGENT_MARKETSTRUCTURE':  'hlfeed',
+    'GII_AGENT_OPTIMIZER':        'hlfeed',
+    'GII_AGENT_ENERGY':           'geopolitical',
+    'GII_AGENT_CONFLICT':         'geopolitical',
+    'GII_AGENT_SANCTIONS':        'geopolitical',
+    'GII_AGENT_MARITIME':         'geopolitical',
+    'GII_AGENT_SOCIAL':           'social',
+    'GII_AGENT_POLYMARKET':       'polymarket',
+    'GII_AGENT_MACRO':            'macro',
+    'GII_AGENT_REGIME':           'macro',
+  };
 
   /* IC-adjacent assets: the only assets where geopolitical/OSINT catalysts
      produce moves large enough to reach 2.5R. Evidence from 315-trade audit:
@@ -172,6 +207,10 @@
   var _lastPoll     = 0;
   var _lastApproved = {};   // asset → timestamp of last approval (runaway-loop guard)
   var _stats        = { submitted: 0, approved: 0, rejected: 0, vetoed: 0, rotated: 0 };
+  var _processing   = false;  // mutex guard — prevents overlapping _processQueue runs (P2)
+  var _shadowLog    = [];     // shadow mode log: { asset, dir, source, wouldApprove, score, ts } (P0-C)
+  var _lastProcessedAt = 0;   // health heartbeat: last successful queue processing time (P2-D)
+  var _approvalWindows = [];  // rolling approval-rate windows for health monitoring (P2-D)
 
   /* ── QUEUE ──────────────────────────────────────────────────────────────── */
   function _submit(signals, sourceTag) {
@@ -189,21 +228,90 @@
       var _src = sourceTag || s.source || 'ic';
       var _isScalperSrc = _src === 'scalper' || _src === 'scalper-session' ||
                           (s.reason && s.reason.indexOf('SCALPER') === 0);
-      // Reject single-source signals early — don't waste scoring cycles on them
-      if (!_isScalperSrc && s.srcCount !== undefined && s.srcCount < 2) {
-        _stats.rejected++;
-        _rejected.unshift({ asset: s.asset, dir: s.dir,
-          reason: 'srcCount ' + s.srcCount + ' < 2 at queue — dropped before scoring', ts: now });
-        if (_rejected.length > 50) _rejected.pop();
+
+      /* P1-C: Dual timestamps — preserve when the agent generated the signal
+         vs when entry processes it. generated_at is used by gatekeeper for
+         analytical staleness; timestamp is refreshed on approval for processing freshness. */
+      s.generated_at = s.timestamp || now;
+
+      /* P0-B: FAST PATH for scalper signals — score inline, skip the queue.
+         The 15s queue cycle can still introduce latency that kills 45-second
+         scalper staleness windows. Scalpers get scored and emitted immediately. */
+      if (_isScalperSrc) {
+        _stats.submitted++;
+        var item = { sig: s, source: _src, queuedAt: now };
+        _scoreFastPath(item);
         return;
       }
+
       _stats.submitted++;
+      /* P2-A: Queue cap — drop oldest if at limit to prevent unbounded growth */
+      if (_queue.length >= QUEUE_MAX) {
+        var dropped = _queue.shift();
+        _stats.rejected++;
+        _rejected.unshift({ asset: dropped.sig.asset, dir: dropped.sig.dir,
+          reason: 'queue-cap-overflow (' + QUEUE_MAX + ' max)', ts: now });
+        if (_rejected.length > 50) _rejected.pop();
+      }
       _queue.push({
         sig:       s,
         source:    _src,
         queuedAt:  now
       });
     });
+  }
+
+  /* ── SHADOW MODE (P0-C) ────────────────────────────────────────────────────
+     During phased rollout, agents call shadow() instead of submit().
+     Scores the signal exactly as submit() would, but logs result without
+     emitting to EE. Compare shadowLog() against actual trade outcomes to
+     validate before cutover.                                                  */
+  function _shadow(signals, sourceTag) {
+    var now = Date.now();
+    (Array.isArray(signals) ? signals : [signals]).forEach(function (s) {
+      if (!s || !s.asset || !s.dir) return;
+      var _src = sourceTag || s.source || 'unknown';
+      var _isScalper = _src === 'scalper' || _src === 'scalper-session';
+      var item = { sig: s, source: _src, queuedAt: now };
+      s.generated_at = s.timestamp || now;
+
+      var veto = _veto(item);
+      var result = veto ? { score: 0, categories: 0, agentsFor: [], agentsAgainst: [] } : _scoreSignal(item);
+      var minScore = _getMinScore(_src);
+      var minCats  = _getMinCategories(_src);
+      _shadowLog.unshift({
+        asset: s.asset, dir: s.dir, source: _src,
+        wouldApprove: !veto && result.score >= minScore && result.categories >= minCats,
+        score: +result.score.toFixed(2),
+        categories: result.categories,
+        needed: minScore,
+        vetoReason: veto || null,
+        agentsFor: result.agentsFor,
+        agentsAgainst: result.agentsAgainst,
+        ts: now
+      });
+      if (_shadowLog.length > 200) _shadowLog.pop();
+    });
+  }
+
+  /* ── SOURCE-AWARE SCORING TIERS (Option 2) ─────────────────────────────── */
+  function _getMinScore(sourceTag) {
+    switch (sourceTag) {
+      case 'scalper':
+      case 'scalper-session':    return MIN_SCORE_SCALPER;
+      case 'ic':                 return MIN_SCORE_GEO;
+      case 'uw-intelligence':    return MIN_SCORE_FLOW;
+      case 'gii': case 'gii-core': return MIN_SCORE_GII;
+      default:                   return MIN_SCORE_STANDALONE;
+    }
+  }
+
+  function _getMinCategories(sourceTag) {
+    switch (sourceTag) {
+      case 'scalper':
+      case 'scalper-session':    return 1;   // TA alone sufficient for scalps
+      default:                   return MIN_CATEGORIES;
+    }
   }
 
   /* ── CONFLUENCE SCORING ─────────────────────────────────────────────────── */
@@ -263,6 +371,79 @@
     } catch (e) { return staticWeight; }
   }
 
+  /* ── FAST PATH (P0-B) — immediate scoring for scalper signals ─────────────
+     Same veto + score + emit logic as _processQueue but runs inline in
+     _submit(), skipping the queue entirely. Prevents scalper signals from
+     going stale during the 15s queue cycle.                                   */
+  function _scoreFastPath(item) {
+    var now = Date.now();
+    var sig = item.sig;
+    var minScore = _getMinScore(item.source);
+    var minCats  = _getMinCategories(item.source);
+
+    /* Veto check */
+    var vetoReason = _veto(item);
+    if (vetoReason) {
+      _stats.vetoed++; _stats.rejected++;
+      _rejected.unshift({ asset: sig.asset, dir: sig.dir, reason: 'FAST-VETO: ' + vetoReason, ts: now });
+      if (_rejected.length > 50) _rejected.pop();
+      return;
+    }
+
+    /* Confluence score */
+    var result = _scoreSignal(item);
+    if (result.score < minScore || result.categories < minCats) {
+      _stats.rejected++;
+      _rejected.unshift({
+        asset: sig.asset, dir: sig.dir, score: +result.score.toFixed(2),
+        categories: result.categories, needed: minScore,
+        reason: 'FAST: score ' + result.score.toFixed(2) + ' < ' + minScore +
+                ' | cats ' + result.categories + '/' + minCats, ts: now
+      });
+      if (_rejected.length > 50) _rejected.pop();
+      return;
+    }
+
+    /* Enrich and emit — same logic as _processQueue approval path */
+    var volStop    = VOL_STOPS[sig.asset] || VOL_STOP_DEFAULT;
+    var dynStopPct = volStop.stopPct;
+    try {
+      if (window.GII_AGENT_UW && typeof GII_AGENT_UW.getIVRanks === 'function') {
+        var _ivMap = GII_AGENT_UW.getIVRanks(), _ivRank = _ivMap[sig.asset];
+        if (typeof _ivRank === 'number') {
+          if      (_ivRank > 80) dynStopPct = Math.min(volStop.stopPct * 1.5, volStop.stopPct * 2.0);
+          else if (_ivRank > 60) dynStopPct = volStop.stopPct * 1.2;
+          else if (_ivRank < 20) dynStopPct = volStop.stopPct * 0.85;
+        }
+      }
+    } catch (e) {}
+
+    var enriched = Object.assign({}, sig, {
+      thesis:          _buildThesis(item, result),
+      confluenceScore: result.score,
+      source:          item.source,
+      stopPct:         sig.stopPct  || dynStopPct,
+      tpRatio:         sig.tpRatio  || volStop.tpRatio,
+      srcCount:        sig.srcCount !== undefined ? sig.srcCount : result.agentsFor.length,
+      timestamp:       now,           // fresh timestamp for gatekeeper
+      approved_at:     now
+    });
+    var confBoost = Math.min(5, Math.floor(result.score * 0.4));
+    enriched.conf = Math.min(88, (sig.conf || 50) + confBoost);
+
+    _stats.approved++;
+    _lastApproved[sig.asset] = now;
+    _approved.unshift({ asset: sig.asset, dir: sig.dir, score: +result.score.toFixed(2),
+      conf: enriched.conf, agentsFor: result.agentsFor, ts: now, fastPath: true });
+    if (_approved.length > 50) _approved.pop();
+
+    if (window.EE && typeof EE.onSignals === 'function') {
+      console.log('[GII-ENTRY] FAST-PATH approved: ' + sig.asset + ' ' + sig.dir +
+        ' score=' + result.score.toFixed(2) + ' conf=' + enriched.conf);
+      EE.onSignals([enriched]);
+    }
+  }
+
   function _scoreSignal(item) {
     var sig    = item.sig;
     var dir    = sig.dir;   // 'LONG' or 'SHORT'
@@ -300,7 +481,7 @@
         categories.technical = true;
         agentsFor.push(name.replace('GII_AGENT_', '').toLowerCase());
       } else if (b.opposes) {
-        score -= w * 0.8;  // symmetric: opposition penalises at 80% of support weight
+        score -= w * 1.0;  // P2-C: equal-weight opposition (was 0.8×)
         agentsAgainst.push(name.replace('GII_AGENT_', '').toLowerCase());
       }
     });
@@ -315,7 +496,7 @@
         categories.technical = true;
         agentsFor.push(name.replace('GII_AGENT_', '').toLowerCase());
       } else if (b.opposes) {
-        score -= w * 0.8;
+        score -= w * 1.0;  // P2-C: equal-weight opposition
         agentsAgainst.push(name.replace('GII_AGENT_', '').toLowerCase());
       }
     });
@@ -337,7 +518,7 @@
         categories.fundamental = true;
         agentsFor.push(name.replace('GII_AGENT_', '').toLowerCase());
       } else if (b.opposes) {
-        score -= w * 0.8;  // symmetric opposition penalty
+        score -= w * 1.0;  // P2-C: equal-weight opposition
         agentsAgainst.push(name.replace('GII_AGENT_', '').toLowerCase());
       }
     });
@@ -557,7 +738,7 @@
               categories.ta_scanner = true;
               agentsFor.push('ta-scanner');
             } else if (_taDir && _taDir !== dir) {
-              score -= _dynAgentWeight('GII_AGENT_TA_SCANNER', 0.8) * 0.8;
+              score -= _dynAgentWeight('GII_AGENT_TA_SCANNER', 0.8) * 1.0;  // P2-C equal-weight
               agentsAgainst.push('ta-scanner');
             }
             break;
@@ -581,7 +762,7 @@
               categories.market_structure = true;
               agentsFor.push('market-observer');
             } else if (_moDir && _moDir !== dir) {
-              score -= _dynAgentWeight('GII_AGENT_MARKET_OBSERVER', 0.6) * 0.8;
+              score -= _dynAgentWeight('GII_AGENT_MARKET_OBSERVER', 0.6) * 1.0;  // P2-C equal-weight
               agentsAgainst.push('market-observer');
             }
             break;
@@ -592,12 +773,64 @@
 
     var categoryCount = Object.keys(categories).length;
 
+    /* ── P1-A: Agent correlation group dedup ─────────────────────────────────
+       Within a correlated group, only the strongest vote counts. This prevents
+       e.g. SCALPER + SCALPER_SESSION (same data) from double-counting.
+       We track each agent's weighted contribution so we can subtract the excess. */
+    var _agentWeights = {};  // agentName → weighted contribution to score
+    agentsFor.forEach(function (a) { _agentWeights[a] = _agentWeights[a] || 0; _agentWeights[a] += 1; });
+
+    AGENT_CORR_GROUPS.forEach(function (group) {
+      var groupMembers = [];
+      // Find agents in this group that voted (for or against)
+      group.forEach(function (fullName) {
+        var shortName = fullName.replace('GII_AGENT_', '').toLowerCase();
+        if (agentsFor.indexOf(shortName) !== -1 || agentsAgainst.indexOf(shortName) !== -1) {
+          groupMembers.push(shortName);
+        }
+      });
+      if (groupMembers.length <= 1) return; // no dedup needed
+
+      // Among agreeing members, keep strongest (first found — they're added in weight order)
+      var agreeingMembers = groupMembers.filter(function (m) { return agentsFor.indexOf(m) !== -1; });
+      if (agreeingMembers.length > 1) {
+        // Penalise score for each extra correlated agent beyond the first
+        for (var _di = 1; _di < agreeingMembers.length; _di++) {
+          score -= 0.8;  // subtract approximate extra weight per correlated duplicate
+        }
+      }
+    });
+
+    /* ── P1-A: Source diversity multiplier ────────────────────────────────────
+       If all agreeing agents use the same data source (e.g. all from HLFeed),
+       that's thin consensus. Scale score by source diversity factor.
+       1 source = 0.5×, 2 sources = 0.8×, 3+ sources = 1.0×                  */
+    var _uniqueSources = {};
+    agentsFor.forEach(function (shortName) {
+      var fullName = 'GII_AGENT_' + shortName.toUpperCase();
+      var src = AGENT_DATA_SOURCES[fullName] || 'unknown';
+      _uniqueSources[src] = true;
+    });
+    var _srcCount = Object.keys(_uniqueSources).length;
+    var _srcDiversityMult = _srcCount >= 3 ? 1.0 : _srcCount === 2 ? 0.8 : (_srcCount === 1 && agentsFor.length > 0) ? 0.5 : 1.0;
+    if (_srcDiversityMult < 1.0 && score > 0) {
+      score = +(score * _srcDiversityMult).toFixed(2);
+    }
+
+    /* ── P2-C: Coverage penalty — penalise thin agent coverage ───────────────
+       If only a small fraction of consulted agents had an opinion, the consensus
+       is weak regardless of whether those few agreed.                          */
+    var _consultedCount = 15;  // approximate total agent slots queried above
+    var _respondedCount = agentsFor.length + agentsAgainst.length;
+    var _coverageRatio  = _respondedCount / _consultedCount;
+    if (_coverageRatio < 0.3 && score > 0) {
+      score = +(score * 0.7).toFixed(2);  // 30% penalty for thin coverage
+    }
+
     // Net agent ratio gate: if more agents oppose than support, cap the score.
-    // Prevents a single high-weight agreeing agent from overriding multiple
-    // opposing agents — the old asymmetric weights allowed this silently.
     if (agentsAgainst.length > agentsFor.length && score > 0) {
       var ratio = agentsFor.length / Math.max(1, agentsAgainst.length);
-      score = +(score * ratio).toFixed(2);  // proportionally reduce
+      score = +(score * ratio).toFixed(2);
     }
 
     return { score: score, categories: categoryCount, agentsFor: agentsFor, agentsAgainst: agentsAgainst };
@@ -719,8 +952,18 @@
 
   /* ── PROCESS QUEUE ──────────────────────────────────────────────────────── */
   function _processQueue() {
-    var now = Date.now();
+    /* P2-A: Mutex guard — prevent overlapping runs from setInterval */
+    if (_processing) return;
+    _processing = true;
 
+    var now = Date.now();
+    _lastProcessedAt = now;  // P2-D: health heartbeat
+
+    try { _processQueueInner(now); }
+    finally { _processing = false; }
+  }
+
+  function _processQueueInner(now) {
     /* Expire stale items — log each one so queue drops are visible in audit log */
     var _expiredItems = _queue.filter(function (item) { return (now - item.queuedAt) >= QUEUE_TTL_MS; });
     _expiredItems.forEach(function (item) {
@@ -789,9 +1032,8 @@
         }
       }
 
-      var minScore = isScalper ? MIN_SCORE_SCALPER
-                   : isGII    ? MIN_SCORE_GII
-                   :            MIN_SCORE_GEO;
+      var minScore = _getMinScore(item.source);
+      var minCats  = _getMinCategories(item.source);
 
       /* Veto check first (fast) */
       var vetoReason = _veto(item);
@@ -806,7 +1048,7 @@
       /* Confluence score */
       var result = _scoreSignal(item);
 
-      if (result.score < minScore || result.categories < MIN_CATEGORIES) {
+      if (result.score < minScore || result.categories < minCats) {
         _stats.rejected++;
         _rejected.unshift({
           asset:      sig.asset,
@@ -815,7 +1057,7 @@
           categories: result.categories,
           needed:     minScore,
           reason:     'score ' + result.score.toFixed(2) + ' < ' + minScore +
-                      ' | categories ' + result.categories + '/' + MIN_CATEGORIES,
+                      ' | categories ' + result.categories + '/' + minCats,
           ts:         now
         });
         if (_rejected.length > 50) _rejected.pop();
@@ -1013,12 +1255,13 @@
         thesis:          _buildThesis(item, result),
         confluenceScore: result.score,
         source:          item.source,
-        stopPct:         sig.stopPct  || dynStopPct,   /* IV-adjusted stop % — EE overrides flat % */
-        tpRatio:         sig.tpRatio  || volStop.tpRatio,   /* per-asset R:R  — EE overrides flat 2.0 */
-        /* srcCount: if the original signal lacks it, derive from how many agents agreed.
-           GII-entry requires MIN_CATEGORIES=3 to approve — any approved signal already
-           has multi-source corroboration even if the raw IC signal had srcCount=1. */
-        srcCount:        sig.srcCount !== undefined ? sig.srcCount : result.agentsFor.length
+        stopPct:         sig.stopPct  || dynStopPct,
+        tpRatio:         sig.tpRatio  || volStop.tpRatio,
+        srcCount:        sig.srcCount !== undefined ? sig.srcCount : result.agentsFor.length,
+        /* P1-C: Dual timestamps — fresh timestamp for gatekeeper staleness check,
+           generated_at preserved for analytical staleness validation */
+        timestamp:       now,
+        approved_at:     now
       });
 
       /* Boost confidence by confluence (up to +5 points), capped at 88.
@@ -1074,30 +1317,106 @@
     });
 
     if (toEmit.length && window.EE && typeof EE.onSignals === 'function') {
-      /* EV-based ranking: sort signals by expected value = (conf/100) × tpRatio
-         before handing off to EE. EE processes signals in-order so highest-EV
-         opportunities fill trade slots first when the portfolio is near capacity.
-         Example: BTC conf=85, tpR=2.5 → EV=2.13 beats SPY conf=88, tpR=2.0 → EV=1.76 */
+
+      /* ── P1-B: Portfolio pre-checks before emission ────────────────────────
+         Defense-in-depth: dedup correlated assets within batch, enforce sector
+         cap, and check aggregate exposure BEFORE signals reach the EE.         */
+      try {
+        var _openTrades = (typeof EE.getOpenTrades === 'function') ? EE.getOpenTrades() : [];
+        var _eeCfg      = (typeof EE.getConfig === 'function') ? EE.getConfig() : {};
+
+        /* 1. Correlation group dedup within batch — keep highest EV per corr group */
+        var CORR_GROUPS = [
+          ['WTI','BRENT','XLE','XOM'], ['GLD','XAU','PAXG','GOLD'],
+          ['BTC','ETH','SOL'], ['LMT','RTX','NOC','XAR'],
+          ['TSM','NVDA','SMH','ASML'], ['SPY','QQQ'], ['FXI','EEM'], ['DAL','UAL']
+        ];
+        function _getAssetCorrGroup(asset) {
+          for (var _ci = 0; _ci < CORR_GROUPS.length; _ci++) {
+            if (CORR_GROUPS[_ci].indexOf(asset) !== -1) return CORR_GROUPS[_ci];
+          }
+          return null;
+        }
+        var _seenCorrGroups = {};
+        toEmit = toEmit.filter(function (s) {
+          var group = _getAssetCorrGroup(s.asset);
+          if (!group) return true;
+          var groupKey = group.slice().sort().join('|');
+          if (_seenCorrGroups[groupKey]) return false;
+          _seenCorrGroups[groupKey] = true;
+          return true;
+        });
+
+        /* 2. Sector cap check against open positions + batch */
+        var _sectorMap = {
+          WTI:'energy',BRENT:'energy',XLE:'energy',GAS:'energy',NATGAS:'energy',
+          XAU:'precious',GLD:'precious',SLV:'precious',PAXG:'precious',
+          BTC:'crypto',ETH:'crypto',SOL:'crypto',
+          SPY:'equity',QQQ:'equity',NVDA:'equity',TSLA:'equity',SMH:'equity',TSM:'equity'
+        };
+        var _maxPerSector = _eeCfg.max_per_sector || 6;
+        var _sectorCounts = {};
+        _openTrades.forEach(function (t) {
+          var sec = _sectorMap[t.asset] || 'other';
+          _sectorCounts[sec] = (_sectorCounts[sec] || 0) + 1;
+        });
+        toEmit = toEmit.filter(function (s) {
+          var sec = _sectorMap[s.asset] || 'other';
+          if ((_sectorCounts[sec] || 0) >= _maxPerSector) return false;
+          _sectorCounts[sec] = (_sectorCounts[sec] || 0) + 1;
+          return true;
+        });
+
+        /* 3. Aggregate exposure estimate — entry caps at 30% (below EE's 45%) */
+        var _totalRiskUsd = _openTrades.reduce(function (sum, t) {
+          var sl = Math.abs((t.entry_price || 0) - (t.stop_loss || 0));
+          return sum + (sl > 0 ? (t.units || 0) * sl : 0);
+        }, 0);
+        var _balance = _eeCfg.virtual_balance || 85;
+        var _entryExpCap = _balance * 0.30;
+        if (_totalRiskUsd >= _entryExpCap) {
+          console.log('[GII-ENTRY] Portfolio exposure at ' + ((_totalRiskUsd / _balance) * 100).toFixed(1) +
+            '% — above 30% entry cap, suppressing ' + toEmit.length + ' signals');
+          toEmit = [];
+        }
+      } catch (e) {
+        console.warn('[GII-ENTRY] Portfolio pre-check error (proceeding): ' + (e.message || e));
+      }
+
+      /* EV-based ranking: highest EV first so best opportunities fill trade slots */
       if (toEmit.length > 1) {
         toEmit.sort(function (a, b) {
           var evA = (a.conf / 100) * (a.tpRatio || 2.5);
           var evB = (b.conf / 100) * (b.tpRatio || 2.5);
-          return evB - evA;  // descending: highest EV first
+          return evB - evA;
         });
         console.log('[GII-ENTRY] EV-ranked ' + toEmit.length + ' signals: ' +
           toEmit.map(function (s) {
             return s.asset + '(' + ((s.conf / 100) * (s.tpRatio || 2.5)).toFixed(2) + ')';
           }).join(', '));
       }
-      EE.onSignals(toEmit);
+
+      /* P2-D: Health heartbeat — track approval rate per window */
+      _approvalWindows.push({ ts: now, 'in': Object.keys(byAsset).length, out: toEmit.length });
+      if (_approvalWindows.length > 12) _approvalWindows.shift();  // keep ~3 min of windows at 15s
+
+      if (toEmit.length) {
+        EE.onSignals(toEmit);
+      }
     }
   }
 
   /* ── PUBLIC API ─────────────────────────────────────────────────────────── */
   window.GII_AGENT_ENTRY = {
 
-    /* Called by renderTrades() and gii-core instead of EE.onSignals() directly */
+    /* Called by all signal agents instead of EE.onSignals() directly (Option 2) */
     submit: _submit,
+
+    /* P0-C: Shadow mode — scores signals without emitting, for phased validation */
+    shadow: _shadow,
+
+    /* P0-C: Shadow log — compare would-approve decisions against actual trade outcomes */
+    shadowLog: function () { return _shadowLog.slice(); },
 
     /* Force a poll/process cycle right now */
     poll: _processQueue,
@@ -1105,12 +1424,25 @@
     signals: function () { return _approved.slice(0, 20); },
 
     status: function () {
+      /* P2-D: Health heartbeat — check if processing is healthy */
+      var _healthy = (Date.now() - _lastProcessedAt) < POLL_MS * 2.5;
+      var _zeroApprovalStreak = 0;
+      for (var _wi = _approvalWindows.length - 1; _wi >= 0; _wi--) {
+        if (_approvalWindows[_wi]['in'] > 0 && _approvalWindows[_wi].out === 0) {
+          _zeroApprovalStreak++;
+        } else { break; }
+      }
       return {
-        lastPoll:      _lastPoll,
-        queueDepth:    _queue.length,
-        stats:         _stats,
-        recentApproved: _approved.slice(0, 5),
-        recentRejected: _rejected.slice(0, 5)
+        mode:              'LIVE',
+        degraded:          false,
+        healthy:           _healthy,
+        zeroApprovalStreak: _zeroApprovalStreak,
+        lastProcessed:     _lastProcessedAt,
+        lastPoll:          _lastPoll,
+        queueDepth:        _queue.length,
+        stats:             _stats,
+        recentApproved:    _approved.slice(0, 5),
+        recentRejected:    _rejected.slice(0, 5)
       };
     },
 
@@ -1118,15 +1450,15 @@
       return { total: _stats.approved, approved: _stats.approved, rejected: _stats.rejected };
     },
 
-    /* Returns per-asset volatility stop config for any signal source.
-       Called by EE signal pipeline to enrich signals that bypass gii-entry
-       (scalper, momentum, technicals, etc.) so they get correct stopPct/tpRatio
-       instead of the flat 3% config default. */
+    /* Returns per-asset volatility stop config for any signal source */
     getStops: function (asset) {
       var key = String(asset || '').toUpperCase();
       return VOL_STOPS[key] || VOL_STOP_DEFAULT;
     }
   };
+
+  /* Mark safe-mode stub as superseded — real entry is live */
+  window._ENTRY_DEGRADED = false;
 
   /* ── INIT ───────────────────────────────────────────────────────────────── */
   window.addEventListener('load', function () {

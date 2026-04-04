@@ -837,25 +837,27 @@
         console.info('[GII SCALPER] Signal: ' + bestDir.toUpperCase() +
           ' ' + sym + ' conf=' + sig.confidence + ' lev=' + sig.leverage + 'x | ' + sig.reasoning);
 
-        // ── EE portfolio integration ────────────────────────────────────────
-        if (window.EE && typeof EE.onSignals === 'function') {
-          try {
-            EE.onSignals([{
-              asset:           sig.asset,
-              dir:             sig.bias === 'short' ? 'SHORT' : 'LONG',
-              conf:            Math.round(sig.confidence * 100),
-              reason:          'SCALPER: ' + sig.reasoning,
-              region:          sig.region || 'GLOBAL',
-              impactMult:      gtiM,
-              atrStop:         sig.atrStop,
-              atrTarget:       sig.atrTarget,
-              matchedKeywords: sig.evidenceKeys || [],
-              source:          'scalper',
-              scalper:         true
-            }]);
-          } catch (eInner) {
-            console.warn('[GII SCALPER] EE.onSignals() error: ' + (eInner.message || String(eInner)));
-          }
+        // ── Option 2: Route through GII_ENTRY for confluence scoring ────────
+        // Scalper signals use the fast path (scored inline, no queue delay).
+        var _scalperSig = {
+          asset:           sig.asset,
+          dir:             sig.bias === 'short' ? 'SHORT' : 'LONG',
+          conf:            Math.round(sig.confidence * 100),
+          reason:          'SCALPER: ' + sig.reasoning,
+          region:          sig.region || 'GLOBAL',
+          timestamp:       Date.now(),
+          impactMult:      gtiM,
+          atrStop:         sig.atrStop,
+          atrTarget:       sig.atrTarget,
+          matchedKeywords: sig.evidenceKeys || [],
+          source:          'scalper',
+          scalper:         true
+        };
+        if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
+          try { GII_AGENT_ENTRY.submit([_scalperSig], 'scalper'); }
+          catch (eInner) { console.warn('[GII SCALPER] GII_ENTRY.submit() error: ' + (eInner.message || String(eInner))); }
+        } else {
+          console.error('[GII SCALPER] GII_ENTRY missing — signal dropped for ' + sig.asset);
         }
       })
       .catch(function (e) {

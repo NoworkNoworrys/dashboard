@@ -87,15 +87,26 @@
      Reject any signal whose timestamp is beyond maxSignalAgeMins.
      ══════════════════════════════════════════════════════════════════════════════ */
   function _checkStaleness(sig) {
-    if (!sig.timestamp || typeof sig.timestamp !== 'number') return null;
-    var ageMs = Date.now() - sig.timestamp;
-    // Scalper signals use 5m/15m candles — tighter age limit (Smart Improvement 4)
-    var isScalper = (sig.source || '').toLowerCase().indexOf('scalp') !== -1;
-    if (isScalper && ageMs > GK_CONFIG.maxScalperAgeSecs * 1000) {
-      return 'Scalper signal stale — ' + Math.round(ageMs / 1000) + 's old (max ' + GK_CONFIG.maxScalperAgeSecs + 's)';
+    /* P1-C: Dual timestamp system — check both processing freshness (timestamp)
+       and analytical freshness (generated_at). A signal can be recently approved
+       (fresh timestamp) but based on stale analysis (old generated_at).         */
+    if (sig.timestamp && typeof sig.timestamp === 'number') {
+      var ageMs = Date.now() - sig.timestamp;
+      var isScalper = (sig.source || '').toLowerCase().indexOf('scalp') !== -1;
+      if (isScalper && ageMs > GK_CONFIG.maxScalperAgeSecs * 1000) {
+        return 'Scalper signal stale — ' + Math.round(ageMs / 1000) + 's old (max ' + GK_CONFIG.maxScalperAgeSecs + 's)';
+      }
+      if (ageMs > GK_CONFIG.maxSignalAgeMins * 60000) {
+        return 'Stale — ' + Math.round(ageMs / 60000) + 'min old (max ' + GK_CONFIG.maxSignalAgeMins + 'min)';
+      }
     }
-    if (ageMs > GK_CONFIG.maxSignalAgeMins * 60000) {
-      return 'Stale — ' + Math.round(ageMs / 60000) + 'min old (max ' + GK_CONFIG.maxSignalAgeMins + 'min)';
+    /* Check generated_at: analysis must not be older than 5 minutes regardless
+       of when entry approved it. Catches queue-delayed signals with stale context. */
+    if (sig.generated_at && typeof sig.generated_at === 'number') {
+      var analysisAge = Date.now() - sig.generated_at;
+      if (analysisAge > 5 * 60 * 1000) {
+        return 'Analysis stale — generated ' + Math.round(analysisAge / 60000) + 'min ago (max 5min)';
+      }
     }
     return null;
   }
@@ -304,8 +315,22 @@
         '  <span style="color:var(--dim)">' + (last.reason || '').substring(0, 70) + '</span>'
       : '—';
 
+    /* P0-A / P2-D: Entry health badge — shows SAFE MODE or health warnings */
+    var _entryBadge = '';
+    if (window._ENTRY_DEGRADED) {
+      _entryBadge = '<span style="color:#ff1744;font-size:9px;font-weight:700;margin-right:10px;background:rgba(255,23,68,0.15);padding:1px 6px;border-radius:3px">SAFE MODE</span>';
+    } else if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.status === 'function') {
+      try {
+        var _es = GII_AGENT_ENTRY.status();
+        if (_es.zeroApprovalStreak >= 3) {
+          _entryBadge = '<span style="color:#ffab40;font-size:9px;font-weight:700;margin-right:10px">ENTRY: 0-APPROVAL×' + _es.zeroApprovalStreak + '</span>';
+        }
+      } catch (e) {}
+    }
+
     el.innerHTML =
       '<span style="color:#e040fb;font-size:10px;font-weight:700;letter-spacing:.04em;margin-right:12px">GATEKEEPER</span>' +
+      _entryBadge +
       '<span style="font-size:9px;color:var(--dim);margin-right:10px">passed <b style="color:#00e676">' + _stats.passed + '</b></span>' +
       '<span style="font-size:9px;color:var(--dim);margin-right:10px">rejected <b style="color:#ff1744">' + _stats.rejected + '</b></span>' +
       '<span style="font-size:9px;color:var(--dim);margin-right:14px">adjusted <b style="color:#ffab40">' + _stats.adjusted + '</b></span>' +

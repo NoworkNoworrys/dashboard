@@ -562,10 +562,16 @@
                   ' | ' + reasoning);
     });
 
-    // ── Forward to Execution Engine ───────────────────────────────────────
-    if (batch.length && window.EE && typeof EE.onSignals === 'function') {
-      try { EE.onSignals(batch); }
-      catch(e) { console.warn('[FF] EE.onSignals error:', e.message || e); }
+    // ── Option 2 Phase 1: Shadow + direct ─────────────────────────────────
+    if (batch.length) {
+      batch.forEach(function (s) { s.timestamp = s.timestamp || Date.now(); });
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
+        try { GII_AGENT_ENTRY.shadow(batch, 'forex-fundamentals'); } catch (e) {}
+      }
+      if (window.EE && typeof EE.onSignals === 'function') {
+        try { EE.onSignals(batch); }
+        catch(e) { console.warn('[FF] EE.onSignals error:', e.message || e); }
+      }
     }
 
     var pairsReady = Object.keys(_priceHistory).filter(function(p) {

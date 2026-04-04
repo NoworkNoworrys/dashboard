@@ -413,12 +413,15 @@
     // 6. USD/JPY risk barometer (OANDA)
     if (oandaOk) _scanUsdJpy(batch);
 
-    // Forward to Execution Engine
-    if (batch.length && window.EE && typeof EE.onSignals === 'function') {
-      try {
-        EE.onSignals(batch);
-      } catch (e) {
-        console.warn('[MACRO-X] EE.onSignals() error: ' + (e.message || String(e)));
+    // Option 2 Phase 1: Shadow + direct
+    if (batch.length) {
+      batch.forEach(function (s) { s.timestamp = s.timestamp || Date.now(); });
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
+        try { GII_AGENT_ENTRY.shadow(batch, 'macro-cross'); } catch (e) {}
+      }
+      if (window.EE && typeof EE.onSignals === 'function') {
+        try { EE.onSignals(batch); }
+        catch (e) { console.warn('[MACRO-X] EE.onSignals() error: ' + (e.message || String(e))); }
       }
     }
 

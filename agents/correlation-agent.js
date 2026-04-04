@@ -378,12 +378,15 @@
                   ' (div ' + divLabel + ', conf ' + conf + ')');
     }
 
-    // ── Forward to EE ─────────────────────────────────────────────────────────
-    if (newSignals.length && window.EE && typeof EE.onSignals === 'function') {
-      try {
-        EE.onSignals(newSignals);
-      } catch (e) {
-        console.warn('[CORR] EE.onSignals() error: ' + (e.message || String(e)));
+    // ── Option 2 Phase 1: Shadow + direct ─────────────────────────────────────
+    if (newSignals.length) {
+      newSignals.forEach(function (s) { s.timestamp = s.timestamp || Date.now(); });
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
+        try { GII_AGENT_ENTRY.shadow(newSignals, 'correlation-agent'); } catch (e) {}
+      }
+      if (window.EE && typeof EE.onSignals === 'function') {
+        try { EE.onSignals(newSignals); }
+        catch (e) { console.warn('[CORR] EE.onSignals() error: ' + (e.message || String(e))); }
       }
     }
 

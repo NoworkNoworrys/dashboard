@@ -757,25 +757,26 @@
         console.info('[GII SCALPER-SESSION] ' + bestDir.toUpperCase() +
           ' ' + sym + ' conf=' + sig.confidence + ' lev=' + sig.leverage + 'x | ' + sig.reasoning);
 
-        // ── EE direct dispatch ────────────────────────────────────────────
-        if (window.EE && typeof EE.onSignals === 'function') {
-          try {
-            EE.onSignals([{
-              asset:           sig.asset,
-              dir:             sig.bias === 'short' ? 'SHORT' : 'LONG',
-              conf:            Math.round(sig.confidence * 100),
-              reason:          'SCALPER-SESSION: ' + sig.reasoning,
-              region:          sig.region || 'GLOBAL',
-              impactMult:      gtiM,
-              atrStop:         sig.atrStop,
-              atrTarget:       sig.atrTarget,
-              matchedKeywords: sig.evidenceKeys || [],
-              source:          'scalper-session',
-              scalper:         true
-            }]);
-          } catch (eInner) {
-            console.warn('[GII SCALPER-SESSION] EE.onSignals() error: ' + (eInner.message || String(eInner)));
-          }
+        // ── Option 2: Route through GII_ENTRY for confluence scoring ────────
+        var _sessSig = {
+          asset:           sig.asset,
+          dir:             sig.bias === 'short' ? 'SHORT' : 'LONG',
+          conf:            Math.round(sig.confidence * 100),
+          reason:          'SCALPER-SESSION: ' + sig.reasoning,
+          region:          sig.region || 'GLOBAL',
+          timestamp:       Date.now(),
+          impactMult:      gtiM,
+          atrStop:         sig.atrStop,
+          atrTarget:       sig.atrTarget,
+          matchedKeywords: sig.evidenceKeys || [],
+          source:          'scalper-session',
+          scalper:         true
+        };
+        if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
+          try { GII_AGENT_ENTRY.submit([_sessSig], 'scalper-session'); }
+          catch (eInner) { console.warn('[GII SCALPER-SESSION] GII_ENTRY.submit() error: ' + (eInner.message || String(eInner))); }
+        } else {
+          console.error('[GII SCALPER-SESSION] GII_ENTRY missing — signal dropped for ' + sig.asset);
         }
       })
       .catch(function (e) {

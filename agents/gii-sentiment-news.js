@@ -152,18 +152,24 @@
       var avgConf = items.reduce(function (s, h) { return s + h.score; }, 0) / items.length;
       var confPct = Math.min(95, Math.round(avgConf * 100) + 5); // small boost for consensus
 
-      /* Emit to EE */
+      /* Option 2 Phase 1: Shadow + direct — shadow logs what entry would do,
+         direct EE.onSignals remains live until Phase 2 cutover */
+      var _sentSig = [{
+        asset:    asset,
+        dir:      dir,
+        conf:     confPct,
+        source:   'sentiment-news',
+        timestamp: Date.now(),
+        srcCount: items.length,
+        reason:   'SENTIMENT SURGE: ' + items.length + ' ' + dir.toLowerCase() +
+                  ' signals in 10min (' + items.map(function(h){ return h.source.replace('GII_AGENT_',''); }).join(', ') + ')',
+        region:   'GLOBAL',
+      }];
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
+        try { GII_AGENT_ENTRY.shadow(_sentSig, 'sentiment-news'); } catch (e) {}
+      }
       if (window.EE && typeof EE.onSignals === 'function') {
-        EE.onSignals([{
-          asset:    asset,
-          dir:      dir,
-          conf:     confPct,
-          source:   'sentiment-news',
-          srcCount: items.length,
-          reason:   'SENTIMENT SURGE: ' + items.length + ' ' + dir.toLowerCase() +
-                    ' signals in 10min (' + items.map(function(h){ return h.source.replace('GII_AGENT_',''); }).join(', ') + ')',
-          region:   'GLOBAL',
-        }]);
+        EE.onSignals(_sentSig);
       }
     });
   }

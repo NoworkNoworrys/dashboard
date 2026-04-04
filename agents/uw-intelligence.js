@@ -59,6 +59,11 @@
       from:   'UW/' + (evt.uw_type === 'flow_alert' ? 'FlowAlert' :
                evt.uw_type === 'darkpool' ? 'DarkPool' : 'Congress'),
     };
+    sig.timestamp = Date.now();
+    // Option 2 Phase 1: Shadow + direct
+    if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
+      try { GII_AGENT_ENTRY.shadow([sig], 'uw-intelligence'); } catch (e) {}
+    }
     EE.onSignals([sig]);
     _log('→ EE: ' + sig.asset + ' ' + sig.dir + ' conf=' + sig.conf);
   }

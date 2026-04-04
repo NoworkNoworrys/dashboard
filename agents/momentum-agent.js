@@ -337,13 +337,14 @@
       publicSignals.forEach(function (s) { _signals.push(s); });
       if (_signals.length > 50) _signals = _signals.slice(-50);
 
-      // Forward to Execution Engine
+      // Option 2 Phase 1: Shadow + direct
+      publicSignals.forEach(function (s) { s.timestamp = s.timestamp || Date.now(); });
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
+        try { GII_AGENT_ENTRY.shadow(publicSignals, 'momentum-agent'); } catch (e) {}
+      }
       if (window.EE && typeof EE.onSignals === 'function') {
-        try {
-          EE.onSignals(publicSignals);
-        } catch (e) {
-          console.warn('[MOMENTUM] EE.onSignals error:', e);
-        }
+        try { EE.onSignals(publicSignals); }
+        catch (e) { console.warn('[MOMENTUM] EE.onSignals error:', e); }
       }
 
       console.log(

@@ -131,12 +131,14 @@
     if (_signals.length > 100) _signals = _signals.slice(_signals.length - 100);
     _signalCount += toEmit.length;
 
+    // Option 2 Phase 1: Shadow + direct
+    toEmit.forEach(function (s) { s.timestamp = s.timestamp || Date.now(); });
+    if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
+      try { GII_AGENT_ENTRY.shadow(toEmit, 'onchain-signals'); } catch (e) {}
+    }
     if (window.EE && typeof EE.onSignals === 'function') {
-      try {
-        EE.onSignals(toEmit);
-      } catch (e) {
-        console.warn('[OnChain] EE.onSignals error:', e);
-      }
+      try { EE.onSignals(toEmit); }
+      catch (e) { console.warn('[OnChain] EE.onSignals error:', e); }
     }
 
     var labels = toEmit.map(function (s) { return s.asset + ':' + s.bias; }).join(', ');
