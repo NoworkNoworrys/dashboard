@@ -2401,11 +2401,25 @@
       (impactMult * _srcWrMult * _credMult) / (1.0 * 1.0 * 1.0) // normalised vs neutral baseline
     ));
 
-    // Total size multiplier cap: Kelly × streak × drawdown × conf × quality must not
-    // exceed 2.0 (double base risk) or fall below 0.15 (15% of base risk).
-    // This prevents the 7-multiplier chain from compounding to extreme or near-zero sizes.
+    // Consultation sizing multiplier: strong consensus = bigger position, weak = smaller.
+    // Runs on the same signal object that passed through the consultation gate above.
+    var _consultSizeMult = 1.0;
+    if (sig._consultation) {
+      var _csNet     = sig._consultation.netScore;
+      var _csVoters  = sig._consultation.voterCount || 0;
+      if      (_csNet >= 3.0 && _csVoters >= 6) _consultSizeMult = 1.40;
+      else if (_csNet >= 3.0)                    _consultSizeMult = 1.25;
+      else if (_csNet >= 1.5 && _csVoters >= 5)  _consultSizeMult = 1.15;
+      else if (_csNet >= 1.5)                    _consultSizeMult = 1.05;
+      else if (_csNet >= 0.5)                    _consultSizeMult = 0.90;
+      else if (_csNet >= -0.5)                   _consultSizeMult = 0.75;
+      else                                       _consultSizeMult = 0.60;
+    }
+
+    // Total size multiplier cap: Kelly × streak × drawdown × conf × quality × consultation
+    // must not exceed 2.0 (double base risk) or fall below 0.15 (15% of base risk).
     var _totalMult = Math.max(0.15, Math.min(2.0,
-      kellyMult * streakMult * _ddMult * confMult * qualityMult
+      kellyMult * streakMult * _ddMult * confMult * qualityMult * _consultSizeMult
     ));
 
     var _effectiveBal = _getEffectiveBalance();
@@ -3346,6 +3360,11 @@
       });
     }
 
+    // Snapshot consultation result so exit-poll can compare against entry
+    if (window.GII_CONSULTATION && sig._consultation && trade.trade_id) {
+      try { GII_CONSULTATION.snapshotTrade(trade.trade_id, trade.asset, trade.direction, sig._consultation); } catch(e) {}
+    }
+
     log('OPENED',
       trade.asset + ' ' + trade.direction +
       ' @ ' + _num(trade.entry_price) +
@@ -3582,6 +3601,11 @@
     }
     saveCfg();
     _recordPnlSnapshot('close:' + reason, trade.pnl_usd);
+
+    // Feed consultation outcome back to track records + calibration
+    if (window.GII_CONSULTATION) {
+      try { GII_CONSULTATION.recordOutcome(trade); } catch(e) {}
+    }
 
     // Sync outcome back to Hit Rate Tracker
     if (window.HRS && typeof HRS.signals !== 'undefined') {
@@ -3901,6 +3925,31 @@
       if (!sigs.length) return;
     }
 
+    // ── Agent Consultation ──────────────────────────────────────────────────
+    // Ask ALL 44 domain agents for their opinion on each proposed trade.
+    // Genuine multi-agent consensus — not temporal coincidence.
+    // Runs after fusion/dedup so we evaluate the merged signal, not raw inputs.
+    if (window.GII_CONSULTATION) {
+      sigs = sigs.filter(function (sig) {
+        var _cAsset = normaliseAsset(sig.asset);
+        var _cDir   = (sig.dir || 'LONG').toUpperCase();
+        var _cResult = GII_CONSULTATION.evaluate(_cAsset, _cDir);
+        sig._consultation = _cResult;
+
+        if (_cResult.verdict === 'BLOCKED') {
+          _logSignal(sig, 'SKIPPED', 'Consultation BLOCKED (' + _cResult.netScore.toFixed(1) + '): ' + _cResult.summary);
+          return false;
+        }
+        // Apply confidence adjustment from consensus
+        if (_cResult.confAdjust) {
+          sig.conf = Math.min(95, Math.max(30, (sig.conf || 0) + _cResult.confAdjust));
+        }
+        return true;
+      });
+      if (!sigs.length) return;
+    }
+    // ── End Agent Consultation ──────────────────────────────────────────────
+
     // ── Quality Gate ────────────────────────────────────────────────────────
     // Filters signals to only the best trades before Phase 1 scoring.
     // Fewer, smarter, better-sized trades — quality over quantity.
@@ -3923,10 +3972,13 @@
             return false;
         }
 
-        // Rule 2: Equity perps need multi-source agreement
+        // Rule 2: Equity perps need 2+ sources OR strong agent consultation consensus
         if (_QG_EQUITY_PERPS[_qgAsset] && _qgSrcCount < 2) {
-            _logSignal(sig, 'SKIPPED', 'Quality gate: equity perp ' + _qgAsset + ' needs 2+ sources');
-            return false;
+            var _qgHasConsensus = sig._consultation && sig._consultation.netScore >= 2.0;
+            if (!_qgHasConsensus) {
+                _logSignal(sig, 'SKIPPED', 'Quality gate: equity perp ' + _qgAsset + ' needs 2+ sources or agent consensus (score=' + (sig._consultation ? sig._consultation.netScore.toFixed(1) : 'n/a') + ')');
+                return false;
+            }
         }
 
         // Rule 3: Block proven losers via brain feedback

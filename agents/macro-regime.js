@@ -282,6 +282,19 @@
         (r.dxy ? ' | DXY ' + r.dxy.toFixed(2) : '') +
         (r.us10y ? ' | US10Y ' + r.us10y.toFixed(2) + '%' : '') +
         (r.notes.length ? '\n  ' + r.notes.join('\n  ') : '');
+    },
+
+    // Consultation: regime-aware trade direction assessment
+    consult: function (asset, dir) {
+      if (_regime === 'UNKNOWN') return { vote: 'abstain', weight: 0, reason: 'regime unknown', ts: _lastPoll };
+      var norm   = String(asset || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      var sec    = (window.EE_SECTOR_MAP || {})[norm] || '';
+      var isRisk = sec === 'crypto' || sec === 'equity' || sec === 'semis';
+      var dirUp  = (dir || '').toUpperCase();
+      if (_regime === 'RISK_OFF' && dirUp === 'LONG'  && isRisk) return { vote: 'oppose',  weight: 0.60, reason: 'MacroRegime RISK_OFF — risk longs risky', ts: _lastPoll };
+      if (_regime === 'RISK_OFF' && dirUp === 'SHORT' && isRisk) return { vote: 'support', weight: 0.40, reason: 'MacroRegime RISK_OFF — shorts favoured', ts: _lastPoll };
+      if (_regime === 'RISK_ON'  && dirUp === 'LONG'  && isRisk) return { vote: 'support', weight: 0.40, reason: 'MacroRegime RISK_ON — risk longs favoured', ts: _lastPoll };
+      return { vote: 'abstain', weight: 0, reason: 'MacroRegime ' + _regime + ' — no conflict', ts: _lastPoll };
     }
   };
 

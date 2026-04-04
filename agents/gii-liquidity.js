@@ -257,7 +257,16 @@
     poll:     poll,
     signals:  function () { return _signals.slice(); },
     status:   function () { return Object.assign({}, _status); },
-    accuracy: function () { return Object.assign({}, _accuracy); }
+    accuracy: function () { return Object.assign({}, _accuracy); },
+
+    // Consultation: liquidity stress increases risk on all entries
+    consult: function (asset, dir) {
+      var s  = _status;
+      var ts = s.lastPoll;
+      if (!s.stressLevel || s.stressLevel === 'LOW') return { vote: 'abstain', weight: 0, reason: 'liquidity normal', ts: ts };
+      var wt = s.stressLevel === 'CRITICAL' ? 0.80 : s.stressLevel === 'HIGH' ? 0.65 : 0.40;
+      return { vote: 'oppose', weight: wt, reason: 'liquidity stress ' + s.stressLevel + ' — spreads widening', ts: ts };
+    }
   };
 
   window.addEventListener('load', function () {

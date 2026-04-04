@@ -277,6 +277,20 @@
     clearSignal:         clearSignal,
     getSectorAlignment:  getSectorAlignment,
     status:              status,
+
+    // Consultation: evaluate a proposed trade against historical win rate data
+    consult: function (asset, dir) {
+      var norm = String(asset || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      var fb   = inheritFeedback(norm);
+      if (!fb) return { vote: 'abstain', weight: 0, reason: 'no history for ' + norm };
+      var d = fb[(dir || 'LONG').toLowerCase()];
+      if (!d || d.total < 5) return { vote: 'abstain', weight: 0, reason: norm + ': only ' + (d ? d.total : 0) + ' trades — insufficient' };
+      var wr = d.winRate;
+      if (wr >= 0.50) return { vote: 'support', weight: Math.min(1.0, wr),  reason: norm + ' ' + dir + ': ' + Math.round(wr * 100) + '% WR/' + d.total + ' trades' };
+      if (wr >= 0.30) return { vote: 'abstain', weight: 0.3,                 reason: norm + ' ' + dir + ': mediocre ' + Math.round(wr * 100) + '% WR' };
+      if (wr  > 0)    return { vote: 'oppose',  weight: 0.60,                reason: norm + ' ' + dir + ': poor ' + Math.round(wr * 100) + '% WR/' + d.total + ' trades' };
+      return                 { vote: 'oppose',  weight: 0.90,                reason: norm + ' ' + dir + ': 0% WR over ' + d.total + ' trades — proven loser' };
+    },
     analytics:           analytics
   };
 

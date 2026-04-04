@@ -635,7 +635,40 @@
       }
     }
 
-    /* 4. Progressive profit trail — locks in profits at 1:1 and 1.5:1 R:R milestones */
+    /* 4. Consultation thesis re-check — cross-agent consensus flip since entry */
+    if (window.GII_CONSULTATION && typeof GII_CONSULTATION.getSnapshot === 'function') {
+      var _entrySnap = GII_CONSULTATION.getSnapshot(tradeId);
+      if (_entrySnap) {
+        var _recheck  = GII_CONSULTATION.evaluate(asset, trade.direction || 'LONG');
+        var _pnlPct   = trade.pnl_pct || 0;
+        var _health   = GII_CONSULTATION.checkThesisHealth(_entrySnap, _recheck, _pnlPct);
+        if (_health === 'FORCE_CLOSE') {
+          _log('FORCE_CLOSE', tradeId, asset, 'consultation-thesis-flip', {
+            detail: 'Consultation re-poll: thesis flipped (entry=' + _entrySnap.netScore.toFixed(1) +
+              ' \u2192 now=' + _recheck.netScore.toFixed(1) + ')'
+          });
+          try { EE.forceCloseTrade(tradeId, 'GII-EXIT:consultation-thesis-flip'); } catch (e) {}
+          if (_srcLower === 'ic' && window.ICRiskEngine) { try { ICRiskEngine.onICTradeClosed(); } catch (e) {} }
+          _stats.closed++;
+          return;
+        }
+        if (_health === 'TIGHTEN_STOP') {
+          var _consultChanges = _computeTightStop(trade);
+          if (_consultChanges) {
+            _log('TIGHTEN_STOP', tradeId, asset, 'consultation-thesis-weakening', {
+              detail: 'Consultation re-poll: thesis weakening (entry=' + _entrySnap.netScore.toFixed(1) +
+                ' \u2192 now=' + _recheck.netScore.toFixed(1) + ')',
+              changes: _consultChanges
+            });
+            try { EE.updateOpenTrade(tradeId, _consultChanges); } catch (e) {}
+            _stats.tightened++;
+            return;
+          }
+        }
+      }
+    }
+
+    /* 5. Progressive profit trail — locks in profits at 1:1 and 1.5:1 R:R milestones */
     var trailResult = _progressiveTrailCheck(trade);
     if (trailResult) {
       var trailChanges = { stop_loss: trailResult.newStop };
@@ -645,7 +678,7 @@
       /* Don't return — still allow TP extension below if momentum is strong */
     }
 
-    /* 5. Positive momentum: try to extend TP */
+    /* 6. Positive momentum: try to extend TP */
     var extResult = _momentumExtend(trade);
     if (extResult && extResult.action === 'RAISE_TP') {
       var tpChanges = _computeRaisedTP(trade);
@@ -705,6 +738,21 @@
 
     exitLog: function () { return _exitLog.slice(); },
     trailLog: function () { return _trailLog.slice(); },
+
+    // Consultation: warn if this asset was recently force-closed (thesis reversed)
+    consult: function (asset, dir) {
+      var norm    = String(asset || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      var cutoff  = Date.now() - 1800000;  // last 30 minutes
+      var recent  = _exitLog.filter(function (e) {
+        return String(e.asset || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === norm && e.ts > cutoff;
+      });
+      if (recent.length) {
+        return { vote: 'oppose', weight: 0.65,
+                 reason: 'exit agent closed ' + norm + ' in last 30min: ' + (recent[0].reason || '?'),
+                 ts: recent[0].ts };
+      }
+      return { vote: 'abstain', weight: 0, reason: 'no recent exit flags for ' + norm };
+    },
 
     status: function () {
       return {

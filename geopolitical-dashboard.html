@@ -13692,6 +13692,9 @@ window._TT_BOOTSTRAP = (function(){
 <!-- Macro Regime Classifier — loaded before EE so canExecute() can gate on regime -->
 <script src="agents/macro-regime.js?v=3"></script>
 
+<!-- Cross-Agent Consultation — polls all domain agents before each trade; must load after agents, before EE -->
+<script src="gii-consultation.js?v=1"></script>
+
 <!-- Execution Engine — loaded last so HRS and IC are already initialised -->
 <script src="executionEngine.js?v=122"></script>
 <!-- Smoke tests — EETests.run() in console to validate core EE behaviour -->

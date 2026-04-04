@@ -305,6 +305,27 @@
 
     imminent:   function () { return _upcoming(BLOCK_MS)[0] || null; },
     upcoming:   function (h) { return _upcoming((h || 2) * 3600000); },
+
+    // Consultation: warn about imminent high-impact economic events
+    consult: function (asset, dir) {
+      var blocking = _upcoming(BLOCK_MS);
+      if (blocking.length) {
+        var ev = blocking[0];
+        var mins = Math.round((ev.date.getTime() - Date.now()) / 60000);
+        return { vote: 'oppose', weight: 0.65,
+                 reason: 'high-impact event in ' + mins + 'min: ' + (ev.country || '') + ' ' + (ev.title || ''),
+                 ts: Date.now() };
+      }
+      var warning = _upcoming(WARN_MS);
+      if (warning.length) {
+        var evW = warning[0];
+        var minsW = Math.round((evW.date.getTime() - Date.now()) / 60000);
+        return { vote: 'oppose', weight: 0.30,
+                 reason: 'upcoming event in ' + minsW + 'min: ' + (evW.country || '') + ' ' + (evW.title || ''),
+                 ts: Date.now() };
+      }
+      return { vote: 'abstain', weight: 0, reason: 'no imminent economic events' };
+    },
     events:     function () { return _events.slice(); },
     nextEvent:  function () { return _nextEvent(); },
     refresh:    function () { _poll(); },

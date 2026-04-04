@@ -241,7 +241,22 @@
     poll:     _poll,
     signals:  function () { return _signals.slice(); },
     status:   function () { return Object.assign({}, _status); },
-    accuracy: function () { return _accuracy; }
+    accuracy: function () { return _accuracy; },
+
+    // Consultation: systemic risk level affects all trades
+    consult: function (asset, dir) {
+      var s  = _status;
+      var ts = s.lastPoll;
+      if (!s.riskLevel || s.riskLevel === 'NORMAL') return { vote: 'abstain', weight: 0, reason: 'risk normal', ts: ts };
+      var norm   = String(asset || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      var sec    = (window.EE_SECTOR_MAP || {})[norm] || '';
+      var isSafe = sec === 'precious' || norm === 'VXX' || norm === 'VIX';
+      var dirUp  = (dir || '').toUpperCase();
+      var wt = s.riskLevel === 'CRITICAL' ? 0.85 : s.riskLevel === 'HIGH' ? 0.70 : 0.50;
+      if (isSafe && dirUp === 'LONG')
+        return { vote: 'support', weight: +(wt * 0.7).toFixed(2), reason: 'systemic risk ' + s.riskLevel + ' — safe haven long OK', ts: ts };
+      return { vote: 'oppose', weight: wt, reason: 'systemic risk ' + s.riskLevel + ' — reduce exposure', ts: ts };
+    }
   };
 
   /* ── INIT ───────────────────────────────────────────────────────────────── */

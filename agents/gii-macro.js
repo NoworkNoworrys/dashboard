@@ -440,7 +440,34 @@
     status:    function () { return Object.assign({}, _status); },
     accuracy:  function () { return Object.assign({}, _accuracy); },
     worldbank: function () { return _wbData  ? Object.assign({}, _wbData)  : null; },
-    imf:       function () { return _imfData ? Object.assign({}, _imfData) : null; }
+    imf:       function () { return _imfData ? Object.assign({}, _imfData) : null; },
+
+    // Consultation: evaluate a proposed trade against current macro conditions
+    consult: function (asset, dir) {
+      var s      = _status;
+      var dirUp  = (dir || '').toUpperCase();
+      var norm   = String(asset || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      var sec    = (window.EE_SECTOR_MAP || {})[norm] || '';
+      var isRisk = sec === 'crypto' || sec === 'equity' || sec === 'semis' || sec === 'index';
+      var isSafe = sec === 'precious' || norm === 'VXX' || norm === 'VIX' || sec === 'defense';
+      var ts     = s.lastPoll;
+
+      // VIX extreme — strongest signal
+      if (s.vix && s.vix > 35) {
+        if (dirUp === 'LONG'  && isRisk) return { vote: 'oppose',  weight: 0.80, reason: 'VIX ' + s.vix.toFixed(0) + ' — risk longs dangerous', ts: ts };
+        if (dirUp === 'LONG'  && isSafe) return { vote: 'support', weight: 0.70, reason: 'VIX ' + s.vix.toFixed(0) + ' — safe havens favoured', ts: ts };
+      }
+      if (s.riskMode === 'RISK_OFF') {
+        if (dirUp === 'LONG'  && isRisk) return { vote: 'oppose',  weight: 0.70, reason: 'RISK_OFF — avoid risk longs', ts: ts };
+        if (dirUp === 'SHORT' && isRisk) return { vote: 'support', weight: 0.50, reason: 'RISK_OFF — risk shorts favoured', ts: ts };
+        if (dirUp === 'LONG'  && isSafe) return { vote: 'support', weight: 0.60, reason: 'RISK_OFF — safe havens favoured', ts: ts };
+      }
+      if (s.riskMode === 'RISK_ON') {
+        if (dirUp === 'LONG'  && isRisk) return { vote: 'support', weight: 0.50, reason: 'RISK_ON — risk longs favoured', ts: ts };
+        if (dirUp === 'SHORT' && isRisk) return { vote: 'oppose',  weight: 0.40, reason: 'RISK_ON — shorts on risk risky', ts: ts };
+      }
+      return { vote: 'abstain', weight: 0, reason: 'no strong macro view (' + (s.riskMode || 'NEUTRAL') + ')', ts: ts };
+    }
   };
 
   window.addEventListener('load', function () {

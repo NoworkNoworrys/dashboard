@@ -207,6 +207,20 @@
         def: _status.shiftDef ? Object.assign({}, _status.shiftDef) : null,
         lastShiftTs: _status.lastShiftTs
       };
+    },
+
+    // Consultation: warn about active regime shifts that invalidate entries
+    consult: function (asset, dir) {
+      var ts = _status.lastPoll;
+      if (!_status.regimeShiftActive) return { vote: 'abstain', weight: 0, reason: 'no shift active', ts: ts };
+      var norm   = String(asset || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      var sec    = (window.EE_SECTOR_MAP || {})[norm] || '';
+      var isSafe = sec === 'precious' || norm === 'VXX' || norm === 'VIX' || sec === 'defense';
+      var dirUp  = (dir || '').toUpperCase();
+      if (isSafe && dirUp === 'LONG')
+        return { vote: 'support', weight: 0.50, reason: 'regime shift — safe haven long OK', ts: ts };
+      return { vote: 'oppose', weight: 0.80,
+               reason: 'regime shift active (' + (_status.shiftType || '?') + ') — avoid new entries', ts: ts };
     }
   };
 
