@@ -248,10 +248,17 @@
       type: 'agent',
       maxAgeMs: 5 * 60 * 1000,
       check: _agentCheck('EE', function (ag) {
-        if (typeof ag.status !== 'function') return { ok: false, detail: 'no status()' };
-        var st = ag.status();
-        if (!st) return { ok: false, detail: 'null status' };
-        return { ok: true, detail: 'open=' + (st.openCount || 0) + ' today=' + (st.todayCount || 0) };
+        if (typeof ag.getAllTrades !== 'function') return { ok: false, detail: 'no getAllTrades()' };
+        var trades = ag.getAllTrades();
+        var openCount = trades.filter(function (t) { return t.status === 'OPEN'; }).length;
+        var cfg = typeof ag.getConfig === 'function' ? ag.getConfig() : {};
+        var halted = typeof ag.isHalted === 'function' && ag.isHalted();
+        return {
+          ok: !halted,
+          detail: (halted ? '⛔ HALTED | ' : '') +
+                  'open=' + openCount + ' total=' + trades.length +
+                  (cfg.enabled ? ' | auto ON' : ' | auto OFF')
+        };
       })
     });
   }
