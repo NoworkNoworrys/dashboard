@@ -48,11 +48,11 @@
     max_siglog:            200,
     cooldown_ms:           180000,       // 3 min per-asset cooldown — quality over quantity
     // ── Core risk parameters (Morgan's live settings — these are the standard) ─
-    min_confidence:        68,           // raised from 55 — only higher-conviction signals
+    min_confidence:        70,           // raised from 55→68→70 — the 60-70 band is EV-negative
     virtual_balance:       1000,         // placeholder — overwritten by live broker equity sync
     risk_per_trade_pct:    10,           // 10% per trade: sized for small $26 HL account
     stop_loss_pct:         2.5,          // 2.5% stop distance
-    take_profit_ratio:     3.0,          // 3.0R target (raised from 2.5 — partial TP at 70% = 2.1R vs old 1.25R)
+    take_profit_ratio:     2.2,          // 2.2R target (reduced from 3.0 — only 4.1% of trades were reaching 3.0R; partial TP fires at 70% = 1.54R)
     max_open_trades:       5,            // focused positions — $85 account
     max_per_region:        6,
     max_per_sector:        6,
@@ -3940,8 +3940,8 @@
         // Rule 4: Small account — tighter position limit
         var _qgBal = _getEffectiveBalance();
         var _qgOpenCount = openTrades().length;
-        if (_qgBal < 100 && _qgOpenCount >= 3) {
-            _logSignal(sig, 'SKIPPED', 'Quality gate: small account ($' + _qgBal.toFixed(0) + ') — max 3 positions');
+        if (_qgBal < 100 && _qgOpenCount >= 4) {
+            _logSignal(sig, 'SKIPPED', 'Quality gate: small account ($' + _qgBal.toFixed(0) + ') — max 4 positions');
             return false;
         }
 
@@ -3953,6 +3953,17 @@
             }).length;
             if (_qgCryptoOpen >= 2 && _qgConf < 80 && _qgSrcCount < 2) {
                 _logSignal(sig, 'SKIPPED', 'Quality gate: 2 crypto already open — need 80%+ conf or 2+ sources');
+                return false;
+            }
+        }
+
+        // Rule 6: Directional bias — longs need higher conviction in RISK_OFF
+        // Data shows shorts at 49.5% WR vs longs at 36.5% in risk-off conditions.
+        // Raise the bar for longs so only high-conviction ones get through.
+        if (_qgDir === 'long' && window.MacroRegime && typeof MacroRegime.current === 'function') {
+            var _qgRegime = (MacroRegime.current() || {}).regime;
+            if (_qgRegime === 'RISK_OFF' && _qgConf < 78) {
+                _logSignal(sig, 'SKIPPED', 'Quality gate: RISK_OFF — longs need 78%+ conf (' + _qgConf + '%)');
                 return false;
             }
         }
