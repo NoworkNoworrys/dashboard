@@ -688,7 +688,7 @@
     'COPPER':  'HG=F',   // Copper futures
     'GDX':     'GDX',    // VanEck Gold Miners ETF
     // GLD removed — routes to CoinGecko PAX Gold (spot price) to prevent ETF/spot mix-up
-    'SLV':     'SLV',    // iShares Silver Trust
+    'SLV':     'SI=F',   // Silver futures (NOT the SLV ETF — different instrument/price from HL silver perp)
     'SPY':     'SPY',
     'QQQ':     'QQQ',
     'DAL':     'DAL',    // Delta Air Lines
@@ -1426,7 +1426,7 @@
       'CRUDE OIL':    'WTI',   'US OIL':       'WTI',   'LIGHT CRUDE':  'WTI',
       'BRENT CRUDE':  'BRENT', 'BRENT OIL':    'BRENT',
       'GOLD':         'XAU',   'SPOT GOLD':    'XAU',
-      'SILVER':       'SLV',   'SPOT SILVER':  'SLV',
+      'SILVER':       'SLV',   'SPOT SILVER':  'SLV',   // SLV = HL silver perp (NOT the ETF)
       'S&P 500':      'SPY',   'S&P500':       'SPY',   'SP500':        'SPY',
       'NASDAQ':       'QQQ',   'NASDAQ 100':   'QQQ',   'NASDAQ100':    'QQQ',
       'DOW JONES':    'DIA',   'DOW':          'DIA',
@@ -1465,7 +1465,10 @@
   // Note: GLD is intentionally excluded — GLD is the SPDR ETF (~1/10 oz gold), NOT spot gold.
   // If Yahoo Finance fails, returning the dashboard's spot GOLD price (10× higher) would corrupt
   // position sizing. Better to return null (skip trade) than trade at 10× the wrong price.
-  var _TICKER_ALIASES = { 'XAU':'GOLD', 'XAG':'SILVER', 'SLV':'SILVER', 'OIL':'WTI', 'CRUDE':'WTI', 'BRENT':'OIL', 'GAS':'NATGAS' };
+  // Dashboard ticker scrape aliases — maps EE token → dashboard ticker label.
+  // IMPORTANT: BRENT must NOT alias to OIL (that's WTI on the dashboard — different crude).
+  // SLV aliases to SILVER (spot) not the SLV ETF price.
+  var _TICKER_ALIASES = { 'XAU':'GOLD', 'XAG':'SILVER', 'SLV':'SILVER', 'OIL':'WTI', 'CRUDE':'WTI', 'BRENT':'BRENT', 'GAS':'NATGAS' };
   function _tickerPrice(token) {
     var searches = [token];
     if (_TICKER_ALIASES[token]) searches.push(_TICKER_ALIASES[token]);
@@ -4463,12 +4466,30 @@
           log('TRADE', sig.asset + ' pending-open lock cleared after 30s timeout — fetchPrice may have hung', 'amber');
         }
       }, 30000);
-      fetchPrice(sig.asset, function (price) {
+      // HL-routed signals: get price from HL ONLY to avoid instrument mismatches
+      // (e.g. SLV ETF $30 vs HL silver perp $33, GLD ETF $275 vs PAXG $3000).
+      // If HL price is unavailable, skip rather than use a wrong-instrument price.
+      var _hlOnlyEntry = sig._venue === 'HL' && window.HLFeed && typeof HLFeed.getPrice === 'function';
+      var _entryPriceFn = _hlOnlyEntry
+        ? function (cb) {
+            var _hlE = HLFeed.getPrice(normaliseAsset(sig.asset));
+            if (_hlE && _hlE.price > 0) {
+              _cacheSet(normaliseAsset(sig.asset), _hlE.price);
+              cb(_hlE.price);
+            } else {
+              cb(null);  // no HL price → skip, don't use fallback
+            }
+          }
+        : function (cb) { fetchPrice(sig.asset, cb); };
+
+      _entryPriceFn(function (price) {
         clearTimeout(_pendingTimer);
         if (!price) {
           delete _pendingOpen[_lockKey];
-          _logSignal(sig, 'SKIPPED', 'Price unavailable — will retry');
-          log('TRADE', sig.asset + ' skipped: no price feed. Re-scan will retry.', 'amber');
+          _logSignal(sig, 'SKIPPED', _hlOnlyEntry
+            ? 'HL price unavailable for ' + sig.asset + ' — refusing wrong-source fallback'
+            : 'Price unavailable — will retry');
+          log('TRADE', sig.asset + ' skipped: ' + (_hlOnlyEntry ? 'no HL price (won\'t use Yahoo/backend fallback)' : 'no price feed') + '. Re-scan will retry.', 'amber');
           return;
         }
         // Re-validate after async gap — another signal for same asset may have
