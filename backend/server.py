@@ -33,6 +33,9 @@ from ingest.fao       import get_cache as get_fao_cache
 from ingest.ocha      import get_cache as get_ocha_cache
 from ingest.cot          import get_cache as get_cot_cache
 from ingest.maritime_ais import get_cache as get_ais_cache
+from ingest.opensky      import get_cache as get_opensky_cache
+from ingest.sentinel     import get_cache as get_sentinel_cache
+from ingest.fred         import get_cache as get_fred_cache
 from ingest.usgs         import get_geojson_cache as get_usgs_cache
 from ingest.manifold     import get_cache as get_manifold_cache
 from ingest.ecb          import get_cache as get_ecb_cache
@@ -687,6 +690,11 @@ async def api_ecb():
     """ECB monetary data — exchange rates, policy rates, inflation, M3, Bund yield."""
     return JSONResponse(content=get_ecb_cache())
 
+@app.get('/api/fred')
+async def api_fred():
+    """FRED US macro data — fed funds rate, yield curve, HY spread, CPI, unemployment, M2, VIX, EPU."""
+    return JSONResponse(content=get_fred_cache())
+
 
 @app.get('/api/earthquakes')
 async def api_earthquakes():
@@ -705,14 +713,14 @@ async def api_ships():
 
 @app.get('/api/aircraft')
 async def api_aircraft():
-    """Military aircraft events — backend OpenSky ingest runs every 5 cycles."""
-    return JSONResponse(content={'aircraft': []})
+    """Military aircraft events — OpenSky ingest runs every 5 cycles (~5 min)."""
+    return JSONResponse(content={'aircraft': get_opensky_cache()})
 
 
 @app.get('/api/satellites')
 async def api_satellites():
-    """Satellite intel placeholder — no live satellite data source configured."""
-    return JSONResponse(content={'satellites': []})
+    """Planet satellite imagery events — requires PLANET_API_KEY env var."""
+    return JSONResponse(content={'satellites': get_sentinel_cache()})
 
 
 @app.get('/api/manifold')

@@ -38,6 +38,12 @@ _MIL_PREFIXES = (
 )
 
 _seen: set = set()
+_cache: List[Dict] = []
+
+
+def get_cache() -> List[Dict]:
+    """Return the last set of OpenSky flight events (populated by fetch_opensky)."""
+    return _cache
 
 
 def fetch_opensky() -> List[Dict]:
@@ -104,5 +110,7 @@ def fetch_opensky() -> List[Dict]:
         for k in list(_seen)[:100]:
             _seen.discard(k)
 
+    global _cache
+    _cache = events
     print(f'[OPENSKY] {len(events)} flight events')
     return events

@@ -25,7 +25,7 @@
 
   var POLL_INTERVAL_MS  = 5 * 60 * 1000;     // 5 minutes
   var INIT_DELAY_MS     = 16500;              // after gii-technicals (11.5s) + buffer
-  var GTI_GATE          = 65;                 // skip scalping when GTI >= this
+
   var SCALPER_ASSETS   = [                // Assets scanned each poll cycle
     'BTC', 'ETH', 'SOL', 'XRP', 'DOGE',
     'AVAX', 'BNB', 'ADA', 'LINK', 'DOT',

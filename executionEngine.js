@@ -1017,8 +1017,18 @@
         else log('SYSTEM', 'Backend write queue flushed ✓', 'dim');
       })
       .catch(function () {
-        // Retry after 30s backoff — prevents queue stalling if backend is briefly offline
-        if (_writeQueue.length) setTimeout(_flushWriteQueue, 30000);
+        // Retry with backoff — but give up after 10 consecutive failures to prevent
+        // an offline backend from stalling the queue indefinitely.
+        if (_writeQueue.length) {
+          item.retries = (item.retries || 0) + 1;
+          if (item.retries >= 10) {
+            log('SYSTEM', 'Write queue: giving up on ' + item.op + ' ' + item.tradeId +
+              ' after 10 retries — item dropped', 'red');
+            _writeQueue.shift();
+            _saveWriteQueue();
+          }
+          setTimeout(_flushWriteQueue, 30000);
+        }
       })
       .finally(function () {
         // Single authoritative clear — runs after .then() or .catch() completes
@@ -3758,6 +3768,15 @@
 
     /* Learning loop feedback: notify dashboard of trade outcome */
     if (typeof window.onTradeClose === 'function') window.onTradeClose(trade);
+
+    /* Notify scalper agents immediately so their per-asset slots are freed now,
+       rather than waiting up to 5 minutes for the next poll cycle's EE cross-check. */
+    if (window.GII_AGENT_SCALPER && typeof GII_AGENT_SCALPER.onTradeResult === 'function') {
+      try { GII_AGENT_SCALPER.onTradeResult(trade); } catch(e) {}
+    }
+    if (window.GII_AGENT_SCALPER_SESSION && typeof GII_AGENT_SCALPER_SESSION.onTradeResult === 'function') {
+      try { GII_AGENT_SCALPER_SESSION.onTradeResult(trade); } catch(e) {}
+    }
   }
 
   /* ══════════════════════════════════════════════════════════════════════════════
@@ -4048,6 +4067,12 @@
         var _rawConf = _numConf <= 1 ? Math.round(_numConf * 100) : _numConf;
         sig.conf = Math.max(0, Math.min(100, _rawConf));  // clamp: agent could send out-of-range value
       }
+      // Keep sig.confidence in sync with sig.conf (0-100 scale).
+      // Agents that send confidence as a 0-1 decimal leave sig.confidence = 0.72 even after
+      // sig.conf is set to 72. Decay at arrival, news adjustments, and floor checks all
+      // operate on sig.conf — leaving sig.confidence stale causes wrong decay results
+      // (Math.round(0.72 * 0.83) = 1, not 60) and confuses any code that reads the field.
+      if (sig.conf !== undefined) sig.confidence = sig.conf;
       if (sig.reasoning !== undefined && sig.reason === undefined) sig.reason = sig.reasoning;
       // ───────────────────────────────────────────────────────────────────────────
 
@@ -7976,6 +8001,11 @@
         });
     },
 
+    /* ── Sector map — exposed so agents can classify assets without depending on EE load order ──
+       Agents (gii-macro, gii-regime, gii-risk, macro-regime, etc.) read window.EE_SECTOR_MAP
+       directly, so we also set it as a plain window property for backward compatibility.      */
+    sectorMap: EE_SECTOR_MAP,
+
     /* ── Diagnostic snapshot — call EE.diagnose() from the browser console ── */
     /* Returns a summary string and logs key state variables for debugging.      */
     diagnose: function () {
@@ -8000,6 +8030,11 @@
       return summary;
     }
   };
+
+  /* Expose sector map as a plain window property so agents can read it directly
+     without going through window.EE (some load before EE, others reference it
+     as window.EE_SECTOR_MAP rather than window.EE.sectorMap).               */
+  window.EE_SECTOR_MAP = EE_SECTOR_MAP;
 
   /* ══════════════════════════════════════════════════════════════════════════════
      INITIALISATION

@@ -16,6 +16,12 @@ from config import PLANET_API_KEY
 from keyword_detector import build_event
 
 _SEARCH_URL = 'https://api.planet.com/data/v1/quick-search'
+_cache: List[Dict] = []
+
+
+def get_cache() -> List[Dict]:
+    """Return the last set of Planet satellite events (populated by fetch_sentinel)."""
+    return _cache
 
 # Geopolitical hotspot bounding boxes [west, south, east, north]
 _HOTSPOTS = [
@@ -89,5 +95,7 @@ def fetch_sentinel() -> List[Dict]:
         except Exception as e:
             print(f'[SENTINEL] {name} error: {e}')
 
+    global _cache
+    _cache = events
     print(f'[SENTINEL] {len(events)} hotspot(s) with new Planet imagery')
     return events

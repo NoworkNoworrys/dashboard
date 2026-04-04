@@ -25,10 +25,11 @@
   var INIT_DELAY_MS = 18 * 1000;    // wait for EE + other agents to fully boot
 
   /* Thesis invalidation thresholds */
-  var IC_PROB_DROP_THRESHOLD  = 15;   // IC region prob below this → close IC/GII trades
-                                      // Raised from 25→15: keyword freq ≠ price momentum.
-                                      // News cycle quietens before market move exhausts —
-                                      // at 25% too many trades were closed while still valid.
+  var IC_PROB_DROP_THRESHOLD  = 25;   // IC region prob below this → close IC/GII trades
+                                      // Reverted 15→25: threshold of 15 was too aggressive.
+                                      // IC keyword scores are noisy — a trade opened at prob 30
+                                      // was closing on noise at 28. 25 requires a genuine signal
+                                      // collapse rather than normal news-cycle decay.
   var POSTERIOR_REVERSAL_DELTA = 0.45; // Bayesian posterior dropped this much from entry → close
                                        // Raised 0.30→0.45: a 30pt drop was triggering premature
                                        // exits on noise. Require a genuinely decisive reversal.
@@ -90,6 +91,25 @@
   var _stats       = { checked: 0, closed: 0, tightened: 0, extended: 0, skipped: 0 };
   var _beApplied   = {};   // { tradeId: 'be'|'half' } — tracks progressive trail milestones
 
+  var _EXIT_LOG_KEY = 'geodash_exit_log_v1';
+  var _EXIT_LOG_TTL = 30 * 60 * 1000;  // keep 30 min of entries (matches consult() lookback)
+
+  function _loadExitLog() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(_EXIT_LOG_KEY) || '[]');
+      var cutoff = Date.now() - _EXIT_LOG_TTL;
+      _exitLog = raw.filter(function (e) { return e.ts > cutoff; });
+    } catch (e) { _exitLog = []; }
+  }
+
+  function _saveExitLog() {
+    try {
+      var cutoff = Date.now() - _EXIT_LOG_TTL;
+      var trimmed = _exitLog.filter(function (e) { return e.ts > cutoff; }).slice(0, 60);
+      localStorage.setItem(_EXIT_LOG_KEY, JSON.stringify(trimmed));
+    } catch (e) {}
+  }
+
   /* ── HELPERS ────────────────────────────────────────────────────────────── */
   function _log(type, tradeId, asset, reason, details) {
     var entry = { type: type, tradeId: tradeId, asset: asset, reason: reason,
@@ -97,6 +117,7 @@
     if (type === 'FORCE_CLOSE' || type === 'THESIS_INVALID') {
       _exitLog.unshift(entry);
       if (_exitLog.length > 60) _exitLog.pop();
+      _saveExitLog();   // persist so consult() survives page reload
     } else {
       _trailLog.unshift(entry);
       if (_trailLog.length > 30) _trailLog.pop();
@@ -771,6 +792,7 @@
 
   /* ── INIT ───────────────────────────────────────────────────────────────── */
   window.addEventListener('load', function () {
+    _loadExitLog();   // restore recent force-closes so consult() works across reloads
     setTimeout(function () {
       _poll();
       setInterval(_poll, POLL_MS);
