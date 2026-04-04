@@ -68,7 +68,7 @@
     daily_profit_target_pct: 0,          // T4-C: 0 = disabled; set e.g. 5 to pause new trades after +5% session gain
     event_gate_enabled:     true,        // block new trades 30min before major events
     event_gate_hours:       0.5,
-    blocked_sectors:        '',           // comma-separated sectors to block (e.g. 'crypto' or 'crypto,forex')
+    blocked_sectors:        'crypto',     // comma-separated sectors to block — crypto blocked by default
   };
 
   /* ── Sector map — used for max_per_sector concentration cap ──────────────── */
@@ -1794,8 +1794,12 @@
 
     // Blocked sectors: completely block trading in named sectors (e.g. 'crypto').
     // Set via EE config: blocked_sectors = 'crypto' or 'crypto,forex' (comma-separated).
-    var sector = EE_SECTOR_MAP[normaliseAsset(sig.asset)];
-    if (sector && _cfg.blocked_sectors) {
+    // IMPORTANT: assets not in EE_SECTOR_MAP default to 'crypto' — the vast majority
+    // of HL's 300+ named perps are crypto tokens (POPCAT, ANIME, GRIFFAIN, etc.).
+    // Only known non-crypto assets (equities, commodities, forex) are in the sector map.
+    // Without this default, unknown assets bypass the sector block entirely.
+    var sector = EE_SECTOR_MAP[normaliseAsset(sig.asset)] || 'crypto';
+    if (_cfg.blocked_sectors) {
       var _blockedList = String(_cfg.blocked_sectors).toLowerCase().split(',').map(function(s){return s.trim();});
       if (_blockedList.indexOf(sector.toLowerCase()) !== -1)
         return { ok: false, reason: 'Sector blocked: ' + sector };
