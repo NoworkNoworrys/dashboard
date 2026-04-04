@@ -73,6 +73,30 @@
     equity:   { rsiLong: 40, rsiShort: 60, rsiStrongL: 30, rsiStrongS: 70 }
   };
 
+  /**
+   * _resolveHlTickers — on init, update stale @N indices from HL_ASSET_REGISTRY
+   * (maintained by hl-feed.js and verified against live spotMeta).
+   * Hardcoded values above are kept as fallbacks only.
+   */
+  function _resolveHlTickers() {
+    if (!window.HL_ASSET_REGISTRY || typeof HL_ASSET_REGISTRY.find !== 'function') {
+      console.warn('[SCRAPER MGR] HL_ASSET_REGISTRY not available — using fallback @N indices');
+      return;
+    }
+    var updated = 0;
+    for (var i = 0; i < WATCHLIST.length; i++) {
+      var entry = WATCHLIST[i];
+      if (!entry.hlTicker || entry.hlTicker.charAt(0) !== '@') continue;
+      var reg = HL_ASSET_REGISTRY.find(entry.eeAsset);
+      if (reg && reg.hlTicker && reg.hlTicker.charAt(0) === '@' && reg.hlTicker !== entry.hlTicker) {
+        console.info('[SCRAPER MGR] ' + entry.eeAsset + ': updated hlTicker ' + entry.hlTicker + ' → ' + reg.hlTicker);
+        entry.hlTicker = reg.hlTicker;
+        updated++;
+      }
+    }
+    if (updated) console.info('[SCRAPER MGR] Resolved ' + updated + ' hlTicker(s) from HL_ASSET_REGISTRY');
+  }
+
   // ── state ─────────────────────────────────────────────────────────────────
 
   var _instances       = {};   // { 'XAU': scraperInstance, ... } — active only
@@ -997,6 +1021,7 @@
   window.addEventListener('load', function () {
     _loadFeedback();
     setTimeout(function () {
+      _resolveHlTickers();
       _scan();
       _scanTimer = setInterval(_scan, POLL_INTERVAL_MS);
       console.info('[SCRAPER MGR] Initialised — watching ' + WATCHLIST.length +

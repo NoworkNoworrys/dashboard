@@ -2230,6 +2230,7 @@
     <button class="nav-btn" data-tab="analytics" data-color="#20b090">📈 Performance</button>
     <button class="nav-btn" data-tab="monitors"  data-color="#e8a020">🌐 Monitors</button>
     <button class="nav-btn" data-tab="sysmon"    data-color="#ff4444">🖥 System <span class="tab-badge" id="lmNavBadge" style="display:none"></span></button>
+    <button class="nav-btn" data-tab="datahealth" data-color="#4488ff">🩺 Data Health <span class="tab-badge" id="dhNavBadge" style="display:none"></span></button>
   </nav>
 
   <!-- ══════════════════════════ COMMAND STRIP ═══════════════════════════════════════ -->
@@ -5240,6 +5241,17 @@
     <div id="lmPanel">
       <div style="padding:40px;text-align:center;color:var(--dim);font-size:11px">
         🖥 System Monitor initialising — first scan in ~4 seconds after page load…
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════════
+       DATA HEALTH — Source freshness & agent health dashboard
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <div class="nav-section" data-tab="datahealth" id="dhWrap">
+    <div id="dhPanel" style="padding:16px">
+      <div style="text-align:center;color:var(--dim);font-size:11px;padding:30px">
+        Initialising data health monitor...
       </div>
     </div>
   </div>
@@ -13777,6 +13789,9 @@ window._TT_BOOTSTRAP = (function(){
 <script src="agents/event-momentum-agent.js?v=2"></script>
 <script src="agents/macro-cross-agent.js?v=3"></script>
 <script src="agents/opening-bias-agent.js?v=1"></script>
+<script src="agents/data-health-monitor.js?v=1"></script>
+<script src="agents/execution-quality.js?v=1"></script>
+<script src="agents/signal-replay.js?v=1"></script>
 <script>
   // Bridge: route gii-technicals.js (GII_TA_SIGNAL events) into EE.onSignals().
   // gii-technicals dispatches these events but previously nothing consumed them.
@@ -13798,7 +13813,7 @@ window._TT_BOOTSTRAP = (function(){
     var _REGION_MAP = {
       BTC:'GLOBAL',ETH:'GLOBAL',SOL:'GLOBAL',DOGE:'GLOBAL',ADA:'GLOBAL',
       BNB:'GLOBAL',XRP:'GLOBAL',LTC:'GLOBAL',DOT:'GLOBAL',LINK:'GLOBAL',
-      WTI:'MIDDLE_EAST',BRENT:'MIDDLE_EAST',GLD:'GLOBAL',XAU:'GLOBAL',
+      WTI:'MIDDLE_EAST',BRENT:'EUROPE',GLD:'GLOBAL',XAU:'GLOBAL',
       SPY:'NORTH_AMERICA',QQQ:'NORTH_AMERICA',NVDA:'NORTH_AMERICA',
       EUR_USD:'EUROPE',GBP_USD:'EUROPE',USD_JPY:'ASIA'
     };
@@ -14701,6 +14716,147 @@ window._TT_BOOTSTRAP = (function(){
     var el = document.getElementById(id);
     if (el && html) el.innerHTML = html;
   }
+
+  /* ── Data Health panel renderer ──────────────────────────────────────────────────── */
+  function updateDataHealth() {
+    var el = document.getElementById('dhPanel');
+    if (!el) return;
+    if (!window.GII_DATA_HEALTH) {
+      el.innerHTML = '<div style="text-align:center;color:var(--dim);padding:30px">Data Health Monitor not loaded</div>';
+      return;
+    }
+    var st = GII_DATA_HEALTH.status();
+    var alertCount = st.alerts.length;
+
+    // Update badge
+    var badge = document.getElementById('dhNavBadge');
+    if (badge) {
+      if (alertCount > 0) {
+        badge.textContent = alertCount;
+        badge.style.display = 'inline-block';
+        badge.style.background = alertCount > 3 ? '#ff4444' : '#e8a020';
+        badge.style.color = '#fff';
+        badge.style.borderRadius = '8px';
+        badge.style.padding = '1px 5px';
+        badge.style.fontSize = '10px';
+        badge.style.marginLeft = '4px';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    var html = '<div style="padding:8px 0">';
+    html += '<h3 style="margin:0 0 12px;color:var(--text);font-size:14px">' +
+            (st.healthy ? '<span style="color:#28c060">All Systems Healthy</span>'
+                        : '<span style="color:#ff4444">' + alertCount + ' Alert' + (alertCount !== 1 ? 's' : '') + '</span>') +
+            '</h3>';
+
+    // Alerts section
+    if (st.alerts.length) {
+      html += '<div style="margin-bottom:16px">';
+      st.alerts.forEach(function (a) {
+        var col = a.severity === 'CRITICAL' ? '#ff4444' : a.severity === 'HIGH' ? '#e8a020' : '#888';
+        html += '<div style="padding:6px 10px;margin-bottom:4px;background:rgba(255,68,68,0.08);border-left:3px solid ' + col + ';border-radius:3px;font-size:12px">';
+        html += '<span style="color:' + col + ';font-weight:600">' + a.severity + '</span> ';
+        html += '<strong>' + a.source + '</strong> — ' + a.detail;
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    // Source table
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    html += '<tr style="border-bottom:1px solid var(--border);color:var(--dim)">' +
+            '<th style="text-align:left;padding:4px 8px">Source</th>' +
+            '<th style="text-align:left;padding:4px 8px">Type</th>' +
+            '<th style="text-align:center;padding:4px 8px">Status</th>' +
+            '<th style="text-align:left;padding:4px 8px">Detail</th></tr>';
+
+    st.sources.forEach(function (s) {
+      var statusIcon = s.ok === null ? '<span style="color:var(--dim)">--</span>'
+                     : s.ok ? '<span style="color:#28c060">OK</span>'
+                     : '<span style="color:#ff4444">FAIL</span>';
+      var typeLabel = s.type === 'api' ? '<span style="color:#4488ff">API</span>'
+                    : '<span style="color:#aa66ff">Agent</span>';
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+              '<td style="padding:4px 8px">' + s.name + '</td>' +
+              '<td style="padding:4px 8px">' + typeLabel + '</td>' +
+              '<td style="text-align:center;padding:4px 8px">' + statusIcon + '</td>' +
+              '<td style="padding:4px 8px;color:var(--dim)">' + (s.detail || '') + '</td></tr>';
+    });
+    html += '</table>';
+
+    // Agent P&L attribution
+    if (window.EE && typeof EE.agentAttribution === 'function') {
+      try {
+        var attr = EE.agentAttribution();
+        if (attr.count > 0 && attr.ranked && attr.ranked.length) {
+          html += '<h3 style="margin:16px 0 8px;color:var(--text);font-size:14px">Agent P&L Attribution <span style="color:var(--dim);font-size:11px">(' + attr.count + ' trades)</span></h3>';
+          html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+          html += '<tr style="border-bottom:1px solid var(--border);color:var(--dim)">' +
+                  '<th style="text-align:left;padding:4px 8px">Agent</th>' +
+                  '<th style="text-align:center;padding:4px 8px">Trades</th>' +
+                  '<th style="text-align:center;padding:4px 8px">Accuracy</th>' +
+                  '<th style="text-align:center;padding:4px 8px">Avg P&L (support)</th>' +
+                  '<th style="text-align:center;padding:4px 8px">Value Score</th></tr>';
+          attr.ranked.slice(0, 20).forEach(function (name) {
+            var a = attr.agents[name];
+            if (a.trades < 3) return;  // skip agents with too few trades
+            var valCol = a.valueScore > 0 ? '#28c060' : a.valueScore < -5 ? '#ff4444' : 'var(--dim)';
+            var accCol = a.accuracy > 55 ? '#28c060' : a.accuracy < 45 ? '#ff4444' : 'var(--text)';
+            html += '<tr style="border-bottom:1px solid var(--border)">' +
+                    '<td style="padding:4px 8px">' + name.replace('GII_AGENT_', '').replace('GII_', '') + '</td>' +
+                    '<td style="text-align:center;padding:4px 8px">' + a.trades + '</td>' +
+                    '<td style="text-align:center;padding:4px 8px;color:' + accCol + '">' + a.accuracy + '%</td>' +
+                    '<td style="text-align:center;padding:4px 8px">' + (a.avgPnlWhenSupport >= 0 ? '+' : '') + '$' + a.avgPnlWhenSupport + '</td>' +
+                    '<td style="text-align:center;padding:4px 8px;color:' + valCol + '">' + (a.valueScore >= 0 ? '+' : '') + '$' + a.valueScore + '</td></tr>';
+          });
+          html += '</table>';
+        }
+      } catch (e) {}
+    }
+
+    // Exec quality summary if available
+    if (window.GII_EXEC_QUALITY) {
+      try {
+        var eq = GII_EXEC_QUALITY.status();
+        if (eq.totalRecords > 0) {
+          html += '<h3 style="margin:16px 0 8px;color:var(--text);font-size:14px">Execution Quality</h3>';
+          html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+          html += '<tr style="border-bottom:1px solid var(--border);color:var(--dim)">' +
+                  '<th style="text-align:left;padding:4px 8px">Venue</th>' +
+                  '<th style="text-align:center;padding:4px 8px">Trades</th>' +
+                  '<th style="text-align:center;padding:4px 8px">Fill Rate</th>' +
+                  '<th style="text-align:center;padding:4px 8px">Avg Slippage</th>' +
+                  '<th style="text-align:center;padding:4px 8px">Win Rate</th></tr>';
+          eq.venues.forEach(function (v) {
+            var s = v.stats;
+            html += '<tr style="border-bottom:1px solid var(--border)">' +
+                    '<td style="padding:4px 8px">' + v.venue + '</td>' +
+                    '<td style="text-align:center;padding:4px 8px">' + s.total + '</td>' +
+                    '<td style="text-align:center;padding:4px 8px">' + s.fillRate + '%</td>' +
+                    '<td style="text-align:center;padding:4px 8px">' + s.avgSlippage + '%</td>' +
+                    '<td style="text-align:center;padding:4px 8px">' + s.winRate + '%</td></tr>';
+          });
+          html += '</table>';
+          if (eq.alerts.length) {
+            eq.alerts.forEach(function (a) {
+              html += '<div style="padding:4px 10px;margin-top:4px;background:rgba(232,160,32,0.08);border-left:3px solid #e8a020;border-radius:3px;font-size:11px">';
+              html += '<strong>' + a.venue + '</strong>: ' + a.detail;
+              html += '</div>';
+            });
+          }
+        }
+      } catch (e) {}
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  // Update data health panel every 60s
+  setInterval(updateDataHealth, 60000);
+  setTimeout(updateDataHealth, 12000);  // first render after agents boot
 
   /* ── Command strip updater ───────────────────────────────────────────────────────── */
   function cs(id, text, color) {

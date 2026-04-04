@@ -72,8 +72,16 @@ def _url() -> str:
 
 
 def _info_post(payload: dict) -> dict:
-    """Direct HTTP POST to /info — avoids the SDK Info class which crashes on testnet."""
-    r = requests.post(_url() + '/info', json=payload, timeout=10)
+    """Direct HTTP POST to /info — avoids the SDK Info class which crashes on testnet.
+    Retries once on 429 (HL rate limit) with 2s backoff."""
+    for attempt in range(2):
+        r = requests.post(_url() + '/info', json=payload, timeout=10)
+        if r.status_code == 429 and attempt == 0:
+            print(f'[HL_BROKER] 429 rate limit on {payload.get("type", "?")} — retrying after 2s')
+            time.sleep(2)
+            continue
+        r.raise_for_status()
+        return r.json()
     r.raise_for_status()
     return r.json()
 
@@ -180,11 +188,14 @@ def disconnect():
     _cfg['connected'] = False
 
 
+_last_known_equity: float = 0.0
+
 def _portfolio_total(wallet: str = '') -> float:
     """Return current total portfolio value (perp + spot tokens + USDC) via
     the HL portfolio endpoint, which prices all holdings at current market rates.
-    Falls back to 0.0 on error.
+    Falls back to last known equity on error (not 0.0 — avoids false 'insufficient balance').
     """
+    global _last_known_equity
     try:
         addr = wallet or _cfg.get('wallet', '')
         port = _info_post({'type': 'portfolio', 'user': addr})
@@ -192,9 +203,13 @@ def _portfolio_total(wallet: str = '') -> float:
             if section[0] == 'day':
                 hist = section[1].get('accountValueHistory', [])
                 if hist:
-                    return float(hist[-1][1])
+                    _last_known_equity = float(hist[-1][1])
+                    return _last_known_equity
     except Exception as e:
         print(f'[HL_BROKER] get_equity failed: {e}')
+    if _last_known_equity > 0:
+        print(f'[HL_BROKER] Using cached equity: ${_last_known_equity:.2f}')
+        return _last_known_equity
     return 0.0
 
 
@@ -247,7 +262,8 @@ def _place_order_locked(coin: str, is_buy: bool, size_usd: float, leverage: int 
             book   = _info_post({'type': 'l2Book', 'coin': coin, 'nSigFigs': 5})
             levels = book.get('levels', [])
             if not levels or len(levels) < 2 or not levels[0] or not levels[1]:
-                return {'ok': False, 'error': f'No l2Book price for {coin}'}
+                print(f'[HL_BROKER] l2Book empty for {coin}: levels={levels}')
+                return {'ok': False, 'error': f'No l2Book price for {coin} — DEX may be illiquid'}
             price = (float(levels[0][0]['px']) + float(levels[1][0]['px'])) / 2
         else:
             mids  = _info_post({'type': 'allMids'})
@@ -273,12 +289,12 @@ def _place_order_locked(coin: str, is_buy: bool, size_usd: float, leverage: int 
         if size_usd < _MIN_ORDER_USD:
             return {'ok': False, 'error': f'Order too small: ${size_usd:.2f} < ${_MIN_ORDER_USD} minimum'}
 
-        # Always set leverage before placing — resets any stale leverage on the account
+        # Set leverage before placing — resets any stale leverage on the account.
+        # If it fails (429 rate limit, network etc.), proceed anyway with existing leverage.
         try:
             _exchange.update_leverage(lev, coin, is_cross=True)
         except Exception as e:
-            print(f'[HL_BROKER] WARNING: leverage update failed for {coin} lev={lev}: {e}')
-            return {'ok': False, 'error': f'Leverage update failed for {coin}: {e}'}
+            print(f'[HL_BROKER] leverage update failed for {coin} lev={lev}: {e} — proceeding with existing leverage')
 
         # Coin quantity = full notional ÷ price, rounded to HL's required decimal places
         decimals = _sz_decimals.get(coin, 5)
@@ -400,20 +416,29 @@ def get_positions() -> dict:
     if not _cfg.get('wallet'):
         return {'ok': False, 'error': 'Not connected'}
     try:
-        state     = _info_post({'type': 'clearinghouseState', 'user': _cfg['wallet']})
         positions = []
-        for p in state.get('assetPositions', []):
-            pos = p.get('position', {})
-            szi = float(pos.get('szi', 0))
-            if szi:
-                positions.append({
-                    'coin':          pos.get('coin'),
-                    'size':          szi,
-                    'side':          'long' if szi > 0 else 'short',
-                    'entryPx':       float(pos.get('entryPx', 0)),
-                    'unrealizedPnl': float(pos.get('unrealizedPnl', 0)),
-                    'leverage':      pos.get('leverage', {}),
-                })
+        # Query both standard DEX and xyz DEX — xyz perp positions
+        # only appear when queried with dex='xyz'.
+        for dex_params in [
+            {'type': 'clearinghouseState', 'user': _cfg['wallet']},
+            {'type': 'clearinghouseState', 'user': _cfg['wallet'], 'dex': 'xyz'},
+        ]:
+            try:
+                state = _info_post(dex_params)
+                for p in state.get('assetPositions', []):
+                    pos = p.get('position', {})
+                    szi = float(pos.get('szi', 0))
+                    if szi:
+                        positions.append({
+                            'coin':          pos.get('coin'),
+                            'size':          szi,
+                            'side':          'long' if szi > 0 else 'short',
+                            'entryPx':       float(pos.get('entryPx', 0)),
+                            'unrealizedPnl': float(pos.get('unrealizedPnl', 0)),
+                            'leverage':      pos.get('leverage', {}),
+                        })
+            except Exception:
+                pass  # if one DEX query fails, still return the other
         return {'ok': True, 'positions': positions}
     except Exception as e:
         return {'ok': False, 'error': str(e)}

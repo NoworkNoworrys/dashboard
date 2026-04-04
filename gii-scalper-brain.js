@@ -284,7 +284,7 @@
       var fb   = inheritFeedback(norm);
       if (!fb) return { vote: 'abstain', weight: 0, reason: 'no history for ' + norm };
       var d = fb[(dir || 'LONG').toLowerCase()];
-      if (!d || d.total < 5) return { vote: 'abstain', weight: 0, reason: norm + ': only ' + (d ? d.total : 0) + ' trades — insufficient' };
+      if (!d || d.total < 3) return { vote: 'abstain', weight: 0, reason: norm + ': only ' + (d ? d.total : 0) + ' trades — insufficient' };
       var wr = d.winRate;
       if (wr >= 0.50) return { vote: 'support', weight: Math.min(1.0, wr),  reason: norm + ' ' + dir + ': ' + Math.round(wr * 100) + '% WR/' + d.total + ' trades' };
       if (wr >= 0.30) return { vote: 'abstain', weight: 0.3,                 reason: norm + ' ' + dir + ': mediocre ' + Math.round(wr * 100) + '% WR' };

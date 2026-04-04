@@ -42,7 +42,7 @@
 
   // Maps assets to geopolitical region for fallback matching
   var ASSET_REGION_MAP = {
-    'WTI':'MIDDLE_EAST', 'BRENT':'MIDDLE_EAST', 'GAS':'EASTERN_EUROPE',
+    'WTI':'MIDDLE_EAST', 'BRENT':'EUROPE', 'GAS':'EASTERN_EUROPE',
     'GLD':'GLOBAL',  'PAXG':'GLOBAL',  'SLV':'GLOBAL',  'GOLD':'GLOBAL',
     'TSM':'TAIWAN',  'SMH':'TAIWAN',
     'LMT':'GLOBAL',  'RTX':'GLOBAL',   'XAR':'GLOBAL',
@@ -128,6 +128,19 @@
     if (!track || track.totalVotes < 10) return baseWeight;
 
     var accuracy = track.earlyAccuracy || 0.5;
+
+    // Circuit breaker: mute agents that are consistently wrong.
+    // Requires 50+ votes so we don't trip on small samples.
+    if (track.totalVotes >= 50 && accuracy < 0.35) {
+      if (!track._cbLogged) {
+        console.warn('[CONSULTATION] Circuit breaker: ' + agentName +
+          ' muted (accuracy ' + (accuracy * 100).toFixed(1) + '% over ' +
+          track.totalVotes + ' votes)');
+        track._cbLogged = true;
+      }
+      return 0;
+    }
+
     var accMult;
     if      (accuracy >= 0.80) accMult = 1.30;
     else if (accuracy >= 0.60) accMult = 1.00 + (accuracy - 0.60) * 1.50;
@@ -197,6 +210,13 @@
     var rawW = Math.min(1.0, conf > 0 ? conf : 0.5);
     var weight = _calibrateWeight(agentName, conf, rawW);
     var sigTs  = best.timestamp || best.ts || best._ts || null;
+
+    // All agents now include timestamps in their signals.
+    // If one is somehow missing (new agent added without timestamp),
+    // apply a moderate penalty so it doesn't silently get full weight.
+    if (!sigTs) {
+      weight = +(weight * 0.7).toFixed(3);
+    }
     var reason = best.reasoning || best.reason || '';
 
     if (sigDir === dirLower) {
@@ -244,12 +264,28 @@
       var baseW  = _dynamicWeight(entry.name, entry.weight);
       var effW   = +(result.weight * baseW).toFixed(3);
 
+      // Staleness penalty: signals older than 5 min get decayed weight.
+      // Linear decay from 1.0 at 5min → 0.3 at 30min. Prevents stale data
+      // from carrying full weight when a data source freezes or goes offline.
+      var sigTs = result.ts || null;
+      if (sigTs && sigTs > 0) {
+        var ageMs = Date.now() - sigTs;
+        var FRESH_MS  = 5 * 60 * 1000;   // no penalty under 5 min
+        var STALE_MS  = 30 * 60 * 1000;  // max penalty at 30 min
+        if (ageMs > FRESH_MS) {
+          var staleFrac = Math.min(1.0, (ageMs - FRESH_MS) / (STALE_MS - FRESH_MS));
+          var freshMult = 1.0 - staleFrac * 0.7;  // decays to 0.3 at 30min
+          effW = +(effW * freshMult).toFixed(3);
+        }
+      }
+
       opinions.push({
-        agent:  entry.name,
-        vote:   result.vote || 'abstain',
-        weight: effW,
-        reason: result.reason || '',
-        ts:     result.ts || null
+        agent:   entry.name,
+        vote:    result.vote || 'abstain',
+        weight:  effW,
+        rawConf: Math.min(1.0, result.weight || 0),  // original 0-1 confidence before dynamic multiplier
+        reason:  result.reason || '',
+        ts:      result.ts || null
       });
 
       if (result.vote === 'support') { supportScore += effW; voterCount++; }
@@ -352,7 +388,7 @@
     if (!tradeId || !consultResult) return;
     var votes = {};
     (consultResult.opinions || []).forEach(function (o) {
-      votes[o.agent] = { vote: o.vote, weight: o.weight, ts: o.ts };
+      votes[o.agent] = { vote: o.vote, weight: o.weight, rawConf: o.rawConf, ts: o.ts };
     });
     _snapshots[tradeId] = {
       tradeId: tradeId, asset: asset, dir: dir,
@@ -403,9 +439,9 @@
       t.avgLeadMinutes  = t.totalLeadMs / t.totalVotes / 60000;
 
       // ── Calibration update ──
-      // v.weight is effective weight (result.weight * dynamicBaseWeight), which can exceed 1.0.
-      // Clamp to [0, 1] so band keys ("60-70" etc.) stay consistent with _calibrateWeight lookups.
-      var conf = Math.min(1.0, v.weight);
+      // Use rawConf (original 0-1 stated confidence) for band lookup.
+      // Falls back to clamped v.weight for snapshots recorded before rawConf was added.
+      var conf = (v.rawConf != null) ? v.rawConf : Math.min(1.0, v.weight);
       if (conf > 0.01) {
         if (!_calibration[agentName]) _calibration[agentName] = {};
         var band = (Math.floor(conf * 10) * 10) + '-' + (Math.floor(conf * 10) * 10 + 10);

@@ -471,7 +471,11 @@
         .then(function (data) {
           if (_resolved) return;
           if (!data.ok) { setTimeout(_check, POLL_MS); return; }
-          var pos = (data.positions || []).find(function (p) { return p.coin === coin; });
+          // Match coin exactly, or without 'xyz:' prefix (HL may return either format)
+          var pos = (data.positions || []).find(function (p) {
+            return p.coin === coin ||
+              (coin.indexOf('xyz:') === 0 && p.coin === coin.slice(4));
+          });
           if (pos) {
             _resolved = true;
             onFill(pos.entryPx, pos);

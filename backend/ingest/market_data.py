@@ -13,7 +13,60 @@ import requests
 import concurrent.futures
 from typing import Dict, Any
 
-from config import COINGECKO_URL, BROWSER_HEADERS
+from config import COINGECKO_URL, BROWSER_HEADERS, ALPHA_VANTAGE_KEY
+
+
+# ── Alpha Vantage failover for when Stooq is stale/missing ──────────────────
+# Free tier: 25 req/day. Only used when Stooq fails for a specific ticker.
+_AV_BASE = 'https://www.alphavantage.co/query'
+_AV_SYMBOLS: Dict[str, str] = {
+    'WTI':   'USO',      # USO ETF as proxy for WTI
+    'BRENT': 'BNO',      # BNO ETF as proxy for Brent
+    'GLD':   'GLD',      # SPDR Gold ETF
+    'LMT':   'LMT',
+    'TSM':   'TSM',
+    'SPY':   'SPY',
+    'DXY':   'UUP',      # UUP ETF as proxy for Dollar Index
+    'WHT':   'WEAT',     # Wheat ETF
+    'GAS':   'UNG',      # Natural Gas ETF
+}
+_av_daily_count: int = 0
+_av_daily_reset: str = ''
+
+
+def _fetch_alphavantage(ticker: str) -> Dict[str, Any]:
+    """Fetch a single quote from Alpha Vantage as Stooq failover."""
+    global _av_daily_count, _av_daily_reset
+    if not ALPHA_VANTAGE_KEY:
+        return {}
+    today = datetime.date.today().isoformat()
+    if _av_daily_reset != today:
+        _av_daily_count = 0
+        _av_daily_reset = today
+    if _av_daily_count >= 24:  # save 1 of 25 for manual use
+        return {}
+    av_sym = _AV_SYMBOLS.get(ticker)
+    if not av_sym:
+        return {}
+    try:
+        resp = requests.get(_AV_BASE, params={
+            'function': 'GLOBAL_QUOTE',
+            'symbol':   av_sym,
+            'apikey':   ALPHA_VANTAGE_KEY,
+        }, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        quote = data.get('Global Quote', {})
+        price = float(quote.get('05. price', 0))
+        chg_pct = quote.get('10. change percent', '0%')
+        chg24h = float(chg_pct.replace('%', '')) if chg_pct else None
+        _av_daily_count += 1
+        if price > 0:
+            print(f'[MARKET] AlphaVantage failover: {ticker}={av_sym} → ${price:.2f}')
+            return {'price': round(price, 4), 'chg24h': chg24h, 'source': 'alphavantage'}
+    except Exception as e:
+        print(f'[MARKET] AlphaVantage {ticker} error: {e}')
+    return {}
 
 
 # ── Stooq symbol map: our ticker → Stooq symbol ──────────────────────────────
@@ -107,6 +160,11 @@ def _fetch_stooq_cached() -> Dict[str, Dict[str, Any]]:
             merged[ticker] = data
         for ticker in list(merged.keys()):
             if ticker not in result:
+                # Try Alpha Vantage failover before marking stale
+                av_data = _fetch_alphavantage(ticker)
+                if av_data:
+                    merged[ticker] = av_data
+                    continue
                 entry = dict(merged[ticker])
                 if not entry.get('stale'):
                     entry['stale'] = True

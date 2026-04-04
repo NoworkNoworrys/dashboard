@@ -2298,10 +2298,7 @@
       ? (_lossStreak[_sectorDirKey] || 0)
       : (_lossStreak[_dirKey] || 0);
     var _dirWinStreak = _winStreak[_dirKey]  || 0;
-    var streakMult    = _dirStreak >= 3 ? 0.50 : _dirStreak >= 2 ? 0.75 : 1.0;
-    if (streakMult < 1.0) {
-      log('RISK', sig.asset + ' [' + _sigSector + '] ' + _dirKey + ' streak ' + _dirStreak + ' → size ×' + streakMult, 'amber');
-    }
+    var _rawStreakMult = _dirStreak >= 3 ? 0.50 : _dirStreak >= 2 ? 0.75 : 1.0;
     // Win-streak tracking kept for display purposes but no longer applied to sizing.
     // Win streaks in markets are largely random — after 3 wins you're not "hot",
     // you may just have had favourable conditions. Amplifying size at that point
@@ -2321,11 +2318,23 @@
       }
     }
 
-    // Peak drawdown size scaler: limits new exposure when the account is in a drawdown.
-    // Thresholds loosened to give the system more room to recover before cutting size.
-    var _ddMult = _ddFromPeak >= 12 ? 0.25   // -12%+: cut to 25%  (was -8%)
-               : _ddFromPeak >=  8 ? 0.50   // -8 to -12%: cut to 50% (was -5%)
-               : 1.0;
+    // Combined recent-performance multiplier: merges loss-streak and drawdown into
+    // a single factor. Previously these were separate (streakMult × _ddMult) which
+    // double-penalised the same risk — a 3-loss streak during a 12% drawdown gave
+    // 0.50 × 0.25 = 0.125× (near-zero sizing), making recovery nearly impossible.
+    // Now: take the WORSE of the two penalties, not their product.
+    var _rawDdMult = _ddFromPeak >= 12 ? 0.25
+                   : _ddFromPeak >=  8 ? 0.50
+                   : 1.0;
+    var streakMult = Math.min(_rawStreakMult, _rawDdMult);  // worst-of, not product
+    var _ddMult    = 1.0;  // neutralised — absorbed into streakMult above
+    if (streakMult < 1.0) {
+      var _perfReason = [];
+      if (_rawStreakMult < 1.0) _perfReason.push('streak ' + _dirStreak);
+      if (_rawDdMult < 1.0)    _perfReason.push('DD -' + _ddFromPeak.toFixed(1) + '%');
+      log('RISK', sig.asset + ' [' + _sigSector + '] recent perf: ' + _perfReason.join(' + ') +
+          ' → size ×' + streakMult.toFixed(2), 'amber');
+    }
 
     // Confidence-tiered sizing: scale position based on signal confidence.
     // Fix #10: replaced stepped tiers with a smooth continuous curve to eliminate
@@ -2434,9 +2443,7 @@
 
     var _effectiveBal = _getEffectiveBalance();
     var riskAmt  = _effectiveBal * _cfg.risk_per_trade_pct / 100 * _totalMult;
-    if (_ddMult < 1.0) {
-      log('RISK', sig.asset + ' peak-DD -' + _ddFromPeak.toFixed(1) + '% → size ×' + _ddMult + ' (' + (_ddMult * 100) + '%)', 'amber');
-    }
+    // (_ddMult log removed — absorbed into combined streakMult log above)
     // Hard cap: prevents compounding from creating unrealistically large positions.
     // Dynamic cap scales at 1% of balance (raised from 0.5%) to grow with the account.
     // At $1k balance → cap=$100, at $10k → cap=$100, at $20k → cap=$200.
@@ -3434,6 +3441,23 @@
         ? new Date(trade.timestamp_close) - new Date(trade.timestamp_open)
         : null;
 
+      /* Agent-level P&L attribution: which agents voted for/against this trade */
+      var agentVotes = {};
+      if (window.GII_CONSULTATION && typeof GII_CONSULTATION.getSnapshot === 'function') {
+        var snap = GII_CONSULTATION.getSnapshot(trade.trade_id);
+        if (snap && snap.votes) {
+          Object.keys(snap.votes).forEach(function (agentName) {
+            var v = snap.votes[agentName];
+            agentVotes[agentName] = {
+              vote:   v.vote,
+              weight: v.weight,
+              correct: (v.vote === 'support' && trade.pnl_usd > 0) ||
+                       (v.vote === 'oppose'  && trade.pnl_usd <= 0)
+            };
+          });
+        }
+      }
+
       var record = {
         trade_id:      trade.trade_id,
         asset:         trade.asset,
@@ -3448,6 +3472,8 @@
         close_reason:  trade.close_reason,
         hold_min:      holdMs !== null ? Math.round(holdMs / 60000) : null,
         ts:            Date.now(),
+        /* Agent attribution */
+        agentVotes:    agentVotes,
         /* Conditions at close */
         regime:        regime.regime  || 'UNKNOWN',
         regime_score:  regime.score   || null,
@@ -3615,6 +3641,11 @@
     // Feed consultation outcome back to track records + calibration
     if (window.GII_CONSULTATION) {
       try { GII_CONSULTATION.recordOutcome(trade); } catch(e) {}
+    }
+
+    // Record execution quality metrics (slippage, fill time, venue performance)
+    if (window.GII_EXEC_QUALITY) {
+      try { GII_EXEC_QUALITY.record(trade); } catch(e) {}
     }
 
     // Sync outcome back to Hit Rate Tracker
@@ -7790,6 +7821,53 @@
         byConf:    byConf,
         records:   records   /* full detail — filter before logging */
       };
+    },
+
+    /* ── Agent-level P&L attribution ── */
+    agentAttribution: function () {
+      var records = [];
+      try { records = JSON.parse(localStorage.getItem(_ATTR_KEY) || '[]'); } catch(e) {}
+      if (!records.length) return { agents: {}, count: 0 };
+
+      var agents = {};
+      records.forEach(function (r) {
+        if (!r.agentVotes) return;
+        Object.keys(r.agentVotes).forEach(function (agentName) {
+          var v = r.agentVotes[agentName];
+          if (v.vote === 'abstain') return;
+          if (!agents[agentName]) agents[agentName] = {
+            trades: 0, supportVotes: 0, opposeVotes: 0,
+            correctVotes: 0, pnlWhenSupport: 0, pnlWhenOppose: 0
+          };
+          var a = agents[agentName];
+          a.trades++;
+          if (v.vote === 'support') {
+            a.supportVotes++;
+            a.pnlWhenSupport += (r.pnl_usd || 0);
+          } else if (v.vote === 'oppose') {
+            a.opposeVotes++;
+            a.pnlWhenOppose += (r.pnl_usd || 0);
+          }
+          if (v.correct) a.correctVotes++;
+        });
+      });
+
+      // Compute derived stats
+      Object.keys(agents).forEach(function (name) {
+        var a = agents[name];
+        a.accuracy = a.trades > 0 ? +(a.correctVotes / a.trades * 100).toFixed(1) : 0;
+        a.avgPnlWhenSupport = a.supportVotes > 0 ? +(a.pnlWhenSupport / a.supportVotes).toFixed(2) : 0;
+        a.avgPnlWhenOppose = a.opposeVotes > 0 ? +(a.pnlWhenOppose / a.opposeVotes).toFixed(2) : 0;
+        // Value score: positive = agent adds value, negative = agent costs money
+        a.valueScore = +(a.pnlWhenSupport - a.pnlWhenOppose).toFixed(2);
+      });
+
+      // Sort by value score
+      var sorted = Object.keys(agents).sort(function (a, b) {
+        return agents[b].valueScore - agents[a].valueScore;
+      });
+
+      return { agents: agents, ranked: sorted, count: records.length };
     },
 
     /* ── Data access for external scripts / debugging ── */

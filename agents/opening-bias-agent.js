@@ -103,7 +103,8 @@
         source:   'momentum',
         srcCount: (s.srcCount || 1) + 1,  // +1 for the opening-timing confirmation
         region:   REGION_MAP[asset] || 'GLOBAL',
-        reason:   'OPENING-BIAS: ' + (s.reason || asset + ' momentum at 10:00 ET open')
+        reason:   'OPENING-BIAS: ' + (s.reason || asset + ' momentum at 10:00 ET open'),
+        timestamp: Date.now()
       };
     });
 

@@ -248,6 +248,22 @@
     };
   }
 
+  /* ── Dynamic weight helper ───────────────────────────────────────────────
+     Pulls live accuracy from consultation track records so confluence weights
+     reflect actual predictive power rather than arbitrary fixed numbers.
+     Falls back to the provided static weight if no track data exists.       */
+  function _dynAgentWeight(agentName, staticWeight) {
+    if (!window.GII_CONSULTATION || typeof GII_CONSULTATION.trackRecords !== 'function') return staticWeight;
+    try {
+      var tracks = GII_CONSULTATION.trackRecords();
+      var t = tracks[agentName];
+      if (!t || t.totalVotes < 15) return staticWeight;
+      // Scale: 50% accuracy = 1.0×, 70% = 1.4×, 30% = 0.6×
+      var accMult = 0.6 + (t.earlyAccuracy || 0.5) * 0.8;
+      return +(staticWeight * Math.max(0.3, Math.min(1.5, accMult))).toFixed(2);
+    } catch (e) { return staticWeight; }
+  }
+
   function _scoreSignal(item) {
     var sig    = item.sig;
     var dir    = sig.dir;   // 'LONG' or 'SHORT'
@@ -279,12 +295,13 @@
     ['GII_AGENT_SCALPER', 'GII_AGENT_SCALPER_SESSION'].forEach(function (name) {
       var b = _agentBias(name, asset, dir, region);
       if (!b) return;
+      var w = _dynAgentWeight(name, 2.5);
       if (b.agrees) {
-        score += 2.5 * b.strength;
+        score += w * b.strength;
         categories.technical = true;
         agentsFor.push(name.replace('GII_AGENT_', '').toLowerCase());
       } else if (b.opposes) {
-        score -= 1.5;
+        score -= w * 0.8;  // symmetric: opposition penalises at 80% of support weight
         agentsAgainst.push(name.replace('GII_AGENT_', '').toLowerCase());
       }
     });
@@ -293,12 +310,13 @@
     ['GII_AGENT_MARKETSTRUCTURE', 'GII_AGENT_OPTIMIZER', 'GII_AGENT_SMARTMONEY'].forEach(function (name) {
       var b = _agentBias(name, asset, dir, region);
       if (!b) return;
+      var w = _dynAgentWeight(name, 1.5);
       if (b.agrees) {
-        score += 1.5 * b.strength;
+        score += w * b.strength;
         categories.technical = true;
         agentsFor.push(name.replace('GII_AGENT_', '').toLowerCase());
       } else if (b.opposes) {
-        score -= 1.0;
+        score -= w * 0.8;
         agentsAgainst.push(name.replace('GII_AGENT_', '').toLowerCase());
       }
     });
@@ -314,13 +332,13 @@
     Object.keys(fundamentalAgents).forEach(function (name) {
       var b = _agentBias(name, asset, dir, region);
       if (!b) return;
-      var w = fundamentalAgents[name];
+      var w = _dynAgentWeight(name, fundamentalAgents[name]);
       if (b.agrees) {
         score += w * Math.max(0.5, b.strength);
         categories.fundamental = true;
         agentsFor.push(name.replace('GII_AGENT_', '').toLowerCase());
       } else if (b.opposes) {
-        score -= w * 0.5;
+        score -= w * 0.8;  // symmetric opposition penalty
         agentsAgainst.push(name.replace('GII_AGENT_', '').toLowerCase());
       }
     });
@@ -526,6 +544,15 @@
     }
 
     var categoryCount = Object.keys(categories).length;
+
+    // Net agent ratio gate: if more agents oppose than support, cap the score.
+    // Prevents a single high-weight agreeing agent from overriding multiple
+    // opposing agents — the old asymmetric weights allowed this silently.
+    if (agentsAgainst.length > agentsFor.length && score > 0) {
+      var ratio = agentsFor.length / Math.max(1, agentsAgainst.length);
+      score = +(score * ratio).toFixed(2);  // proportionally reduce
+    }
+
     return { score: score, categories: categoryCount, agentsFor: agentsFor, agentsAgainst: agentsAgainst };
   }
 

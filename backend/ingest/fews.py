@@ -33,8 +33,9 @@ def fetch_fews() -> List[Dict]:
     """
     events = []
     try:
+        # ipcphasecountry/ is the current active endpoint (ipcphase/ may return 500)
         r = requests.get(
-            f'{_BASE}/ipcphase/',
+            f'{_BASE}/ipcphasecountry/',
             params={
                 'format': 'json',
                 'phase__gte': '3',     # Crisis (3), Emergency (4), Famine (5)

@@ -598,7 +598,8 @@
         label:           sc.label,
         probability:     result.probability,
         supportingAgents: result.supportingAgents,
-        horizon:         sc.horizon
+        horizon:         sc.horizon,
+        timestamp:       Date.now()
       });
 
       var agentLabel = result.supportingAgents.length > 0

@@ -552,7 +552,7 @@
       _signals.unshift(newSignals[k]);
     }
     // Keep a reasonable cap on stored signals (session memory)
-    if (_signals.length > 200) _signals = _signals.slice(0, 200);
+    if (_signals.length > 200) _signals = _signals.slice(-200);
 
     _status.signalCount += newSignals.length;
     _status.note = _status.scanCount + ' scans · ' +

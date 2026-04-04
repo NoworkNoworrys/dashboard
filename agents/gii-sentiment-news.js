@@ -42,9 +42,9 @@
 
   /* Rolling window: keep headlines for 30 minutes */
   var WINDOW_MS = 30 * 60 * 1000;
-  /* Surge: 3+ same-direction events for an asset within 10 minutes */
+  /* Surge: 12+ same-direction events for an asset within 10 minutes */
   var SURGE_WINDOW_MS = 10 * 60 * 1000;
-  var SURGE_MIN_COUNT = 3;
+  var SURGE_MIN_COUNT = 12;
 
   /* ── State ──────────────────────────────────────────────────────────────── */
   var _headlines = [];   // [{ ts, asset, dir, score, source, text }]
@@ -268,8 +268,13 @@
   function headlines() { _prune(); return _headlines.slice(); }
 
   /* Poll every 3 minutes */
-  _poll();
-  setInterval(_poll, 3 * 60 * 1000);
+  var _initialized = false;
+  window.addEventListener('load', function () {
+    if (_initialized) return;
+    _initialized = true;
+    _poll();
+    setInterval(_poll, 3 * 60 * 1000);
+  });
 
   window.GII_SENTIMENT_NEWS = {
     getSentiment: getSentiment,

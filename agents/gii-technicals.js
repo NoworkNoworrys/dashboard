@@ -101,7 +101,7 @@
     { id:'BTC',  sym:'BTC',  api:'cryptocompare', type:'crypto', region:'GLOBAL', hlCoin:'BTC', hl4h:true },
     // ── Commodities (Alpha Vantage — no HL coverage) ──────────────────────────
     { id:'WTI',   sym:'WTI',   api:'alphavantage', type:'commodity', region:'MIDDLE EAST' },
-    { id:'BRENT', sym:'BRENT', api:'alphavantage', type:'commodity', region:'MIDDLE EAST' },
+    { id:'BRENT', sym:'BRENT', api:'alphavantage', type:'commodity', region:'EUROPE' },
     { id:'WEAT',  sym:'WHEAT', api:'alphavantage', type:'commodity', region:'UKRAINE'      }
   ];
 
@@ -1437,7 +1437,7 @@
         if (sig) {
           newSigs.unshift(sig);
           _status.assetsAnalysed++;
-          _status.activeSignals.push({ asset: a.id, bias: sig.bias, confidence: sig.confidence, grade: sig.taGrade, regime: sig.taRegime });
+          _status.activeSignals.push({ asset: a.id, bias: sig.bias, confidence: sig.confidence, grade: sig.taGrade, regime: sig.taRegime, timestamp: Date.now() });
         }
       });
 
