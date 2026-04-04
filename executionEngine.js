@@ -4361,6 +4361,18 @@
         return;
       }
 
+      // Trade Quality Gate: validate trade geometry (stop vs costs, R:R, leverage)
+      // before allowing the signal to proceed. Catches trades where the stop is so
+      // tight that commissions alone guarantee a loss — the #1 cause of $0 P&L trades.
+      if (window.GII_TRADE_GATE && typeof GII_TRADE_GATE.validate === 'function') {
+        var gateCheck = GII_TRADE_GATE.validate(sig);
+        if (!gateCheck.ok) {
+          _logSignal(sig, 'GATE-REJECTED', gateCheck.reason);
+          log('GATE', '✘ ' + sig.asset + ' ' + (sig.dir || 'LONG') + ' rejected by Trade Quality Gate: ' + gateCheck.reason, 'amber');
+          return;
+        }
+      }
+
       // Signal passed all gates — score it and queue for Phase 2 ranking
       sig._score = _computeSignalScore(sig);
       _readySigs.push(sig);

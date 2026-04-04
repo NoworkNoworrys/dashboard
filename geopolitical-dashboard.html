@@ -13792,6 +13792,7 @@ window._TT_BOOTSTRAP = (function(){
 <script src="agents/data-health-monitor.js?v=1"></script>
 <script src="agents/execution-quality.js?v=1"></script>
 <script src="agents/signal-replay.js?v=1"></script>
+<script src="agents/trade-quality-gate.js?v=1"></script>
 <script>
   // Bridge: route gii-technicals.js (GII_TA_SIGNAL events) into EE.onSignals().
   // gii-technicals dispatches these events but previously nothing consumed them.
@@ -14812,6 +14813,30 @@ window._TT_BOOTSTRAP = (function(){
                     '<td style="text-align:center;padding:4px 8px;color:' + valCol + '">' + (a.valueScore >= 0 ? '+' : '') + '$' + a.valueScore + '</td></tr>';
           });
           html += '</table>';
+        }
+      } catch (e) {}
+    }
+
+    // Trade Quality Gate stats
+    if (window.GII_TRADE_GATE) {
+      try {
+        var gateStatus = GII_TRADE_GATE.status();
+        if (gateStatus.passed + gateStatus.failed > 0) {
+          html += '<h3 style="margin:16px 0 8px;color:var(--text);font-size:14px">Trade Quality Gate</h3>';
+          var gateCol = gateStatus.passRate > 80 ? '#28c060' : gateStatus.passRate > 50 ? '#e8a020' : '#ff4444';
+          html += '<div style="font-size:12px;margin-bottom:8px">' +
+                  '<span style="color:' + gateCol + '">' + gateStatus.passRate + '% pass rate</span>' +
+                  ' — <span style="color:#28c060">' + gateStatus.passed + ' passed</span>' +
+                  ' / <span style="color:#ff4444">' + gateStatus.failed + ' rejected</span></div>';
+          if (gateStatus.recentRejects.length) {
+            html += '<div style="font-size:11px;color:var(--dim);margin-bottom:4px">Recent rejections:</div>';
+            gateStatus.recentRejects.forEach(function (r) {
+              var ago = Math.round((Date.now() - r.ts) / 60000);
+              html += '<div style="padding:4px 10px;margin-bottom:2px;background:rgba(255,68,68,0.06);border-left:3px solid #ff4444;border-radius:3px;font-size:11px">';
+              html += '<strong>' + r.asset + '</strong> <span style="color:var(--dim)">' + ago + 'm ago</span> — ' + r.reason;
+              html += '</div>';
+            });
+          }
         }
       } catch (e) {}
     }
