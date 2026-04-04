@@ -165,11 +165,12 @@
                   ' signals in 10min (' + items.map(function(h){ return h.source.replace('GII_AGENT_',''); }).join(', ') + ')',
         region:   'GLOBAL',
       }];
-      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
-        try { GII_AGENT_ENTRY.shadow(_sentSig, 'sentiment-news'); } catch (e) {}
-      }
-      if (window.EE && typeof EE.onSignals === 'function') {
-        EE.onSignals(_sentSig);
+      /* Option 2: Route through Entry Brain */
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
+        try { GII_AGENT_ENTRY.submit(_sentSig, 'sentiment-news'); }
+        catch (e) { console.error('[SENTIMENT] Entry submit failed — signal dropped'); }
+      } else {
+        console.error('[SENTIMENT] GII_AGENT_ENTRY not available — signal dropped');
       }
     });
   }

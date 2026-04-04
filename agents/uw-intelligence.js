@@ -60,12 +60,14 @@
                evt.uw_type === 'darkpool' ? 'DarkPool' : 'Congress'),
     };
     sig.timestamp = Date.now();
-    // Option 2 Phase 1: Shadow + direct
-    if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
-      try { GII_AGENT_ENTRY.shadow([sig], 'uw-intelligence'); } catch (e) {}
+    /* Option 2: Route through Entry Brain */
+    if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
+      try { GII_AGENT_ENTRY.submit([sig], 'uw-intelligence'); }
+      catch (e) { console.error('[UW] Entry submit failed — signal dropped'); }
+    } else {
+      console.error('[UW] GII_AGENT_ENTRY not available — signal dropped');
     }
-    EE.onSignals([sig]);
-    _log('→ EE: ' + sig.asset + ' ' + sig.dir + ' conf=' + sig.conf);
+    _log('→ Entry: ' + sig.asset + ' ' + sig.dir + ' conf=' + sig.conf);
   }
 
   /* ── IV rank → EE risk adjustment ────────────────────────────────────── */

@@ -815,20 +815,13 @@
 
   function _forwardToEE(sigs) {
     if (!sigs || !sigs.length) return;
-    /* Option 2 Phase 1: Shadow + direct */
+    /* Option 2: Route through Entry Brain */
     sigs.forEach(function (s) { s.timestamp = s.timestamp || Date.now(); });
-    if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
-      try { GII_AGENT_ENTRY.shadow(sigs, 'macro-events'); } catch (e) {}
-    }
-    if (!window.EE || typeof EE.onSignals !== 'function') {
-      console.warn('[MACRO-EVENTS] EE.onSignals not available — signals buffered locally only');
-      return;
-    }
-    try {
-      EE.onSignals(sigs);
-      console.log('[MACRO-EVENTS] Forwarded ' + sigs.length + ' signal(s) to EE');
-    } catch (e) {
-      console.warn('[MACRO-EVENTS] EE.onSignals error: ' + (e.message || String(e)));
+    if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
+      try { GII_AGENT_ENTRY.submit(sigs, 'macro-events'); }
+      catch (e) { console.error('[MACRO-EVENTS] Entry submit failed — signal dropped'); }
+    } else {
+      console.error('[MACRO-EVENTS] GII_AGENT_ENTRY not available — signal dropped');
     }
   }
 

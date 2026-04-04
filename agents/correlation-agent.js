@@ -378,15 +378,14 @@
                   ' (div ' + divLabel + ', conf ' + conf + ')');
     }
 
-    // ── Option 2 Phase 1: Shadow + direct ─────────────────────────────────────
+    /* Option 2: Route through Entry Brain */
     if (newSignals.length) {
       newSignals.forEach(function (s) { s.timestamp = s.timestamp || Date.now(); });
-      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
-        try { GII_AGENT_ENTRY.shadow(newSignals, 'correlation-agent'); } catch (e) {}
-      }
-      if (window.EE && typeof EE.onSignals === 'function') {
-        try { EE.onSignals(newSignals); }
-        catch (e) { console.warn('[CORR] EE.onSignals() error: ' + (e.message || String(e))); }
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
+        try { GII_AGENT_ENTRY.submit(newSignals, 'correlation-agent'); }
+        catch (e) { console.error('[CORR] Entry submit failed — signal dropped'); }
+      } else {
+        console.error('[CORR] GII_AGENT_ENTRY not available — signal dropped');
       }
     }
 

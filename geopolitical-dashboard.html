@@ -13634,7 +13634,7 @@ function _modalKeyHandler(e) {
 <!-- ShadowBroker Integration — injects OSINT feeds into the AI pipeline -->
 <script src="shadowbroker.js?v=23"></script>
 <!-- Unusual Whales Intelligence — options flow, dark pool, congress, IV rank, tide -->
-<script src="agents/uw-intelligence.js?v=5"></script>
+<script src="agents/uw-intelligence.js?v=6"></script>
 <!-- Polymarket Integration — prediction market consensus → IC pipeline (paper trading only) -->
 <script src="polymarket.js?v=15"></script>
 
@@ -13677,7 +13677,7 @@ window._TT_BOOTSTRAP = (function(){
 <script src="agents/live-portfolio.js?v=3"></script>
 
 <!-- Forex Fundamentals Agent — CSI, carry trade, unwind detection, session timing -->
-<script src="agents/forex-fundamentals.js?v=3"></script>
+<script src="agents/forex-fundamentals.js?v=4"></script>
 
 <!-- IC Risk Engine — must load before executionEngine so ICRiskEngine is available
      when the first IC signal is sized. Self-contained; reads localStorage directly. -->
@@ -13763,7 +13763,7 @@ window._TT_BOOTSTRAP = (function(){
 <script src="agents/gii-deescalation.js?v=1"></script>
 <script src="agents/gii-risk.js?v=1"></script>
 <script src="agents/gii-situational.js?v=1"></script>
-<script src="agents/gii-sentiment-news.js?v=2"></script>
+<script src="agents/gii-sentiment-news.js?v=3"></script>
 <script src="agents/gii-correlation-guard.js?v=2"></script>
 <script src="agents/gii-manager.js?v=6"></script>
 <!-- ── ENTRY SAFE-MODE STUB ─────────────────────────────────────────────────
@@ -13828,13 +13828,13 @@ window._TT_BOOTSTRAP = (function(){
 <!-- Market Observer + signal agents — all load after hl-feed so HLFeed is defined -->
 <script src="agents/market-observer.js?v=5"></script>
 <script src="agents/technicals-agent.js?v=6"></script>
-<script src="agents/macro-events-agent.js?v=4"></script>
-<script src="agents/crypto-signals-agent.js?v=5"></script>
-<script src="agents/correlation-agent.js?v=6"></script>
-<script src="agents/momentum-agent.js?v=4"></script>
-<script src="agents/onchain-signals-agent.js?v=3"></script>
-<script src="agents/event-momentum-agent.js?v=3"></script>
-<script src="agents/macro-cross-agent.js?v=4"></script>
+<script src="agents/macro-events-agent.js?v=5"></script>
+<script src="agents/crypto-signals-agent.js?v=6"></script>
+<script src="agents/correlation-agent.js?v=7"></script>
+<script src="agents/momentum-agent.js?v=5"></script>
+<script src="agents/onchain-signals-agent.js?v=4"></script>
+<script src="agents/event-momentum-agent.js?v=4"></script>
+<script src="agents/macro-cross-agent.js?v=5"></script>
 <script src="agents/opening-bias-agent.js?v=1"></script>
 <script src="agents/data-health-monitor.js?v=1"></script>
 <script src="agents/execution-quality.js?v=1"></script>
@@ -13846,10 +13846,10 @@ window._TT_BOOTSTRAP = (function(){
     try {
       if (!e.detail) return;
       e.detail.timestamp = e.detail.timestamp || Date.now();
-      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
-        GII_AGENT_ENTRY.shadow([e.detail], 'gii-technicals-bridge');
-      }
-      if (window.EE && typeof EE.onSignals === 'function') {
+      /* Option 2: Route through Entry Brain */
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
+        GII_AGENT_ENTRY.submit([e.detail], 'gii-technicals-bridge');
+      } else if (window.EE && typeof EE.onSignals === 'function') {
         EE.onSignals([e.detail]);
       }
     } catch (err) {}

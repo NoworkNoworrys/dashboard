@@ -409,14 +409,13 @@
       newSignals.forEach(function (s) { _signals.push(s); });
       if (_signals.length > MAX_SIGNALS) _signals = _signals.slice(-MAX_SIGNALS);
 
-      // Option 2 Phase 1: Shadow + direct
+      /* Option 2: Route through Entry Brain */
       newSignals.forEach(function (s) { s.timestamp = s.timestamp || Date.now(); });
-      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.shadow === 'function') {
-        try { GII_AGENT_ENTRY.shadow(newSignals, 'event-momentum'); } catch (e) {}
-      }
-      if (window.EE && typeof EE.onSignals === 'function') {
-        try { EE.onSignals(newSignals); }
-        catch (e) { console.warn('[EVENT-MOMENTUM] EE.onSignals error:', e); }
+      if (window.GII_AGENT_ENTRY && typeof GII_AGENT_ENTRY.submit === 'function') {
+        try { GII_AGENT_ENTRY.submit(newSignals, 'event-momentum'); }
+        catch (e) { console.error('[EVENT-MOMENTUM] Entry submit failed — signal dropped'); }
+      } else {
+        console.error('[EVENT-MOMENTUM] GII_AGENT_ENTRY not available — signal dropped');
       }
 
       console.log(
